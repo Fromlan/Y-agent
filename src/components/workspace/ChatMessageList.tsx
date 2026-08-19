@@ -1,8 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "@/lib/agent-event";
-import { Sparkles, ChevronDown, ChevronRight, Clock, Zap, Check, X } from "lucide-react";
-import { useState } from "react";
 import type { AgentEvent } from "@/lib/agent-event";
+import type { Asset } from "@/lib/types";
+import { assetMainImage } from "@/lib/types";
+import { Sparkles, ChevronDown, ChevronRight, Clock, Zap, Check, X } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -210,15 +211,11 @@ function PlanCard({
   );
 }
 
-function mainUrl(asset: any): string {
-  if (asset.isLayerDecomposition && asset.payload?.layers?.length) {
-    const base = asset.payload.layers.find((l: any) => l.zIndex === 0);
-    return base?.url ?? asset.payload.layers[0]?.url ?? "";
-  }
-  return asset.payload?.urls?.[0] ?? "";
+function mainUrl(asset: Asset): string {
+  return assetMainImage(asset) ?? "";
 }
 
-function AssetThumb({ asset }: { asset: any }) {
+function AssetThumb({ asset }: { asset: Asset }) {
   const [open, setOpen] = useState(false);
   const url = mainUrl(asset);
   if (!url) return null;
