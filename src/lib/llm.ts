@@ -6,6 +6,8 @@
  * - 流式响应：v0.1 暂用非流式（先求稳），流式留给 v0.2
  */
 
+import { log } from "@/lib/logger";
+
 export interface LLMConfig {
   provider: "deepseek" | "doubao" | "openai" | "custom";
   apiKey: string;
@@ -129,14 +131,25 @@ export async function llmChat(
     body.tool_choice = "auto";
   }
 
-  const resp = await fetch(cfg.endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${cfg.apiKey}`,
-    },
-    body: JSON.stringify(body),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60_000);
+  let resp: Response;
+  try {
+    resp = await fetch(cfg.endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${cfg.apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (e: any) {
+    const reason = e?.name === "AbortError" ? "请求超时（60s）" : (e?.message ?? String(e));
+    throw new Error(`LLM 请求失败：${reason}`);
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!resp.ok) {
     const text = await resp.text();
@@ -188,15 +201,27 @@ export async function llmChatLoop(
       working.push({ role: "assistant", content: resp.content });
       break;
     }
+    if (i === MAX_TURNS - 1) {
+      // 达到上限但模型仍要求调工具：给用户一个明确提示，避免静默空白。
+      finalContent = finalContent || "已达到最大工具调用轮次，请重试或简化需求。";
+      break;
+    }
     // 把 assistant 消息（含 tool_calls）推入
     working.push({ role: "assistant", content: resp.content, tool_calls: resp.tool_calls });
     // 顺序执行每个 tool_call
     for (const tc of resp.tool_calls) {
-      let args: any = {};
+      let args: any;
       try {
         args = JSON.parse(tc.function.arguments);
-      } catch (e) {
-        console.warn("[llm] tool args parse failed:", tc.function.arguments, e);
+      } catch (e: any) {
+        // JSON 解析失败：回传错误给 LLM，让它重新格式化参数（不要静默用 {}）
+        log.warn("llm", "tool args parse failed:", tc.function.arguments, e);
+        working.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: `工具 ${tc.function.name} 的参数 JSON 解析失败：${e?.message ?? e}。请重新生成正确格式的参数。`,
+        });
+        continue;
       }
       const { result } = await executeTool(tc.function.name, args);
       working.push({ role: "tool", tool_call_id: tc.id, content: result });

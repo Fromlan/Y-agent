@@ -6,6 +6,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { log } from "@/lib/logger";
 
 export interface AgentContext {
   /** 画风偏好关键词（如"厚涂"、"写实"、"3:2"） */
@@ -31,9 +32,9 @@ const STYLE_KEYWORDS = [
   // 色调
   "暗色", "亮色", "冷色调", "暖色调", "高饱和", "低饱和", "莫兰迪", "赛博", "蒸汽朋克",
   // 比例 / 风格
-  "厚涂", "3:2", "16:9", "横版", "竖版", "电影感",
+  "3:2", "16:9", "横版", "竖版", "电影感",
   // 题材
-  "仙侠", "古风", "科幻", "末日", "蒸汽朋克", "和风", "国风", "韩风",
+  "仙侠", "古风", "科幻", "末日", "和风", "国风", "韩风",
 ];
 
 export async function loadAgentContext(projectId: string): Promise<AgentContext> {
@@ -48,7 +49,7 @@ export async function loadAgentContext(projectId: string): Promise<AgentContext>
       updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0,
     };
   } catch (e) {
-    console.warn("[agent-memory] load failed:", e);
+    log.warn("agent-memory", "load failed:", e);
     return { ...EMPTY };
   }
 }

@@ -6,6 +6,7 @@
  */
 
 import type { Asset } from "@/lib/types";
+import { log } from "@/lib/logger";
 
 export type AgentEvent =
   | { type: "turn_start"; userInput: string }
@@ -21,6 +22,10 @@ export interface PendingPlan {
   modelId: string;
   modelName: string;
   size: string;
+  /** 规则计划生成时需要携带的参考图（dataURL） */
+  image?: string[];
+  /** 组图数量（>1 时生成时传 sequential/maxImages） */
+  maxImages?: number;
 }
 
 export interface ChatMessage {
@@ -38,6 +43,8 @@ export interface ChatMessage {
     isDemo: boolean;
   };
   assets?: Asset[];
+  /** 持久化到 DB 的资产 id 列表；listMessages 反查后会填充 assets */
+  assetIds?: string[];
   events?: AgentEvent[];
   error?: string;
   /** 规则路由降级模式下的「待确认计划」。点确认后由父组件执行生成 */
@@ -58,7 +65,7 @@ class EventBus {
       try {
         l(e);
       } catch (err) {
-        console.error("[agent-event] listener error", err);
+        log.error("agent-event", "listener error", err);
       }
     }
   }

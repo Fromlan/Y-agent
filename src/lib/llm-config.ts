@@ -6,6 +6,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { log } from "@/lib/logger";
 import type { LLMConfig } from "@/lib/llm";
 import { LLM_PRESETS } from "@/lib/llm";
 
@@ -15,7 +16,7 @@ export async function loadLlmConfig(): Promise<LLMConfig | null> {
     if (!json) return null;
     return JSON.parse(json) as LLMConfig;
   } catch (e) {
-    console.warn("[llm-config] load failed:", e);
+    log.warn("llm-config", "load failed:", e);
     return null;
   }
 }

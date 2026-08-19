@@ -6,6 +6,8 @@
  * - v0.1：6 个预置 Skill 通过 Vite import.meta.glob 内联打包（无需网络请求）
  */
 
+import { log } from "@/lib/logger";
+
 export interface Skill {
   /** Skill 标识（目录名） */
   id: string;
@@ -112,7 +114,7 @@ export function loadBuiltinSkills(): Skill[] {
     try {
       out.push(parseSkillMd(m[1], raw));
     } catch (e) {
-      console.warn(`[skill] 跳过 ${path}：`, e);
+      log.warn("skill", `跳过 ${path}：`, e);
     }
   }
   // 排序：按 name 字典序
