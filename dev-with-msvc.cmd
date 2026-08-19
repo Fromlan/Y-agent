@@ -5,5 +5,7 @@ if errorlevel 1 (
   echo Failed to load vcvars64
   exit /b 1
 )
-cd /d E:\Pi\Y-agent
+REM vcvars64 resets PATH; re-prepend cargo so tauri CLI can invoke `cargo metadata`
+set "PATH=C:\Users\17123\.cargo\bin;%PATH%"
+cd /d "%~dp0"
 call npm run tauri:dev %*
