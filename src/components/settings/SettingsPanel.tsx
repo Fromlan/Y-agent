@@ -6,6 +6,8 @@ import { useToast } from "@/components/shared/Toast";
 import { MODEL_OPTIONS, type ModelOption } from "@/lib/types";
 import { loadLlmConfig, saveLlmConfig, presetConfig } from "@/lib/llm-config";
 import { LLM_PRESETS, type LLMConfig } from "@/lib/llm";
+import { confirmDialog } from "@/lib/dialog";
+import { APP_NAME, APP_VERSION, BUILD_TAG } from "@/lib/app-info";
 
 const PREF_DEFAULT_MODEL = "default_model";
 const PREF_DEFAULT_SIZE = "default_size";
@@ -104,7 +106,8 @@ export default function SettingsPanel({ open, onClose }: Props) {
   };
 
   const onClear = async () => {
-    if (!window.confirm("确认清除 API Key？")) return;
+    const ok = await confirmDialog("确认清除 API Key？", { kind: "warning", okLabel: "清除" });
+    if (!ok) return;
     try {
       await clearApiKey();
       setKey("");
@@ -317,6 +320,14 @@ export default function SettingsPanel({ open, onClose }: Props) {
               </button>
             </div>
           </div>
+        </div>
+
+        {/* 关于 */}
+        <div className="border-t border-border px-5 py-3 flex items-center justify-between text-[11px] text-text-muted bg-bg-elev/40">
+          <span>{APP_NAME}</span>
+          <span className="font-mono" title="v0.1.0 = package.json / build-tag = git + 时间">
+            v{APP_VERSION} · {BUILD_TAG}
+          </span>
         </div>
       </div>
     </div>
