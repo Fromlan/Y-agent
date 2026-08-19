@@ -5,6 +5,8 @@ npm-debug.log*
 pnpm-debug.log*
 y-agent-stdout.log
 y-agent-stderr.log
+# Tauri dev 临时输出（启动 dev 时写到 doc/ 根目录以保证权限可写）
+doc/.tmp-tauri-dev.*
 
 # ===== Process / build runtime artifacts =====
 *.pid
