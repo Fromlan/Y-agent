@@ -8,6 +8,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ChatMessage } from "@/lib/agent-event";
 import type { Asset } from "@/lib/types";
+import { log } from "@/lib/logger";
 
 /** 获取或创建项目的 chat_session id */
 export async function getOrCreateSession(projectId: string): Promise<string> {
@@ -88,4 +89,46 @@ export async function clearSession(sessionId: string): Promise<void> {
 /** 辅助：把 assets 数组的 id 提取出来 */
 export function assetIds(assets: Asset[] | undefined): string[] {
   return (assets ?? []).map((a) => a.id);
+}
+
+// ---------- fire-and-forget 安全包装 ----------
+//
+// 用途：业务侧不需要 await，但失败不能悄无声息。带 1 次重试 + 错误日志。
+// 用法：void persistInsert(...);  // 代替 .catch(console.error)
+//
+// 为什么不直接 await？因为对话 / 生成流里 DB 写失败不应该阻塞主流程
+// （in-memory state 已经更新，刷新页面才会丢数据）。
+
+const MAX_RETRY = 1;
+const RETRY_DELAY_MS = 200;
+
+async function withRetry<T>(op: () => Promise<T>, label: string): Promise<T | null> {
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt <= MAX_RETRY; attempt++) {
+    try {
+      return await op();
+    } catch (e) {
+      lastErr = e;
+      if (attempt < MAX_RETRY) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      }
+    }
+  }
+  log.error("chat-history", `${label} failed after ${MAX_RETRY + 1} attempts:`, lastErr);
+  return null;
+}
+
+/** 异步插入消息。失败时自动重试 1 次并写错误日志（不抛错、不阻塞）。 */
+export function persistInsert(sessionId: string, msg: InsertMessageParams): void {
+  void withRetry(() => insertMessage(sessionId, msg), `insertMessage(${msg.role})`);
+}
+
+/** 异步更新消息。失败时自动重试 1 次并写错误日志。 */
+export function persistUpdate(messageId: string, fields: UpdateMessageParams): void {
+  void withRetry(() => updateMessage(messageId, fields), `updateMessage(${messageId.slice(0, 8)}…)`);
+}
+
+/** 异步删除消息。失败时重试 1 次。 */
+export function persistDelete(messageId: string): void {
+  void withRetry(() => deleteMessage(messageId), `deleteMessage(${messageId.slice(0, 8)}…)`);
 }
