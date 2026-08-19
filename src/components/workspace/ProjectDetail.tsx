@@ -1,26 +1,21 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useRef } from "react";
 import { ArrowLeft, MessageSquare, Image as ImageIcon, Brain, KeyRound, Trash2 } from "lucide-react";
 import { useSession } from "@/lib/session";
-import { listAssets, deleteAsset, createAsset } from "@/lib/assets";
+import { deleteAsset, createAsset } from "@/lib/assets";
 import { renameProject } from "@/lib/projects";
 import { generateImage, explainError } from "@/lib/jimeng";
-import { getPref } from "@/lib/prefs";
 import { hasApiKey } from "@/lib/api-key";
 import { useToast } from "@/components/shared/Toast";
+import { usePrompt } from "@/components/shared/PromptProvider";
+import { confirmDialog } from "@/lib/dialog";
+import { useProjectBootstrap } from "@/lib/hooks/useProjectBootstrap";
+import { MODEL_OPTIONS, type Asset, type AssetPayload } from "@/lib/types";
 import {
-  MODEL_OPTIONS,
-  type Asset,
-  type ModelOption,
-  type AssetPayload,
-} from "@/lib/types";
-import {
-  getOrCreateSession,
-  listMessages,
-  insertMessage,
-  updateMessage,
-  deleteMessage as dbDeleteMessage,
   clearSession as dbClearSession,
   assetIds as dbAssetIds,
+  persistInsert,
+  persistUpdate,
+  persistDelete,
 } from "@/lib/chat-history";
 import PromptBar from "@/components/workspace/PromptBar";
 import AssetBoard from "@/components/workspace/AssetBoard";
@@ -29,16 +24,11 @@ import ModeSwitch, { type InputMode } from "@/components/workspace/ModeSwitch";
 import AgentMemoryPanel from "@/components/workspace/AgentMemoryPanel";
 import { agentEvents, type ChatMessage, type AgentEvent } from "@/lib/agent-event";
 import { route } from "@/lib/agent-router";
-import {
-  loadAgentContext,
-  addStyleHints,
-  recordModel,
-  saveAgentContext,
-  type AgentContext,
-} from "@/lib/agent-memory";
 import { loadLlmConfig } from "@/lib/llm-config";
 import { llmChatLoop, type LLMConfig, type ChatMessage as LLMChatMessage } from "@/lib/llm";
 import { AGENT_TOOLS, renderSystemPrompt } from "@/lib/agent-tools";
+import { executePlan, learnFromGeneration } from "@/lib/agent-flow";
+import { log } from "@/lib/logger";
 
 interface Props {
   onBack: () => void;
@@ -49,10 +39,32 @@ type ViewTab = "chat" | "assets";
 
 export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   const { currentProject, setCurrentProject } = useSession();
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [hasKey, setHasKey] = useState<boolean | null>(null);
   const toast = useToast();
+  const askText = usePrompt();
+
+  // ---------- 项目级数据统一由 useProjectBootstrap 管理 ----------
+  const {
+    assets,
+    setAssets,
+    loading,
+    agentCtx,
+    setAgentCtx,
+    chatSessionId,
+    messages,
+    setMessages,
+    hasKey: initialHasKey,
+    model,
+    setModel,
+    size,
+    setSize,
+    reload,
+  } = useProjectBootstrap(currentProject?.id);
+
+  // hasKey 在"生成后"也需要重新检测（用户可能从设置切回来配了 Key）
+  const [hasKey, setHasKey] = useState<boolean | null>(initialHasKey);
+  useEffect(() => {
+    setHasKey(initialHasKey);
+  }, [initialHasKey]);
 
   // 视图 tab：对话 / 资产
   const [tab, setTab] = useState<ViewTab>("chat");
@@ -60,8 +72,6 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   // 共享输入态
   const [prompt, setPrompt] = useState("");
   const [refs, setRefs] = useState<string[]>([]);
-  const [model, setModel] = useState<ModelOption>(MODEL_OPTIONS[0]);
-  const [size, setSize] = useState("2k");
   const [groupCount, setGroupCount] = useState(1);
   const [layerDecomp, setLayerDecomp] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -72,110 +82,23 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   // Agent 记忆面板开关
   const [memoryOpen, setMemoryOpen] = useState(false);
 
-  // 对话流（仅在 chat tab 下展示）
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  // chat_session id（项目内唯一）
-  const [chatSessionId, setChatSessionId] = useState<string | null>(null);
-
-  // Agent Memory（项目级）
-  const [agentCtx, setAgentCtx] = useState<AgentContext | null>(null);
-
-  const reload = useCallback(async () => {
-    if (!currentProject) return;
-    setLoading(true);
-    try {
-      setAssets(await listAssets(currentProject.id));
-    } catch (e: any) {
-      toast.error(`加载资产失败：${e?.message ?? e}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [currentProject, toast]);
-
-  const silentReload = useCallback(async () => {
-    if (!currentProject) return;
-    try {
-      setAssets(await listAssets(currentProject.id));
-    } catch (e: any) {
-      console.error("silentReload failed:", e);
-    }
-  }, [currentProject]);
-
-  useEffect(() => {
-    if (currentProject) reload();
-  }, [currentProject, reload]);
-
-  // 进入项目时：加载默认偏好 + Agent Memory + 对话历史
-  useEffect(() => {
-    if (!currentProject) return;
-    getPref("default_model")
-      .then((v) => {
-        if (v) {
-          const m = MODEL_OPTIONS.find((o) => o.id === v);
-          if (m) setModel(m);
-        }
-      })
-      .catch(console.error);
-    getPref("default_size")
-      .then((v) => {
-        if (v) setSize(v);
-      })
-      .catch(console.error);
-    loadAgentContext(currentProject.id).then(setAgentCtx).catch(console.error);
-    // 加载对话历史
-    (async () => {
-      try {
-        const sid = await getOrCreateSession(currentProject.id);
-        setChatSessionId(sid);
-        const msgs = await listMessages(sid);
-        // 把 assetIds 还原成 assets（用当前 assets 表的数据）
-        const enriched = await enrichWithAssets(msgs);
-        setMessages(enriched);
-      } catch (e) {
-        console.error("加载对话历史失败:", e);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentProject?.id]);
-
-  /** 把消息里的 assetIds 反查成完整 Asset 对象（用当前 assets 表的数据） */
-  const enrichWithAssets = useCallback(
-    async (msgs: ChatMessage[]): Promise<ChatMessage[]> => {
-      // 收集所有 assetId
-      const idSet = new Set<string>();
-      msgs.forEach((m) => {
-        if ((m as any).assetIds) (m as any).assetIds.forEach((id: string) => idSet.add(id));
-      });
-      if (idSet.size === 0) return msgs;
-      // 从 assets 表查
-      const allAssets = await listAssets(currentProject!.id);
-      const map = new Map(allAssets.map((a) => [a.id, a]));
-      return msgs.map((m) => {
-        const ids: string[] = (m as any).assetIds ?? [];
-        const assets = ids.map((id) => map.get(id)).filter((a): a is Asset => !!a);
-        return { ...m, assets: assets.length > 0 ? assets : undefined };
-      });
-    },
-    [currentProject]
-  );
-
-  // 进入项目时检测 API Key（以及每次生成后重新检测，应对用户从设置切回来的情况）
+  // 每次切项目 / 每次生成完都重新检测 API Key
   useEffect(() => {
     if (!currentProject) return;
     hasApiKey().then(setHasKey).catch(() => setHasKey(false));
-  }, [currentProject?.id, generating]);
+  }, [currentProject, generating]);
 
-  // 模式切换时同步主视图 tab：
-  // - 生图模式 → 资产列表（M1 体验）
-  // - 对话模式 → 聊天气泡流
-  // 用户可手动覆盖 tab（例如对话模式下想翻历史资产）
+  // 模式与 tab 同步：只在"刚切换到该项目"时同步一次，之后尊重用户手动选择。
+  // - 生图模式 → 资产 tab
+  // - 对话模式 → 对话 tab
+  // 解决 bug：用户在对话模式下手动切到资产 tab 看历史图后，切换 inputMode 会强制覆盖。
+  const lastSyncedProjectIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (inputMode === "generate") {
-      setTab("assets");
-    } else {
-      setTab("chat");
-    }
-  }, [inputMode]);
+    if (!currentProject) return;
+    if (lastSyncedProjectIdRef.current === currentProject.id) return;
+    lastSyncedProjectIdRef.current = currentProject.id;
+    setTab(inputMode === "generate" ? "assets" : "chat");
+  }, [currentProject, inputMode]);
 
   if (!currentProject) {
     return (
@@ -186,7 +109,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   }
 
   const onRename = async () => {
-    const name = window.prompt("新项目名", currentProject.name);
+    const name = await askText("新项目名", { defaultValue: currentProject.name });
     if (!name?.trim() || name.trim() === currentProject.name) return;
     try {
       const updated = await renameProject(currentProject.id, name.trim());
@@ -198,7 +121,8 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   };
 
   const onDeleteAsset = async (id: string) => {
-    if (!window.confirm("确认删除这个资产？")) return;
+    const ok = await confirmDialog("确认删除这个资产？", { okLabel: "删除" });
+    if (!ok) return;
     try {
       await deleteAsset(id);
       setAssets((prev) => prev.filter((a) => a.id !== id));
@@ -230,6 +154,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   // 生图模式 submit（M1 行为：直接调即梦，资产入库，无 Agent 路由）
   // -------------------------------------------------------------------------
   const onSubmitGenerate = async () => {
+    if (generating) return;
     if (!prompt.trim()) {
       toast.warn("请输入提示词");
       return;
@@ -271,7 +196,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
           isLayerDecomposition: isLayer,
           payload,
         });
-        await silentReload();
+        await reload({ silent: true });
         toast.success("已入库到资产库");
         setPrompt("");
         setRefs([]);
@@ -292,18 +217,18 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   // 对话模式 submit：优先走 LLM 真对话；未配 LLM 时降级到规则 + 计划确认
   // -------------------------------------------------------------------------
   const onSubmitChat = async () => {
+    if (generating) return;
     if (!prompt.trim()) {
       toast.warn("请输入提示词");
+      return;
+    }
+    if (!chatSessionId) {
+      toast.error("对话会话未就绪，请重试");
       return;
     }
     const text = prompt.trim();
     setPrompt("");
     if (tab !== "chat") setTab("chat");
-
-    if (!chatSessionId) {
-      toast.error("对话会话未就绪，请重试");
-      return;
-    }
 
     // 用户消息入流 + 入库
     const userMsg: ChatMessage = {
@@ -314,12 +239,12 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
       createdAt: Date.now(),
     };
     setMessages((prev) => [...prev, userMsg]);
-    insertMessage(chatSessionId, {
+    persistInsert(chatSessionId, {
       id: userMsg.id,
       role: "user",
       content: text,
       attachments: refs.length > 0 ? [...refs] : undefined,
-    }).catch(console.error);
+    });
 
     setGenerating(true);
     const events: AgentEvent[] = [];
@@ -378,13 +303,12 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
       },
     ]);
     // 立即插入空消息占位（content=""），后面再 update
-    insertMessage(chatSessionId!, {
+    persistInsert(chatSessionId!, {
       id: agentId,
       role: "agent",
       content: "",
       events: [...events],
-    })
-      .catch((e) => console.error("save agent placeholder failed:", e));
+    });
     const start = Date.now();
 
     // 构造 LLM 消息历史：system + 现有 user/agent（不含 tool_calls 等私有字段）
@@ -421,71 +345,90 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     let isDemo = false;
     let finalContent = "";
 
-    await llmChatLoop(cfg, llmHistory, AGENT_TOOLS, async (name, args) => {
-      if (name === "jimeng_generate_image") {
-        const prompt = String(args.prompt ?? "").trim();
-        if (!prompt) {
-          return { result: "错误：prompt 不能为空" };
-        }
-        const useModel = String(args.model ?? model.id);
-        const useSize = String(args.size ?? size);
-        const refRequired = !!args.ref_required;
-        lastModel = useModel;
-        const useModelOpt = MODEL_OPTIONS.find((m) => m.id === useModel) ?? model;
+    try {
+      const { finalContent: loopContent } = await llmChatLoop(cfg, llmHistory, AGENT_TOOLS, async (name, args) => {
+        if (name === "jimeng_generate_image") {
+          const prompt = String(args.prompt ?? "").trim();
+          if (!prompt) {
+            return { result: "错误：prompt 不能为空" };
+          }
+          const useModel = String(args.model ?? model.id);
+          const useSize = String(args.size ?? size);
+          const refRequired = !!args.ref_required;
+          const maxImages = Math.max(1, Math.min(4, Number(args.max_images) || 1));
+          lastModel = useModel;
+          const useModelOpt = MODEL_OPTIONS.find((m) => m.id === useModel) ?? model;
 
-        agentEvents.emit({
-          type: "tool_start",
-          toolName: "jimeng.generate_image",
-          model: useModel,
-          args: { prompt, size: useSize, refRequired },
-        });
-        const t0 = Date.now();
-        let imgs;
-        try {
-          const resp = await generateImage({
+          if (refRequired && refs.length === 0) {
+            return { result: "用户当前没有提供参考图。请先向用户说明需要参考图，或改用不依赖参考图的方案。" };
+          }
+
+          agentEvents.emit({
+            type: "tool_start",
+            toolName: "jimeng.generate_image",
             model: useModel,
-            prompt,
-            image: refs.length > 0 ? refs : undefined,
-            size: useSize,
+            args: { prompt, size: useSize, refRequired, maxImages },
           });
-          imgs = resp.images;
-          isDemo = resp.isDemo;
-        } catch (e: any) {
-          const raw = e?.message ?? String(e);
-          return { result: `生成失败：${await explainError(raw).catch(() => raw)}` };
+          let imgs: { url: string }[];
+          try {
+            const result = await executePlan(
+              {
+                prompt,
+                modelId: useModel,
+                modelName: useModelOpt.name,
+                size: useSize,
+                images: refs.length > 0 ? refs : undefined,
+                maxImages: maxImages > 1 ? maxImages : undefined,
+              },
+              currentProject.id
+            );
+            isDemo = result.isDemo;
+            toolAssets.push(result.asset);
+            imgs = result.asset.payload.urls.map((u) => ({ url: u }));
+            agentEvents.emit({
+              type: "tool_end",
+              costMs: result.costMs,
+              assets: [result.asset],
+              isDemo: result.isDemo,
+            });
+            return {
+              result: `已生成 ${imgs.length} 张图（模型 ${useModelOpt.name}，尺寸 ${useSize}，${(result.costMs / 1000).toFixed(1)}s）`,
+            };
+          } catch (e: any) {
+            const raw = e?.message ?? String(e);
+            return { result: `生成失败：${await explainError(raw).catch(() => raw)}` };
+          }
         }
-        const costMs = Date.now() - t0;
-        // 入库
-        const asset = await createAsset({
-          projectId: currentProject.id,
-          prompt,
-          model: useModel,
-          modelName: useModelOpt.name,
-          size: useSize,
-          refCount: refs.length,
-          costMs,
-          isLayerDecomposition: false,
-          payload: { urls: imgs.map((i) => i.url) },
-        });
-        toolAssets.push(asset);
-        agentEvents.emit({
-          type: "tool_end",
-          costMs,
-          assets: [asset],
-          isDemo,
-        });
-        return {
-          result: `已生成 ${imgs.length} 张图（模型 ${useModelOpt.name}，尺寸 ${useSize}，${(costMs / 1000).toFixed(1)}s）`,
-        };
-      }
-      return { result: `未知工具：${name}` };
-    })
-      .then((r) => {
-        finalContent = r.finalContent;
-      })
-      .catch((e) => {
-        throw e;
+        return { result: `未知工具：${name}` };
       });
+      finalContent = loopContent;
+      if (!finalContent.trim()) finalContent = "已完成。";
+    } catch (e: any) {
+      const raw = e?.message ?? String(e);
+      const friendly = await explainError(raw).catch(() => raw);
+      console.error("LLM turn failed:", e);
+      // 把占位消息改成错误消息，避免留下空白 agent 消息。
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === agentId
+            ? {
+                ...m,
+                content: "",
+                error: friendly,
+                events: [...events],
+                assets: toolAssets.length > 0 ? toolAssets : undefined,
+              }
+            : m
+        )
+      );
+      persistUpdate(agentId, {
+        content: "",
+        error: friendly,
+        events: [...events],
+        assetIds: toolAssets.length > 0 ? dbAssetIds(toolAssets) : null,
+      });
+      return;
+    }
 
     const totalCost = Date.now() - start;
     const skillLog = {
@@ -520,21 +463,18 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
       )
     );
     // 把最终内容写回 DB
-    updateMessage(agentId, {
+    persistUpdate(agentId, {
       content: finalContent,
       events: [...events],
       skillLog,
       assetIds: toolAssets.length > 0 ? dbAssetIds(toolAssets) : null,
-    }).catch((e) => console.error("update agent message failed:", e));
+    });
 
     // 自动学习
     if (agentCtx) {
-      const updated = addStyleHints(agentCtx, userInput);
-      const withModel = recordModel(updated, lastModel);
-      setAgentCtx(withModel);
-      saveAgentContext(currentProject.id, withModel).catch(console.error);
+      await learnFromGeneration(agentCtx, userInput, lastModel, currentProject.id, setAgentCtx);
     }
-    silentReload();
+    reload({ silent: true });
   };
 
   /** 规则降级：展示计划，等用户点确认才生图 */
@@ -552,11 +492,14 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     agentEvents.emit({ type: "turn_end", assistantMessage: { id: "", role: "agent", content: "", createdAt: Date.now() } });
 
     const agentId = crypto.randomUUID();
+    const planGroupCount = decision.groupCount ?? groupCount;
     const plan = {
       prompt: decision.prompt,
       modelId: decision.model.id,
       modelName: decision.model.name,
-      size,
+      size: decision.size ?? size,
+      image: refs.length > 0 ? [...refs] : undefined,
+      maxImages: planGroupCount > 1 ? planGroupCount : undefined,
     };
     const skillLog = {
       matchedSkill: decision.skillName,
@@ -580,25 +523,25 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
       } as ChatMessage & { pendingPlan?: typeof plan },
     ]);
     // 持久化（plan 信息也存）
-    insertMessage(chatSessionId!, {
+    persistInsert(chatSessionId!, {
       id: agentId,
       role: "agent",
       content: "（未配置 LLM，使用规则路由。请点下方「开始生成」或继续发消息调整计划。）",
       events: [...events],
       skillLog,
       pendingPlan: plan,
-    }).catch((e) => console.error("save plan message failed:", e));
+    });
   };
 
   const onSubmit = inputMode === "chat" ? onSubmitChat : onSubmitGenerate;
 
   /** 规则降级：用户点了"开始生成"按钮 */
   const onConfirmPlan = async (msgId: string) => {
+    if (generating) return;
     const msg = messages.find((m) => m.id === msgId);
     if (!msg?.pendingPlan) return;
     const plan = msg.pendingPlan;
     setGenerating(true);
-    const start = Date.now();
     const events: AgentEvent[] = [];
     const off = agentEvents.on((e) => events.push(e));
     try {
@@ -606,27 +549,21 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
         type: "tool_start",
         toolName: "jimeng.generate_image",
         model: plan.modelId,
-        args: { prompt: plan.prompt, size: plan.size },
+        args: { prompt: plan.prompt, size: plan.size, maxImages: plan.maxImages },
       });
-      const resp = await generateImage({
-        model: plan.modelId,
-        prompt: plan.prompt,
-        image: refs.length > 0 ? refs : undefined,
-        size: plan.size,
-      });
-      const costMs = Date.now() - start;
-      agentEvents.emit({ type: "tool_end", costMs, assets: [], isDemo: resp.isDemo });
-      const asset = await createAsset({
-        projectId: currentProject.id,
-        prompt: plan.prompt,
-        model: plan.modelId,
-        modelName: plan.modelName,
-        size: plan.size,
-        refCount: refs.length,
-        costMs,
-        isLayerDecomposition: false,
-        payload: { urls: resp.images.map((i) => i.url) },
-      });
+      const result = await executePlan(
+        {
+          prompt: plan.prompt,
+          modelId: plan.modelId,
+          modelName: plan.modelName,
+          size: plan.size,
+          images: plan.image,
+          maxImages: plan.maxImages && plan.maxImages > 1 ? plan.maxImages : undefined,
+        },
+        currentProject.id
+      );
+      const { asset, costMs, isDemo } = result;
+      agentEvents.emit({ type: "tool_end", costMs, assets: [asset], isDemo });
       setMessages((prev) =>
         prev.map((m) =>
           m.id === msgId
@@ -636,7 +573,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
                 pendingPlan: undefined,
                 assets: [asset],
                 skillLog: m.skillLog
-                  ? { ...m.skillLog, costMs, isDemo: resp.isDemo, modelUsed: plan.modelId, modelName: plan.modelName }
+                  ? { ...m.skillLog, costMs, isDemo, modelUsed: plan.modelId, modelName: plan.modelName }
                   : undefined,
                 events: [...events, { type: "turn_end", assistantMessage: { id: msgId, role: "agent", content: "", createdAt: Date.now() } }],
               }
@@ -644,27 +581,25 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
         )
       );
       // 持久化：把 plan 清掉 + asset_id 存上
-      updateMessage(msgId, {
+      persistUpdate(msgId, {
         content: "✅ 已生成。",
         pendingPlan: null,
         assetIds: [asset.id],
         skillLog: msg.skillLog
-          ? { ...msg.skillLog, costMs, isDemo: resp.isDemo, modelUsed: plan.modelId, modelName: plan.modelName }
+          ? { ...msg.skillLog, costMs, isDemo, modelUsed: plan.modelId, modelName: plan.modelName }
           : undefined,
-      }).catch((e) => console.error("update confirmed plan failed:", e));
+      });
       // 自动学习
       const userMsgs = messages.filter((m) => m.role === "user");
       const lastUserText = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : "";
       if (agentCtx && lastUserText) {
-        const updated = addStyleHints(agentCtx, lastUserText);
-        const withModel = recordModel(updated, plan.modelId);
-        setAgentCtx(withModel);
-        saveAgentContext(currentProject.id, withModel).catch(console.error);
+        await learnFromGeneration(agentCtx, lastUserText, plan.modelId, currentProject.id, setAgentCtx);
       }
-      silentReload();
+      reload({ silent: true });
     } catch (e: any) {
       const raw = e?.message ?? String(e);
       const friendly = await explainError(raw).catch(() => raw);
+      log.error("project-detail", "onConfirmPlan failed:", e);
       setMessages((prev) =>
         prev.map((m) =>
           m.id === msgId
@@ -681,13 +616,17 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   /** 规则降级：用户点了"取消" */
   const onCancelPlan = (msgId: string) => {
     setMessages((prev) => prev.filter((m) => m.id !== msgId));
-    dbDeleteMessage(msgId).catch((e) => console.error("delete plan failed:", e));
+    persistDelete(msgId);
   };
 
   /** 清空所有对话历史 */
   const onClearHistory = async () => {
     if (!chatSessionId) return;
-    if (!window.confirm("确认清空所有对话历史？\n\n项目内的资产不会被删除（它们在「资产」tab 里）。")) return;
+    const ok = await confirmDialog(
+      "确认清空所有对话历史？\n\n项目内的资产不会被删除（它们在「资产」tab 里）。",
+      { okLabel: "清空" }
+    );
+    if (!ok) return;
     try {
       await dbClearSession(chatSessionId);
       setMessages([]);
@@ -774,10 +713,17 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
                   onDownload={onDownload}
                   onDelete={onDeleteAsset}
                   onBatchDelete={async (ids) => {
-                    for (const id of ids) {
-                      await deleteAsset(id);
+                    const deleted: string[] = [];
+                    try {
+                      for (const id of ids) {
+                        await deleteAsset(id);
+                        deleted.push(id);
+                      }
+                    } finally {
+                      if (deleted.length > 0) {
+                        setAssets((prev) => prev.filter((a) => !deleted.includes(a.id)));
+                      }
                     }
-                    setAssets((prev) => prev.filter((a) => !ids.includes(a.id)));
                   }}
                 />
               )}
