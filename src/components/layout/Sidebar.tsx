@@ -24,8 +24,8 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { id: "projects", label: "项目库", icon: FolderOpen },
-  { id: "assets", label: "资产中心", icon: Image, soon: true },
-  { id: "skills", label: "Skill", icon: Wand2, soon: true },
+  { id: "assets", label: "资产中心", icon: Image },
+  { id: "skills", label: "Skill", icon: Wand2 },
 ];
 
 export default function Sidebar({ route, onRoute, onOpenSettings }: Props) {
