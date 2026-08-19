@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { ArrowLeft, MessageSquare, Image as ImageIcon, Brain, KeyRound, Trash2 } from "lucide-react";
+import { ArrowLeft, Brain, KeyRound, Trash2 } from "lucide-react";
 import { useSession } from "@/lib/session";
 import { deleteAsset, createAsset } from "@/lib/assets";
 import { renameProject } from "@/lib/projects";
@@ -88,15 +88,18 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     hasApiKey().then(setHasKey).catch(() => setHasKey(false));
   }, [currentProject, generating]);
 
-  // 模式与 tab 同步：只在"刚切换到该项目"时同步一次，之后尊重用户手动选择。
-  // - 生图模式 → 资产 tab
-  // - 对话模式 → 对话 tab
-  // 解决 bug：用户在对话模式下手动切到资产 tab 看历史图后，切换 inputMode 会强制覆盖。
+  // 模式与 tab 同步：
+  // - 切换项目 → 用当前 inputMode 决定初始 tab
+  // - 切换 inputMode → 同步 tab（生图 → 资产，对话 → 对话）
+  // 顶部手动 tab 按钮已移除，ModeSwitch 是唯一入口，这里同步 tab 是预期行为。
   const lastSyncedProjectIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!currentProject) return;
-    if (lastSyncedProjectIdRef.current === currentProject.id) return;
-    lastSyncedProjectIdRef.current = currentProject.id;
+    // 切项目时强制同步一次；切 inputMode 时每次都同步
+    const isProjectSwitch = lastSyncedProjectIdRef.current !== currentProject.id;
+    if (isProjectSwitch) {
+      lastSyncedProjectIdRef.current = currentProject.id;
+    }
     setTab(inputMode === "generate" ? "assets" : "chat");
   }, [currentProject, inputMode]);
 
@@ -657,24 +660,8 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
           </div>
         </div>
         <div className="inline-flex rounded-md border border-border bg-bg-base p-0.5 text-xs">
-          <button
-            onClick={() => setTab("chat")}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded transition-colors ${
-              tab === "chat" ? "bg-bg-hover text-text-primary" : "text-text-muted hover:text-text-secondary"
-            }`}
-          >
-            <MessageSquare className="w-3.5 h-3.5" />
-            对话
-          </button>
-          <button
-            onClick={() => setTab("assets")}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded transition-colors ${
-              tab === "assets" ? "bg-bg-hover text-text-primary" : "text-text-muted hover:text-text-secondary"
-            }`}
-          >
-            <ImageIcon className="w-3.5 h-3.5" />
-            资产
-          </button>
+          {/* 顶部"对话/资产" tab 已移除：底部输入模式 ModeSwitch 是唯一入口，
+              切 inputMode 时 useEffect 会自动同步 tab。避免两套控件打架。 */}
         </div>
         <button
           onClick={() => setMemoryOpen(true)}
