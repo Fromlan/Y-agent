@@ -43,6 +43,12 @@ pub struct GenerateImageParams {
     pub response_format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layer_decomposition: Option<bool>,
+    /// 是否在生成图右下角加 "AI生成" 水印。
+    /// 即梦/豆包 Seedream API 默认 `true`（加水印），与 Y-agent 期望不符。
+    /// 调用方可不传；`generate()` 会补 `false`。
+    /// 未来要做 UI 开关时，前端传 `true` 进来即可生效。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub watermark: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -134,7 +140,15 @@ pub async fn generate(
         .timeout(std::time::Duration::from_secs(180))
         .build()?;
 
-    let body = serde_json::to_value(&params)?;
+    // Y-agent 默认行为：永远显式关闭 AI 水印。
+    // Seedream API 的 watermark 字段默认是 true（加水印），不传就走默认值。
+    // 改成 None 时在这里补 false，保证请求 payload 里一定带 watermark: false。
+    let mut body = serde_json::to_value(&params)?;
+    if body.get("watermark").is_none() {
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert("watermark".into(), serde_json::Value::Bool(false));
+        }
+    }
     log::info!("jimeng request: model={}, prompt_len={}", params.model, params.prompt.len());
     log::debug!("jimeng payload: {}", body);
 

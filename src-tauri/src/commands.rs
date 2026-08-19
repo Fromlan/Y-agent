@@ -56,6 +56,10 @@ pub struct JsGenerateParams {
     pub max_images: Option<u32>,
     #[serde(default)]
     pub layer_decomposition: Option<bool>,
+    /// 是否加 "AI生成" 水印。None = 走 Y-agent 默认（不加）。
+    /// Seedream API 默认 true，Y-agent 显式补 false 关闭。
+    #[serde(default)]
+    pub watermark: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -89,6 +93,7 @@ pub async fn jimeng_generate(
                     .map(|n| jimeng::SequentialOptions { max_images: n }),
                 response_format: Some("url".to_string()),
                 layer_decomposition: params.layer_decomposition,
+                watermark: params.watermark,
             },
         )
     };

@@ -10,6 +10,12 @@ export interface GenerateImageParams {
   sequential?: "auto";
   maxImages?: number;
   layerDecomposition?: boolean;
+  /**
+   * 是否在生成图右下角加 "AI生成" 水印。
+   * 留空走 Y-agent 默认（不加）；Seedream API 默认 true，Y-agent 后端会显式补 false 关闭。
+   * 如未来需要 UI 开关，往这里传 true/false 即可。
+   */
+  watermark?: boolean;
 }
 
 export interface GenerateImageResponse {
