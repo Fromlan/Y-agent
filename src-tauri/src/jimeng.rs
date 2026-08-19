@@ -58,10 +58,10 @@ struct ApiResponse {
 #[derive(Debug, Deserialize)]
 struct ApiImage {
     url: Option<String>,
-    #[serde(rename = "b64_json")]
+    #[serde(rename = "b64_json", alias = "b64Json")]
     b64_json: Option<String>,
     /// 图层拆分场景下返回，底图固定为 0
-    #[serde(default)]
+    #[serde(default, alias = "zIndex")]
     z_index: Option<i32>,
     /// 图层名称
     #[serde(default)]
@@ -72,6 +72,7 @@ struct ApiImage {
 }
 
 #[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct GeneratedImage {
     pub url: String,
     #[serde(default)]

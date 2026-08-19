@@ -24,7 +24,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: https: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://ark.cn-beijing.volces.com ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; img-src 'self' data: https: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https: http: ws: ipc: http://ipc.localhost"
     }
   },
   "bundle": {

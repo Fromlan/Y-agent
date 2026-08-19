@@ -242,8 +242,13 @@ pub struct JsAsset {
 }
 
 fn row_to_asset(row: &rusqlite::Row<'_>) -> rusqlite::Result<JsAsset> {
-    let payload_str: String = row.get(9)?;
-    let payload: Value = serde_json::from_str(&payload_str).unwrap_or(Value::Null);
+    // 旧版本行可能没有 model_name / size / payload（迁移时新列允许为 NULL），这里统一容错。
+    let payload_str: Option<String> = row.get(9)?;
+    let payload: Value = payload_str
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(Value::Null);
+    let model_name: Option<String> = row.get(4)?;
+    let size: Option<String> = row.get(5)?;
     let ref_count: i64 = row.get(6)?;
     let cost_ms: i64 = row.get(7)?;
     let is_layer: i64 = row.get(8)?;
@@ -252,8 +257,8 @@ fn row_to_asset(row: &rusqlite::Row<'_>) -> rusqlite::Result<JsAsset> {
         project_id: row.get(1)?,
         prompt: row.get(2)?,
         model: row.get(3)?,
-        model_name: row.get(4)?,
-        size: row.get(5)?,
+        model_name: model_name.unwrap_or_default(),
+        size: size.unwrap_or_default(),
         ref_count: ref_count as u32,
         cost_ms: cost_ms as u64,
         is_layer_decomposition: is_layer != 0,
@@ -267,55 +272,37 @@ pub fn create_asset(
     params: JsCreateAssetParams,
     state: State<'_, Mutex<AppState>>,
 ) -> Result<JsAsset, String> {
-    eprintln!(
-        "[create_asset] enter project={} prompt={:?} payload_kind={}",
-        params.project_id,
-        &params.prompt.chars().take(40).collect::<String>(),
-        if params.payload.get("layers").is_some() { "layer" } else { "url" }
-    );
     let s = state.lock().map_err(map_err)?;
     let conn = s.storage.conn.lock().map_err(map_err)?;
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp_millis();
     let payload_str = serde_json::to_string(&params.payload).map_err(map_err)?;
-    eprintln!("[create_asset] before INSERT, id={id}");
-    let n = conn
-        .execute(
-            "INSERT INTO assets(id, project_id, prompt, model, model_name, size,
-                                ref_count, cost_ms, is_layer_decomposition, payload, created_at)
-             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            params![
-                id,
-                params.project_id,
-                params.prompt,
-                params.model,
-                params.model_name,
-                params.size,
-                params.ref_count as i64,
-                params.cost_ms as i64,
-                if params.is_layer_decomposition { 1i64 } else { 0i64 },
-                payload_str,
-                now,
-            ],
-        )
-        .map_err(|e| {
-            eprintln!("[create_asset] INSERT failed: {e}");
-            e.to_string()
-        })?;
-    eprintln!("[create_asset] INSERT ok, rows={n}");
+    conn.execute(
+        "INSERT INTO assets(id, project_id, prompt, model, model_name, size,
+                            ref_count, cost_ms, is_layer_decomposition, payload, created_at)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            id,
+            params.project_id,
+            params.prompt,
+            params.model,
+            params.model_name,
+            params.size,
+            params.ref_count as i64,
+            params.cost_ms as i64,
+            if params.is_layer_decomposition { 1i64 } else { 0i64 },
+            payload_str,
+            now,
+        ],
+    )
+    .map_err(map_err)?;
 
-    let u = conn
-        .execute(
-            "UPDATE projects SET updated_at=?1 WHERE id=?2",
-            params![now, params.project_id],
-        )
-        .map_err(|e| {
-            eprintln!("[create_asset] UPDATE projects failed: {e}");
-            e.to_string()
-        })?;
-    eprintln!("[create_asset] UPDATE projects ok, rows={u}");
+    conn.execute(
+        "UPDATE projects SET updated_at=?1 WHERE id=?2",
+        params![now, params.project_id],
+    )
+    .map_err(map_err)?;
 
-    eprintln!("[create_asset] returning id={id}");
     Ok(JsAsset {
         id,
         project_id: params.project_id,
