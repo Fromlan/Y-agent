@@ -3,8 +3,10 @@ import Sidebar, { type Route } from "@/components/layout/Sidebar";
 import Workspace from "@/components/workspace/Workspace";
 import SettingsPanel from "@/components/settings/SettingsPanel";
 import { ToastProvider, useToast } from "@/components/shared/Toast";
+import { PromptProvider } from "@/components/shared/PromptProvider";
 import { SessionProvider, useSession } from "@/lib/session";
 import { hasApiKey } from "@/lib/api-key";
+import { log } from "@/lib/logger";
 
 function AppShell() {
   const [route, setRoute] = useState<Route>("projects");
@@ -17,14 +19,37 @@ function AppShell() {
     hasApiKey()
       .then((ok) => setNeedsApiKey(!ok))
       .catch((e) => {
-        console.error(e);
+        log.error("app", "hasApiKey check failed:", e);
         toast.error("检查 API Key 失败");
       });
-  }, []);
+  }, [toast]);
 
-  // 选项目后自动跳到 project 路由
+  /**
+   * 全局未捕获错误兜底。
+   * 业务里所有 await 都有 try/catch，但万一有遗漏的 Promise 拒绝 / 同步抛错，
+   * 至少要让用户知道"出问题了"，而不是黑屏。
+   */
   useEffect(() => {
-    if (currentProject && route !== "project") {
+    const onRejection = (e: PromiseRejectionEvent) => {
+      log.error("app", "unhandled promise rejection:", e.reason);
+      const msg = e.reason instanceof Error ? e.reason.message : String(e.reason);
+      toast.error(`未知错误：${msg.slice(0, 200)}`);
+    };
+    const onError = (e: ErrorEvent) => {
+      log.error("app", "uncaught error:", e.error ?? e.message);
+    };
+    window.addEventListener("unhandledrejection", onRejection);
+    window.addEventListener("error", onError);
+    return () => {
+      window.removeEventListener("unhandledrejection", onRejection);
+      window.removeEventListener("error", onError);
+    };
+  }, [toast]);
+
+  // 在「项目库」页选了项目后自动跳到 project 路由
+  // - 只在 route === "projects" 时触发，避免把"资产中心 / Skill"等主动切换吞掉
+  useEffect(() => {
+    if (currentProject && route === "projects") {
       setRoute("project");
     }
   }, [currentProject, route]);
@@ -86,9 +111,11 @@ function AppShell() {
 export default function App() {
   return (
     <ToastProvider>
-      <SessionProvider>
-        <AppShell />
-      </SessionProvider>
+      <PromptProvider>
+        <SessionProvider>
+          <AppShell />
+        </SessionProvider>
+      </PromptProvider>
     </ToastProvider>
   );
 }

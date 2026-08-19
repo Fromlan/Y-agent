@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { FolderPlus, Trash2, FolderOpen, Pencil, ArrowRight } from "lucide-react";
 import { listProjects, createProject, deleteProject, renameProject } from "@/lib/projects";
 import { useToast } from "@/components/shared/Toast";
+import { usePrompt } from "@/components/shared/PromptProvider";
 import { useSession } from "@/lib/session";
+import { confirmDialog } from "@/lib/dialog";
 import type { Project } from "@/lib/types";
 
 export default function ProjectsPage() {
@@ -10,8 +12,9 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(true);
   const { setCurrentProject } = useSession();
   const toast = useToast();
+  const prompt = usePrompt();
 
-  const reload = async () => {
+  const reload = useCallback(async () => {
     setLoading(true);
     try {
       setItems(await listProjects());
@@ -20,14 +23,14 @@ export default function ProjectsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
 
   useEffect(() => {
     reload();
-  }, []);
+  }, [reload]);
 
   const onCreate = async () => {
-    const name = window.prompt("项目名称", "未命名项目");
+    const name = await prompt("项目名称", { defaultValue: "未命名项目", okLabel: "创建" });
     if (!name?.trim()) return;
     try {
       await createProject(name.trim());
@@ -39,7 +42,11 @@ export default function ProjectsPage() {
   };
 
   const onDelete = async (id: string, name: string) => {
-    if (!window.confirm(`确认删除项目「${name}」？\n项目内的所有资产也会被删除。此操作不可恢复。`)) return;
+    const ok = await confirmDialog(
+      `确认删除项目「${name}」？\n项目内的所有资产也会被删除。此操作不可恢复。`,
+      { kind: "warning", okLabel: "删除" }
+    );
+    if (!ok) return;
     try {
       await deleteProject(id);
       toast.success("已删除");
@@ -50,7 +57,7 @@ export default function ProjectsPage() {
   };
 
   const onRename = async (id: string, currentName: string) => {
-    const name = window.prompt("新项目名", currentName);
+    const name = await prompt("新项目名", { defaultValue: currentName });
     if (!name?.trim() || name.trim() === currentName) return;
     try {
       await renameProject(id, name.trim());

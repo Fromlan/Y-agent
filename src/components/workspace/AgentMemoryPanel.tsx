@@ -6,6 +6,7 @@ import {
   type AgentContext,
 } from "@/lib/agent-memory";
 import { useToast } from "@/components/shared/Toast";
+import { confirmDialog } from "@/lib/dialog";
 
 interface Props {
   open: boolean;
@@ -59,7 +60,11 @@ export default function AgentMemoryPanel({ open, onClose, projectId }: Props) {
   };
 
   const onClear = async () => {
-    if (!window.confirm("确认清除 Agent 记忆？已学到的画风偏好会清空。")) return;
+    const ok = await confirmDialog(
+      "确认清除 Agent 记忆？已学到的画风偏好会清空。",
+      { kind: "warning", okLabel: "清除" }
+    );
+    if (!ok) return;
     setSaving(true);
     try {
       const empty: AgentContext = { styleHints: [], recentModels: [], updatedAt: Date.now() };

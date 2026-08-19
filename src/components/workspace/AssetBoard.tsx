@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { ImageIcon, X } from "lucide-react";
 import type { Asset } from "@/lib/types";
+import { assetMainImage } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
+import { confirmDialog } from "@/lib/dialog";
 import AssetCard, { type ViewMode } from "@/components/workspace/AssetCard";
 import BoardToolbar, {
   type SortBy,
@@ -70,6 +72,13 @@ export default function AssetBoard({
     });
   }, [assets]);
 
+  // 当前详情资产被删除时自动关闭详情弹窗
+  useEffect(() => {
+    if (detail && !assets.some((a) => a.id === detail.id)) {
+      setDetail(null);
+    }
+  }, [assets, detail]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list = assets.filter((a) => {
@@ -128,10 +137,7 @@ export default function AssetBoard({
     // 浏览器对连续 download 有限制，用间隔触发
     for (let i = 0; i < targets.length; i++) {
       const a = targets[i];
-      const url =
-        a.isLayerDecomposition
-          ? [...(a.payload.layers ?? [])].sort((x, y) => (x.zIndex ?? 0) - (y.zIndex ?? 0))[0]?.url
-          : a.payload.urls?.[0];
+      const url = assetMainImage(a);
       if (url) {
         onDownload(url, `y-agent-${a.id}.png`);
       }
@@ -143,7 +149,11 @@ export default function AssetBoard({
   const handleBatchDelete = async () => {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
-    if (!window.confirm(`确认删除选中的 ${ids.length} 个资产？此操作不可恢复。`)) return;
+    const ok = await confirmDialog(
+      `确认删除选中的 ${ids.length} 个资产？此操作不可恢复。`,
+      { kind: "warning", okLabel: "删除" }
+    );
+    if (!ok) return;
     try {
       await onBatchDelete(ids);
       toast.success(`已删除 ${ids.length} 个`);
