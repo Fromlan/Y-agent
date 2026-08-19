@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   X,
   Copy,
@@ -14,6 +14,9 @@ import {
   Cpu,
   CalendarClock,
   Check,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
 } from "lucide-react";
 import type { Asset, GeneratedImage } from "@/lib/types";
 import { assetMainImage, flatAssetImages } from "@/lib/types";
@@ -69,15 +72,11 @@ export default function AssetDetailDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [images.length, onClose]);
 
-  const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(asset.prompt);
-      setPromptCopied(true);
-      onCopyPrompt(asset.prompt);
-      setTimeout(() => setPromptCopied(false), 1500);
-    } catch {
-      toast.error("复制失败");
-    }
+  const onCopy = () => {
+    // 父组件 onCopyPrompt 已统一处理 clipboard + toast，这里只维护按钮状态。
+    onCopyPrompt(asset.prompt);
+    setPromptCopied(true);
+    setTimeout(() => setPromptCopied(false), 1500);
   };
 
   const onDownloadCur = () => {
@@ -86,11 +85,14 @@ export default function AssetDetailDialog({
     onDownload(cur.url, `y-agent-${asset.id}-${idx + 1}.${ext}`);
   };
 
-  const onDownloadAll = () => {
-    images.forEach((img, i) => {
-      if (img.url) onDownload(img.url, `y-agent-${asset.id}-${i + 1}.png`);
-    });
+  const onDownloadAll = async () => {
     toast.info(`开始下载 ${images.length} 张图…`);
+    // 分批触发，避免浏览器把连续下载当广告拦截。
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i];
+      if (img.url) onDownload(img.url, `y-agent-${asset.id}-${i + 1}.png`);
+      await new Promise((r) => setTimeout(r, 250));
+    }
   };
 
   const onDeleteClick = () => {
@@ -339,9 +341,10 @@ export default function AssetDetailDialog({
 
 /**
  * 统一预览舞台
- * - 固定 16:10 容器（max-w-[640px] max-h-[480px]）
- * - 所有图（不论原图比例）都用 object-contain 居中显示
- * - 加载失败显示 fallback
+ * - 容器：max-w-[640px] 16:10
+ * - 默认：object-contain 居中（适合 1K~2K 缩略图浏览）
+ * - 缩放：滚轮 / 按钮（0.5x ~ 4x），双击重置
+ * - 平移：放大后可拖动
  */
 function PreviewStage({
   image,
@@ -352,10 +355,50 @@ function PreviewStage({
 }) {
   const url = image?.url ?? fallbackUrl;
   const [errored, setErrored] = useState(false);
+  const [scale, setScale] = useState(1);
+  const [tx, setTx] = useState(0);
+  const [ty, setTy] = useState(0);
+  const dragRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
 
+  // 切换图片时重置
   useEffect(() => {
     setErrored(false);
+    setScale(1);
+    setTx(0);
+    setTy(0);
   }, [url]);
+
+  const reset = useCallback(() => {
+    setScale(1);
+    setTx(0);
+    setTy(0);
+  }, []);
+
+  const zoomBy = useCallback((delta: number) => {
+    setScale((s) => Math.max(0.5, Math.min(4, s + delta)));
+  }, []);
+
+  // 滚轮缩放（按住 Ctrl 更直观；无 Ctrl 也允许）
+  const onWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    zoomBy(e.deltaY < 0 ? 0.2 : -0.2);
+  };
+
+  // 拖拽平移
+  const onMouseDown = (e: React.MouseEvent) => {
+    if (scale <= 1.05) return; // 未放大不进入拖拽
+    dragRef.current = { x: e.clientX, y: e.clientY, tx, ty };
+  };
+  const onMouseMove = (e: React.MouseEvent) => {
+    if (!dragRef.current) return;
+    const dx = e.clientX - dragRef.current.x;
+    const dy = e.clientY - dragRef.current.y;
+    setTx(dragRef.current.tx + dx);
+    setTy(dragRef.current.ty + dy);
+  };
+  const stopDrag = () => {
+    dragRef.current = null;
+  };
 
   if (!url || errored) {
     return (
@@ -370,15 +413,60 @@ function PreviewStage({
   }
 
   return (
-    <div className="w-full max-w-[640px] aspect-[16/10] bg-bg-elev rounded-md
-      flex items-center justify-center overflow-hidden border border-border">
-      <img
-        src={url}
-        alt={image?.name ?? ""}
-        onError={() => setErrored(true)}
-        className="max-w-full max-h-full object-contain"
-        style={{ imageRendering: "auto" }}
-      />
+    <div className="relative w-full max-w-[640px] aspect-[16/10] bg-bg-elev rounded-md
+      overflow-hidden border border-border select-none">
+      <div
+        className="w-full h-full flex items-center justify-center"
+        style={{
+          cursor: scale > 1.05 ? (dragRef.current ? "grabbing" : "grab") : "zoom-in",
+        }}
+        onWheel={onWheel}
+        onMouseDown={onMouseDown}
+        onMouseMove={onMouseMove}
+        onMouseUp={stopDrag}
+        onMouseLeave={stopDrag}
+        onDoubleClick={reset}
+        title="滚轮缩放 · 双击重置 · 拖拽平移"
+      >
+        <img
+          src={url}
+          alt={image?.name ?? ""}
+          onError={() => setErrored(true)}
+          draggable={false}
+          className="max-w-full max-h-full object-contain"
+          style={{
+            imageRendering: scale > 2 ? "pixelated" : "auto",
+            transform: `scale(${scale}) translate(${tx / scale}px, ${ty / scale}px)`,
+            transition: dragRef.current ? "none" : "transform 0.15s",
+          }}
+        />
+      </div>
+      {/* 缩放控制条 */}
+      <div className="absolute bottom-2 right-2 flex items-center gap-1 px-1.5 py-1 rounded
+        bg-black/60 backdrop-blur-sm text-white text-xs">
+        <button
+          className="p-1 hover:bg-white/10 rounded"
+          onClick={() => zoomBy(-0.25)}
+          title="缩小"
+        >
+          <ZoomOut className="w-3.5 h-3.5" />
+        </button>
+        <span className="w-10 text-center tabular-nums">{Math.round(scale * 100)}%</span>
+        <button
+          className="p-1 hover:bg-white/10 rounded"
+          onClick={() => zoomBy(0.25)}
+          title="放大"
+        >
+          <ZoomIn className="w-3.5 h-3.5" />
+        </button>
+        <button
+          className="p-1 hover:bg-white/10 rounded"
+          onClick={reset}
+          title="重置（双击图片也可）"
+        >
+          <Maximize2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
     </div>
   );
 }
