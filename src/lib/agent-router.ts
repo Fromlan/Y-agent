@@ -26,6 +26,9 @@ export interface RouteDecision {
   reasoning: string;
   /** 若 explicit 触发，从输入里剥掉 /xxx 前缀（用于 UI 回显） */
   remainingInput?: string;
+  /** Skill 模板推荐的尺寸/组图数量，供规则降级计划使用 */
+  size?: string;
+  groupCount?: number;
 }
 
 // 关键词词典：6 类 Skill 的中英触发词
@@ -90,12 +93,14 @@ export function route(
         triggerType: "explicit",
         reasoning: `显式触发 /${cmd} → 命中 Skill「${skill.name}」`,
         remainingInput: rest,
+        size: skill.size,
+        groupCount: skill.groupCount,
       };
     }
     // /xxx 没匹配到 Skill：当作 fallback（仍然剥掉前缀，避免污染 prompt）
     return {
       model: currentModel,
-      prompt: rest,
+      prompt: rest || text,
       triggerType: "fallback",
       reasoning: `未识别 /${cmd}（无匹配 Skill），走默认生图`,
       remainingInput: rest,
@@ -117,6 +122,8 @@ export function route(
           prompt: rendered,
           triggerType: "keyword",
           reasoning: `检测到关键词「${keywords.find((k) => lower.includes(k.toLowerCase()))}」→ 命中 Skill「${skill.name}」`,
+          size: skill.size,
+          groupCount: skill.groupCount,
         };
       }
     }

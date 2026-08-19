@@ -83,9 +83,14 @@ export interface Asset {
  * - 非图层拆分：返回 payload.urls
  * - 图层拆分：按 zIndex 升序返回 layers（图层在前 / 底图在后）
  */
+function layerZIndex(img: GeneratedImage): number {
+  // 兼容旧数据：早期后端序列化的是 z_index，新数据是 zIndex。
+  return img.zIndex ?? (img as GeneratedImage & { z_index?: number }).z_index ?? 0;
+}
+
 export function flatAssetImages(asset: Asset): GeneratedImage[] {
   if (asset.isLayerDecomposition && asset.payload.layers?.length) {
-    return [...asset.payload.layers].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    return [...asset.payload.layers].sort((a, b) => layerZIndex(a) - layerZIndex(b));
   }
   return (asset.payload.urls ?? []).map((u) => ({ url: u }));
 }
@@ -93,7 +98,7 @@ export function flatAssetImages(asset: Asset): GeneratedImage[] {
 /** 取资产的主图：图层拆分取底图（zIndex=0），否则取 urls[0] */
 export function assetMainImage(asset: Asset): string | null {
   if (asset.isLayerDecomposition && asset.payload.layers?.length) {
-    const base = [...asset.payload.layers].find((l) => l.zIndex === 0);
+    const base = [...asset.payload.layers].find((l) => layerZIndex(l) === 0);
     return base?.url ?? asset.payload.layers[0].url;
   }
   return asset.payload.urls?.[0] ?? null;
