@@ -16,6 +16,9 @@ impl Storage {
         std::fs::create_dir_all(app_dir)?;
         let db_path = app_dir.join(DB_FILE);
         let conn = Connection::open(&db_path)?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        // SQLite 默认不启用外键约束，必须显式打开，否则 ON DELETE CASCADE 不会生效。
+        conn.pragma_update(None, "foreign_keys", true)?;
         Self::migrate(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -149,6 +152,15 @@ impl Storage {
         // payload 旧表可能 NULL（旧 schema 没有这列），SQLite 新加列允许 NULL
         // 但我们代码里读成 String，NOT NULL 旧行会变 NULL → serde_json::from_str("null") 拿到 Value::Null，安全
 
+        // 2a. 如果是从 M0 旧表升级，尽量把旧 urls 列迁移到 payload 再删旧列。
+        if cols.iter().any(|c| c.eq_ignore_ascii_case("urls")) {
+            conn.execute(
+                "UPDATE assets SET payload = json_object('urls', json(urls))
+                 WHERE payload IS NULL AND urls IS NOT NULL AND json_valid(urls)",
+                [],
+            )?;
+        }
+
         // 2b. 清理 M0 时代的旧列（kind/urls/meta，已被 payload 取代）
         // 需要 SQLite 3.35+ 支持 DROP COLUMN（libsqlite3-sys 0.30 默认 3.4x，远超 3.35）
         for old_col in ["kind", "urls", "meta"] {
@@ -174,7 +186,7 @@ impl Storage {
     }
 
     pub fn put_kv(&self, key: &str, value: &str) -> anyhow::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         conn.execute(
             "INSERT INTO kv(key, value) VALUES(?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -184,7 +196,7 @@ impl Storage {
     }
 
     pub fn get_kv(&self, key: &str) -> anyhow::Result<Option<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         let mut stmt = conn.prepare("SELECT value FROM kv WHERE key = ?1")?;
         let mut rows = stmt.query(params![key])?;
         if let Some(row) = rows.next()? {
@@ -195,7 +207,7 @@ impl Storage {
     }
 
     pub fn delete_kv(&self, key: &str) -> anyhow::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         conn.execute("DELETE FROM kv WHERE key = ?1", params![key])?;
         Ok(())
     }
@@ -221,7 +233,7 @@ impl Storage {
 
     /// 读项目 agent_context（JSON 字符串）。未设置返回 Ok(None)。
     pub fn get_project_agent_context(&self, project_id: &str) -> anyhow::Result<Option<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         let mut stmt = conn.prepare("SELECT agent_context FROM projects WHERE id = ?1")?;
         let mut rows = stmt.query(params![project_id])?;
         if let Some(row) = rows.next()? {
@@ -238,7 +250,7 @@ impl Storage {
         project_id: &str,
         json: &str,
     ) -> anyhow::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         let changed = conn.execute(
             "UPDATE projects SET agent_context = ?1, updated_at = ?2 WHERE id = ?3",
             params![json, chrono::Utc::now().timestamp_millis(), project_id],
@@ -258,7 +270,7 @@ impl Storage {
         &self,
         project_id: &str,
     ) -> anyhow::Result<String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         let mut stmt = conn.prepare("SELECT id FROM chat_sessions WHERE project_id = ?1")?;
         let mut rows = stmt.query(params![project_id])?;
         if let Some(row) = rows.next()? {
@@ -275,7 +287,7 @@ impl Storage {
 
     /// 列出某 session 的所有消息（按 created_at 升序），返回 JSON 字符串数组
     pub fn list_chat_messages(&self, session_id: &str) -> anyhow::Result<Vec<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         let mut stmt = conn.prepare(
             "SELECT id, role, content, attachments, skill_log, events,
                     pending_plan, error, asset_ids, created_at
@@ -324,7 +336,7 @@ impl Storage {
         asset_ids: Option<&str>,
         id: Option<&str>,
     ) -> anyhow::Result<String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         // 前端传过来的 id 优先；没传才用 UUID
         let id_owned = id
             .map(|s| s.to_string())
@@ -358,8 +370,7 @@ impl Storage {
         error: Option<&str>,
         asset_ids: Option<&str>,
     ) -> anyhow::Result<()> {
-        let conn = self.conn.lock().unwrap();
-        let now = chrono::Utc::now().timestamp_millis();
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         let mut sets: Vec<&str> = Vec::new();
         let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         if let Some(v) = content { sets.push("content = ?"); values.push(Box::new(v.to_string())); }
@@ -371,8 +382,6 @@ impl Storage {
         if sets.is_empty() {
             return Ok(());
         }
-        sets.push("created_at = ?");
-        values.push(Box::new(now));
         let sql = format!("UPDATE chat_messages SET {} WHERE id = ?", sets.join(", "));
         let mut all: Vec<Box<dyn rusqlite::ToSql>> = values;
         all.push(Box::new(message_id.to_string()));
@@ -386,15 +395,19 @@ impl Storage {
 
     /// 删除单条消息
     pub fn delete_chat_message(&self, message_id: &str) -> anyhow::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         conn.execute("DELETE FROM chat_messages WHERE id = ?1", params![message_id])?;
         Ok(())
     }
 
     /// 清空某 session 的所有消息
     pub fn clear_chat_session(&self, session_id: &str) -> anyhow::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         conn.execute("DELETE FROM chat_messages WHERE session_id = ?1", params![session_id])?;
+        conn.execute(
+            "UPDATE chat_sessions SET updated_at = ?1 WHERE id = ?2",
+            params![chrono::Utc::now().timestamp_millis(), session_id],
+        )?;
         Ok(())
     }
 }
