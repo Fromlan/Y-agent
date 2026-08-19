@@ -1,0 +1,143 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    user-select: none;
+  }
+
+  /* 允许表单可选择 */
+  input,
+  textarea,
+  [contenteditable="true"] {
+    user-select: text;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #2a2a32;
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3a3a44;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm
+      rounded-md transition-colors duration-150
+      border border-border bg-bg-elev hover:bg-bg-hover
+      text-text-primary disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply bg-accent hover:bg-accent-hover text-white border-transparent;
+  }
+  .btn-icon {
+    @apply inline-flex items-center justify-center w-8 h-8 rounded-md
+      text-text-secondary hover:text-text-primary hover:bg-bg-hover
+      transition-colors;
+  }
+  .panel {
+    @apply bg-bg-panel border border-border rounded-lg;
+  }
+  .input {
+    @apply w-full px-3 py-2 bg-bg-elev border border-border rounded-md
+      text-text-primary placeholder:text-text-muted
+      focus:outline-none focus:border-accent transition-colors;
+  }
+  .label {
+    @apply text-xs text-text-secondary font-medium;
+  }
+
+  /* Markdown 渲染样式（用于 LLM 输出 / Skill 模板说明） */
+  .md-content {
+    @apply text-sm text-text-primary leading-relaxed;
+  }
+  .md-content > :first-child {
+    @apply mt-0;
+  }
+  .md-content > :last-child {
+    @apply mb-0;
+  }
+  .md-content p {
+    @apply my-1.5;
+  }
+  .md-content h1,
+  .md-content h2,
+  .md-content h3,
+  .md-content h4 {
+    @apply font-semibold text-text-primary mt-3 mb-1.5;
+  }
+  .md-content h1 { @apply text-lg; }
+  .md-content h2 { @apply text-base; }
+  .md-content h3 { @apply text-sm; }
+  .md-content h4 { @apply text-sm; }
+  .md-content ul,
+  .md-content ol {
+    @apply my-1.5 pl-5;
+  }
+  .md-content ul { list-style-type: disc; }
+  .md-content ol { list-style-type: decimal; }
+  .md-content li {
+    @apply my-0.5;
+  }
+  .md-content li > p {
+    @apply my-0;
+  }
+  .md-content code {
+    @apply px-1 py-0.5 rounded bg-bg-elev text-accent text-[12.5px]
+      font-mono;
+  }
+  .md-content pre {
+    @apply my-2 p-2.5 rounded-md bg-bg-elev border border-border
+      overflow-x-auto;
+  }
+  .md-content pre code {
+    @apply bg-transparent p-0 text-text-secondary text-[12.5px] block;
+  }
+  .md-content blockquote {
+    @apply my-2 pl-3 border-l-2 border-border text-text-secondary italic;
+  }
+  .md-content strong {
+    @apply font-semibold text-text-primary;
+  }
+  .md-content em {
+    @apply italic;
+  }
+  .md-content a {
+    @apply text-accent hover:underline;
+  }
+  .md-content hr {
+    @apply my-3 border-border;
+  }
+  /* 紧凑变体（用于 Skill 折叠日志等小空间） */
+  .md-content.md-compact {
+    @apply text-xs;
+  }
+  .md-content.md-compact p {
+    @apply my-1;
+  }
+  .md-content.md-compact pre {
+    @apply my-1.5 p-2;
+  }
+}

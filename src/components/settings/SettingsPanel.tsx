@@ -1,0 +1,331 @@
+import { useEffect, useState } from "react";
+import { X, Eye, EyeOff, FlaskConical, Brain } from "lucide-react";
+import { getApiKey, setApiKey, clearApiKey } from "@/lib/api-key";
+import { getPref, setPref } from "@/lib/prefs";
+import { useToast } from "@/components/shared/Toast";
+import { MODEL_OPTIONS, type ModelOption } from "@/lib/types";
+import { loadLlmConfig, saveLlmConfig, presetConfig } from "@/lib/llm-config";
+import { LLM_PRESETS, type LLMConfig } from "@/lib/llm";
+
+const PREF_DEFAULT_MODEL = "default_model";
+const PREF_DEFAULT_SIZE = "default_size";
+
+interface Props {
+  open: boolean;
+  onClose: () => void;
+}
+
+export default function SettingsPanel({ open, onClose }: Props) {
+  const [key, setKey] = useState("");
+  const [show, setShow] = useState(false);
+  const [hasKey, setHasKey] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [defaultModel, setDefaultModel] = useState<ModelOption>(MODEL_OPTIONS[0]);
+  const [defaultSize, setDefaultSize] = useState("2k");
+  // LLM 配置
+  const [llmProvider, setLlmProvider] = useState<keyof typeof LLM_PRESETS>("deepseek");
+  const [llmApiKey, setLlmApiKey] = useState("");
+  const [llmEndpoint, setLlmEndpoint] = useState(LLM_PRESETS.deepseek.endpoint);
+  const [llmModel, setLlmModel] = useState(LLM_PRESETS.deepseek.model); // v4-flash（2026 默认）
+  const [llmConfigured, setLlmConfigured] = useState(false);
+  const toast = useToast();
+
+  useEffect(() => {
+    if (open) {
+      getApiKey()
+        .then((k) => {
+          setKey(k ?? "");
+          setHasKey(!!k);
+        })
+        .catch(console.error);
+      getPref(PREF_DEFAULT_MODEL).then((v) => {
+        if (v) {
+          const m = MODEL_OPTIONS.find((o) => o.id === v);
+          if (m) setDefaultModel(m);
+        }
+      }).catch(console.error);
+      getPref(PREF_DEFAULT_SIZE).then((v) => {
+        if (v) setDefaultSize(v);
+      }).catch(console.error);
+      loadLlmConfig().then((c) => {
+        if (c) {
+          setLlmProvider((c.provider as keyof typeof LLM_PRESETS) ?? "deepseek");
+          setLlmApiKey(c.apiKey);
+          setLlmEndpoint(c.endpoint);
+          setLlmModel(c.model);
+          setLlmConfigured(true);
+        } else {
+          setLlmConfigured(false);
+        }
+      }).catch(console.error);
+    }
+  }, [open]);
+
+  // 切换 provider 时自动填默认 endpoint / model
+  const onProviderChange = (p: keyof typeof LLM_PRESETS) => {
+    setLlmProvider(p);
+    if (p !== "custom" && LLM_PRESETS[p]) {
+      setLlmEndpoint(LLM_PRESETS[p].endpoint);
+      setLlmModel(LLM_PRESETS[p].model);
+    }
+  };
+
+  if (!open) return null;
+
+  const onSave = async () => {
+    if (!key.trim()) {
+      toast.warn("请输入 API Key");
+      return;
+    }
+    setSaving(true);
+    try {
+      await setApiKey(key.trim());
+      await setPref(PREF_DEFAULT_MODEL, defaultModel.id);
+      await setPref(PREF_DEFAULT_SIZE, defaultSize);
+      // LLM 配置（可选）：若填了 key 就保存
+      if (llmApiKey.trim()) {
+        const cfg: LLMConfig = llmProvider === "custom"
+          ? { provider: "custom", apiKey: llmApiKey.trim(), endpoint: llmEndpoint.trim(), model: llmModel.trim() }
+          : presetConfig(llmProvider, llmApiKey.trim());
+        await saveLlmConfig(cfg);
+        setLlmConfigured(true);
+      } else {
+        await saveLlmConfig(null);
+        setLlmConfigured(false);
+      }
+      toast.success("已保存");
+      setHasKey(true);
+      onClose();
+    } catch (e: any) {
+      toast.error(`保存失败：${e?.message ?? e}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onClear = async () => {
+    if (!window.confirm("确认清除 API Key？")) return;
+    try {
+      await clearApiKey();
+      setKey("");
+      setHasKey(false);
+      toast.success("已清除");
+    } catch (e: any) {
+      toast.error(`清除失败：${e?.message ?? e}`);
+    }
+  };
+
+  const onEnableDemo = async () => {
+    setSaving(true);
+    try {
+      const demoKey = `demo-${Date.now().toString(36)}`;
+      await setApiKey(demoKey);
+      await setPref(PREF_DEFAULT_MODEL, defaultModel.id);
+      await setPref(PREF_DEFAULT_SIZE, defaultSize);
+      toast.success("Demo 模式已启用");
+      setHasKey(true);
+      onClose();
+    } catch (e: any) {
+      toast.error(`启用失败：${e?.message ?? e}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      onClick={onClose}
+    >
+      <div
+        className="panel w-[520px] max-w-[90vw] p-6 max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">设置</h2>
+          <button onClick={onClose} className="btn-icon">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="space-y-5">
+          {/* 默认偏好 */}
+          <section>
+            <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">
+              默认偏好
+            </h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">默认模型</label>
+                <select
+                  value={defaultModel.id}
+                  onChange={(e) => {
+                    const m = MODEL_OPTIONS.find((o) => o.id === e.target.value);
+                    if (m) setDefaultModel(m);
+                  }}
+                  className="input"
+                >
+                  {MODEL_OPTIONS.filter((o) => o.id !== "CUSTOM").map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">默认尺寸</label>
+                <select
+                  value={defaultSize}
+                  onChange={(e) => setDefaultSize(e.target.value)}
+                  className="input"
+                >
+                  {SIZES_FOR_MODEL[defaultModel.id]?.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  )) ?? <option value="2k">2k</option>}
+                </select>
+              </div>
+            </div>
+          </section>
+
+          {/* API Key */}
+          <section>
+            <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">
+              API Key
+            </h3>
+            <div>
+              <label className="label flex items-center justify-between">
+                <span>即梦（豆包 Seedream）API Key</span>
+                {hasKey && (
+                  <span className="text-[10px] text-green-400">● 已配置</span>
+                )}
+              </label>
+              <div className="relative mt-1.5">
+                <input
+                  type={show ? "text" : "password"}
+                  value={key}
+                  onChange={(e) => setKey(e.target.value)}
+                  placeholder="ark-..."
+                  className="input pr-10"
+                  autoComplete="off"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShow((s) => !s)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary"
+                >
+                  {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="text-[11px] text-text-muted mt-1.5">
+                Key 通过本地加密存储在 Rust 端，不会上传到任何地方。在
+                <a
+                  className="text-accent hover:underline mx-1"
+                  href="https://console.volcengine.com/ark/region:cn-beijing/apiKey"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  火山方舟控制台
+                </a>
+                获取。
+              </p>
+            </div>
+          </section>
+
+          {/* Agent LLM（v0.2 新增） */}
+          <section>
+            <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <Brain className="w-3.5 h-3.5" />
+              Agent LLM（用于对话）
+              {llmConfigured && (
+                <span className="text-[10px] text-green-400 ml-1">● 已配置</span>
+              )}
+            </h3>
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="label">Provider</label>
+                  <select
+                    className="input"
+                    value={llmProvider}
+                    onChange={(e) => onProviderChange(e.target.value as keyof typeof LLM_PRESETS)}
+                  >
+                    <option value="deepseek">{LLM_PRESETS.deepseek.name}</option>
+                    <option value="doubao">{LLM_PRESETS.doubao.name}</option>
+                    <option value="openai">{LLM_PRESETS.openai.name}</option>
+                    <option value="custom">自定义 OpenAI 兼容</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Model</label>
+                  <input
+                    className="input"
+                    value={llmModel}
+                    onChange={(e) => setLlmModel(e.target.value)}
+                    placeholder="deepseek-chat"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="label">API Key</label>
+                <input
+                  type="password"
+                  className="input"
+                  value={llmApiKey}
+                  onChange={(e) => setLlmApiKey(e.target.value)}
+                  placeholder={llmProvider === "deepseek" ? "sk-..." : "API Key"}
+                  autoComplete="off"
+                />
+              </div>
+              {llmProvider === "custom" && (
+                <div>
+                  <label className="label">Endpoint URL</label>
+                  <input
+                    className="input"
+                    value={llmEndpoint}
+                    onChange={(e) => setLlmEndpoint(e.target.value)}
+                    placeholder="https://your-api.com/v1/chat/completions"
+                  />
+                </div>
+              )}
+              <p className="text-[11px] text-text-muted">
+                LLM 用于「对话」模式：Agent 会主动反问、推荐选项、调工具生成图。留空则退到规则路由（不真对话，只展示计划）。
+                {llmProvider === "deepseek" && (
+                  <> 在 <a className="text-accent hover:underline mx-1" href="https://platform.deepseek.com/" target="_blank" rel="noreferrer">DeepSeek 平台</a> 注册免费拿 Key。</>
+                )}
+              </p>
+            </div>
+          </section>
+
+          <div className="flex items-center justify-between pt-2 border-t border-border">
+            <button
+              onClick={onClear}
+              disabled={!hasKey}
+              className="text-xs text-text-muted hover:text-red-400 disabled:opacity-40"
+            >
+              清除 Key
+            </button>
+            <div className="flex gap-2">
+              {!hasKey && (
+                <button onClick={onEnableDemo} disabled={saving} className="btn">
+                  <FlaskConical className="w-3.5 h-3.5" />
+                  试用 Demo 模式
+                </button>
+              )}
+              <button onClick={onClose} className="btn">取消</button>
+              <button onClick={onSave} disabled={saving} className="btn btn-primary">
+                {saving ? "保存中..." : "保存"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const SIZES_FOR_MODEL: Record<string, string[]> = {
+  "doubao-seedream-5-0-pro-260628": ["1k", "1.5k", "2k"],
+  "doubao-seedream-5-0-lite-260128": ["2k", "3k", "4k"],
+  "doubao-seedream-4-5-251128": ["2k", "4k"],
+  "doubao-seedream-4-0-250828": ["1k", "2k", "4k"],
+};

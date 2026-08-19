@@ -1,0 +1,9 @@
+@echo off
+setlocal
+call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul
+if errorlevel 1 (
+  echo Failed to load vcvars64
+  exit /b 1
+)
+cd /d E:\Pi\Y-agent\src-tauri
+cargo %*

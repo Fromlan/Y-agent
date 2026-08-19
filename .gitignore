@@ -1,0 +1,51 @@
+# ===== Logs =====
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+y-agent-stdout.log
+y-agent-stderr.log
+
+# ===== Process / build runtime artifacts =====
+*.pid
+*.tmp
+.cache
+
+# ===== VS Build Tools installer (one-off) =====
+vs_BuildTools.exe
+
+# ===== Editor =====
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+
+# ===== Build outputs =====
+dist
+dist-ssr
+target
+node_modules
+
+# ===== TypeScript incremental build artifacts =====
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
+# ===== Tauri =====
+src-tauri/target
+src-tauri/gen/schemas
+src-tauri/WixTools
+
+# ===== Reference assets (kept locally, not in repo) =====
+# MiniMax Design 新手指南 — 1.3GB 教程素材,含单文件 > 100MB
+# (GitHub 硬限制 100MB/单文件)。本地保留,版本管理走网盘。
+doc/MiniMax Design - 新手指南/
+
+# ===== Local config & secrets =====
+.env
+.env.local
+*.local
+*.key
+
+# ===== OS =====
+Thumbs.db
