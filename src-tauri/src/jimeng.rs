@@ -457,6 +457,10 @@ pub enum StreamEvent {
         size: Option<String>,
         /// P5：下载到本地的绝对路径（24h 兜底），下载失败时 None
         local_path: Option<String>,
+        /// 本次请求约定的输出格式（来自 params.output_format；4.5/4.0 固定 None，
+        /// 5.0 系列 = Some("png"|"jpeg")）。partial 阶段 SSE 事件不带此字段，
+        /// 由 Rust 端从入参补齐，让前端 partial 入库时也能拿到权威值。
+        output_format: Option<String>,
     },
     /// 单图成功：base64（response_format=b64_json 或 partial_image 事件）
     PartialImageB64 {
@@ -465,6 +469,8 @@ pub enum StreamEvent {
         b64: String,
         /// P5：把 b64 写成本地 png 后的绝对路径，下载失败时 None
         local_path: Option<String>,
+        /// 同 PartialImage.output_format
+        output_format: Option<String>,
     },
     /// 单图失败（组图场景下某张失败）
     PartialFailed {
@@ -581,7 +587,13 @@ where
         while let Some(idx) = buffer.find("\n\n") {
             let raw = buffer[..idx].to_string();
             buffer = buffer[idx + 2..].to_string();
-            process_sse_event(&raw, &request_id, &mut on_event, &mut aborted_reason);
+            process_sse_event(
+                &raw,
+                &request_id,
+                params.output_format.clone(),
+                &mut on_event,
+                &mut aborted_reason,
+            );
             if aborted_reason.is_some() {
                 break;
             }
@@ -592,7 +604,13 @@ where
     }
     // 处理末尾残留（不带空行的事件）
     if !buffer.trim().is_empty() && aborted_reason.is_none() {
-        process_sse_event(&buffer, &request_id, &mut on_event, &mut aborted_reason);
+        process_sse_event(
+            &buffer,
+            &request_id,
+            params.output_format.clone(),
+            &mut on_event,
+            &mut aborted_reason,
+        );
     }
 
     if let Some(reason) = aborted_reason {
@@ -606,9 +624,12 @@ where
 }
 
 /// 解析单个 SSE 事件（已剥掉空行）。可能产生 0~2 个 StreamEvent（partial_image 可能再带 partial_succeeded）。
+/// `output_format` 是从入参 `params.output_format` 透传过来的：SSE partial 事件本身不带此字段，
+/// 但 partial 资产入库时需要它。4.5/4.0 固定 None，5.0 系列通常为 Some。
 fn process_sse_event<F>(
     raw: &str,
     request_id: &str,
+    output_format: Option<String>,
     on_event: &mut F,
     aborted_reason: &mut Option<String>,
 ) where
@@ -645,6 +666,7 @@ fn process_sse_event<F>(
                     url,
                     size: parsed.size,
                     local_path: None, // 由 commands 包装层异步下载后回填
+                    output_format: output_format.clone(),
                 });
             } else if let Some(b64) = parsed.b64_json {
                 on_event(StreamEvent::PartialImageB64 {
@@ -652,6 +674,7 @@ fn process_sse_event<F>(
                     index: parsed.partial_image_index.unwrap_or(0),
                     b64,
                     local_path: None,
+                    output_format: output_format.clone(),
                 });
             } else {
                 log::warn!("partial_succeeded but no url/b64");
@@ -665,6 +688,7 @@ fn process_sse_event<F>(
                     index: parsed.partial_image_index.unwrap_or(0),
                     b64,
                     local_path: None,
+                    output_format: output_format.clone(),
                 });
             }
         }
@@ -726,6 +750,7 @@ where
             url: url.clone(),
             size: Some("1024x1024".into()),
             local_path: None,
+            output_format: params.output_format.clone(),
         });
     }
     on_event(StreamEvent::Completed {

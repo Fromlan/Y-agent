@@ -28,13 +28,16 @@ export type AgentEvent =
 
 export interface PendingPlan {
   prompt: string;
-  modelId: string;
-  modelName: string;
+  /** P7：执行时用 PromptBar 选定的模型。留作兼容老数据：onConfirmPlan 时如果 plan.modelId 存在仍用之。 */
+  modelId?: string;
+  modelName?: string;
   size: string;
   /** 规则计划生成时需要携带的参考图（dataURL） */
   image?: string[];
   /** 组图数量（>1 时生成时传 sequential/maxImages） */
   maxImages?: number;
+  /** P7：Skill 推荐但与 PromptBar 不同时的提示（仅展示，不影响执行） */
+  suggestedModelName?: string;
 }
 
 export interface ChatMessage {

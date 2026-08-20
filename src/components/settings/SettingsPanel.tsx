@@ -1,17 +1,17 @@
-import { useEffect, useState } from "react";
-import { X, Eye, EyeOff, FlaskConical, Brain, Activity, Palette } from "lucide-react";
+﻿import { useEffect, useState } from "react";
+import { X, Eye, EyeOff, FlaskConical, Brain, Activity, Palette, Database } from "lucide-react";
 import { getApiKey, setApiKey, clearApiKey } from "@/lib/api-key";
 import { getPref, setPref } from "@/lib/prefs";
 import { useToast } from "@/components/shared/Toast";
-import { MODEL_OPTIONS, type ModelOption } from "@/lib/types";
+import { MODEL_OPTIONS, modelCapabilities, type ModelOption } from "@/lib/types";
 import { loadLlmConfig, saveLlmConfig, presetConfig } from "@/lib/llm-config";
 import { LLM_PRESETS, type LLMConfig } from "@/lib/llm";
 import { confirmDialog } from "@/lib/dialog";
 import { APP_NAME, APP_VERSION, BUILD_TAG } from "@/lib/app-info";
 import { listProjects } from "@/lib/projects";
-import { listAssets } from "@/lib/assets";
+import { listAssets, backfillOutputFormat } from "@/lib/assets";
 import ThemePicker from "@/components/settings/ThemePicker";
-import type { Asset, Project } from "@/lib/types";
+import type { Asset } from "@/lib/types";
 
 const PREF_DEFAULT_MODEL = "default_model";
 const PREF_DEFAULT_SIZE = "default_size";
@@ -41,6 +41,14 @@ export default function SettingsPanel({ open, onClose }: Props) {
     totalTokens: number;
     assets: number;
   } | null>(null);
+  // P6+：回填 outputFormat 报告
+  const [backfillBusy, setBackfillBusy] = useState(false);
+  const [backfillReport, setBackfillReport] = useState<{
+    scanned: number;
+    missing: number;
+    updated: number;
+    skipped: number;
+  } | null>(null);
   const toast = useToast();
 
   useEffect(() => {
@@ -53,7 +61,7 @@ export default function SettingsPanel({ open, onClose }: Props) {
         .catch(console.error);
       // P5：聚合近 24h 用量（按 asset.createdAt 过滤）
       const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-      Promise.all([listProjects(), Promise.resolve([] as Project[])])
+      Promise.all([listProjects()])
         .then(async ([projects]) => {
           const allAssets: Asset[] = (
             await Promise.all(
@@ -181,6 +189,31 @@ export default function SettingsPanel({ open, onClose }: Props) {
     }
   };
 
+  // P6+：回填老资产的 payload.outputFormat 字段
+  //  - 修复 P4 之前入库的资产（详情页"格式"显示 "—"）
+  //  - 推断规则：transparent → png；URL 末尾 .png/.jpg/.jpeg → 对应格式
+  //  - 已有字段会跳过，URL 没扩展名（火山方舟 jfs/tos 内部路径）也会跳过
+  const onBackfillOutputFormat = async () => {
+    if (backfillBusy) return;
+    const ok = await confirmDialog(
+      "扫描所有项目，缺 outputFormat 的资产按 URL 扩展名回填。已有字段不动。是否继续？",
+      { kind: "info", okLabel: "开始回填" }
+    );
+    if (!ok) return;
+    setBackfillBusy(true);
+    try {
+      const r = await backfillOutputFormat();
+      setBackfillReport(r);
+      toast.success(
+        `回填完成：扫描 ${r.scanned} 条，缺字段 ${r.missing} 条，已更新 ${r.updated} 条，跳过 ${r.skipped} 条`
+      );
+    } catch (e: any) {
+      toast.error(`回填失败：${e?.message ?? e}`);
+    } finally {
+      setBackfillBusy(false);
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-bg-overlay"
@@ -240,7 +273,7 @@ export default function SettingsPanel({ open, onClose }: Props) {
                   onChange={(e) => setDefaultSize(e.target.value)}
                   className="input"
                 >
-                  {SIZES_FOR_MODEL[defaultModel.id]?.map((s) => (
+                  {(modelCapabilities(defaultModel.id).sizePresets ?? [])?.map((s) => (
                     <option key={s} value={s}>{s}</option>
                   )) ?? <option value="2k">2k</option>}
                 </select>
@@ -399,6 +432,34 @@ export default function SettingsPanel({ open, onClose }: Props) {
             </div>
           </section>
 
+          {/* 数据维护（P6+：outputFormat 回填） */}
+          <section>
+            <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <Database className="w-3.5 h-3.5" />
+              数据维护
+            </h3>
+            <div className="space-y-2">
+              <button
+                onClick={onBackfillOutputFormat}
+                disabled={backfillBusy}
+                className="btn"
+              >
+                {backfillBusy ? "回填中…" : "回填 outputFormat 字段"}
+              </button>
+              {backfillReport && (
+                <div className="text-[11px] text-text-muted bg-bg-elev border border-border rounded-md p-2 space-y-0.5">
+                  <div>扫描：<span className="text-text-primary tabular-nums">{backfillReport.scanned}</span> 条</div>
+                  <div>缺字段：<span className="text-text-primary tabular-nums">{backfillReport.missing}</span> 条</div>
+                  <div>已更新：<span className="text-accent-success tabular-nums">{backfillReport.updated}</span> 条</div>
+                  <div>跳过（已有 / 无法推断）：<span className="text-text-primary tabular-nums">{backfillReport.skipped}</span> 条</div>
+                </div>
+              )}
+              <p className="text-[10px] text-text-muted/70">
+                一次性操作，修复 P4 之前入库的资产"格式"为空。火山方舟 URL 不带扩展名时会跳过（属正常）。
+              </p>
+            </div>
+          </section>
+
           <div className="flex items-center justify-between pt-2 border-t border-border">
             <button
               onClick={onClear}
@@ -442,9 +503,3 @@ export default function SettingsPanel({ open, onClose }: Props) {
   );
 }
 
-const SIZES_FOR_MODEL: Record<string, string[]> = {
-  "doubao-seedream-5-0-pro-260628": ["1k", "1.5k", "2k"],
-  "doubao-seedream-5-0-lite-260128": ["2k", "3k", "4k"],
-  "doubao-seedream-4-5-251128": ["2k", "4k"],
-  "doubao-seedream-4-0-250828": ["1k", "2k", "4k"],
-};

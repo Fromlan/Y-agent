@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+﻿import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   X,
   Copy,
@@ -22,13 +22,47 @@ import {
   Frame,
   Brush,
   Send,
+  Focus,
+  Grid2X2,
+  Image,
 } from "lucide-react";
 import type { Asset, GeneratedImage } from "@/lib/types";
 import { assetMainImage, flatAssetImages, imageInput } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
 import { generateImage as jimengGenerate, explainError } from "@/lib/jimeng";
+import { buildAssetPayload, resolveFormat } from "@/lib/asset-payload";
+import { resolveImageUrl } from "@/lib/image-resolver";
 import SafeImage from "@/components/shared/SafeImage";
 import { createAsset } from "@/lib/assets";
+import { pickVisibleLayers } from "@/lib/layer-view";
+import LayerCompositeStage from "@/components/workspace/LayerCompositeStage";
+
+/**
+ * 从 GeneratedImage 推断下载扩展名
+ * - 优先看 payload.outputFormat（P4 起的权威字段）
+ * - 缺失时看 data URL / URL 末尾扩展名
+ * - 兜底 png
+ */
+function detectImageExt(img: GeneratedImage, payloadFormat: "png" | "jpeg" | undefined): string {
+  if (payloadFormat === "jpeg") return "jpg";
+  if (payloadFormat === "png") return "png";
+  if (img.outputFormat === "jpeg") return "jpg";
+  if (img.outputFormat === "png") return "png";
+  const src = img.localPath ?? img.url ?? "";
+  // data URL
+  if (src.startsWith("data:image/jpeg") || src.startsWith("data:image/jpg")) return "jpg";
+  if (src.startsWith("data:image/png")) return "png";
+  if (src.startsWith("data:image/webp")) return "webp";
+  if (src.startsWith("data:image/")) return "png";
+  // 末尾扩展名
+  const m = src.split("?")[0].split("#")[0].match(/\.(jpe?g|png|webp)(\.|$)/i);
+  if (m) {
+    const e = m[1].toLowerCase();
+    if (e === "jpg" || e === "jpeg") return "jpg";
+    return e;
+  }
+  return "png";
+}
 
 interface Props {
   asset: Asset;
@@ -86,11 +120,19 @@ export default function AssetDetailDialog({
       setEditBusy(true);
       const t0 = Date.now();
       try {
+        // 重要：jimeng API 的 image[] 只接受 http(s)/data: URL；本地绝对路径（assetMainImage 在 P5 后优先 localPath）会被 API 拒。先 resolveImageUrl 把它转成 dataURL 再传。
+        const apiImage = await resolveImageUrl(srcInput);
         const resp = await jimengGenerate({
           model: "doubao-seedream-5-0-pro-260628",
           prompt: builtPrompt,
-          image: [srcInput],
+          image: [apiImage],
           size: asset.size || "2k",
+        });
+        // 局部编辑用 5.0 Pro 同步，resp.output_format 一定有值（5.0 Pro 顶层字段）
+        const actualFormat = resolveFormat({
+          respFormat: (resp as { output_format?: string }).output_format,
+          reqFormat: undefined,
+          modelId: "doubao-seedream-5-0-pro-260628",
         });
         const newAsset = await createAsset({
           projectId: asset.projectId,
@@ -101,18 +143,23 @@ export default function AssetDetailDialog({
           refCount: 1,
           costMs: Date.now() - t0,
           isLayerDecomposition: false,
-          payload: {
-            urls: resp.images.map((i) => i.url),
-            usage: resp.usage,
-            // P3：保留溯源信息（编辑历史）
-            parentAssetId: asset.id,
-            bbox,
-            // P5：把 Rust 端下好的本地路径一起持久化（24h 兜底）。
-            // 后端 create_asset 也会兜底：万一这里漏了或下载失败，会自动重拉。
-            localPaths: resp.images
-              .map((i) => i.localPath)
-              .filter((p): p is string => !!p),
-          },
+          payload: buildAssetPayload(
+            {
+              urls: resp.images.map((i) => i.url),
+              usage: resp.usage,
+              // 局部编辑场景不是 transparent 背景模式（源图可能是 jpeg）
+              isTransparent: false,
+              // P3：保留溯源信息（编辑历史）
+              parentAssetId: asset.id,
+              bbox,
+              // P5：把 Rust 端下好的本地路径一起持久化（24h 兜底）。
+              // 后端 create_asset 也会兜底：万一这里漏了或下载失败，会自动重拉。
+              localPaths: resp.images
+                .map((i) => i.localPath)
+                .filter((p): p is string => !!p),
+            },
+            actualFormat
+          ),
         });
         onAssetCreated?.(newAsset);
         toast.success("局部编辑完成，已入库到资产库");
@@ -139,6 +186,41 @@ export default function AssetDetailDialog({
       return next;
     });
   };
+  // 合成视图：solo / 选中 / 视图模式（仅 isLayerDecomposition 生效）
+  const [viewMode, setViewMode] = useState<"composite" | "single">("composite");
+  const [soloLayerIdx, setSoloLayerIdx] = useState<number | null>(null);
+  const [selectedLayerIdx, setSelectedLayerIdx] = useState<number | null>(null);
+  const toggleSolo = (i: number) => {
+    setSoloLayerIdx((prev) => (prev === i ? null : i));
+  };
+  const showAllLayers = () => {
+    setHiddenLayers(new Set());
+    setSoloLayerIdx(null);
+  };
+  // 派生：当前合成画布上应该渲染的图层
+  const visibleLayers = useMemo(
+    () => pickVisibleLayers(images, hiddenLayers, soloLayerIdx),
+    [images, hiddenLayers, soloLayerIdx]
+  );
+  // 派生：底图层（zIndex=0），用于解析画布像素
+  const baseLayer = useMemo(
+    () => images.find((img) => (img.zIndex ?? 0) === 0) ?? images[0],
+    [images]
+  );
+  // 派生：当前选中的图层对象（用于 bbox 描边）
+  const selectedLayer = useMemo(
+    () => (selectedLayerIdx === null ? null : images[selectedLayerIdx] ?? null),
+    [images, selectedLayerIdx]
+  );
+  // 行点击：合成模式 → 高亮 bbox；单图层模式 → 切到该图层
+  const onLayerRowClick = (i: number) => {
+    if (viewMode === "single" || !asset.isLayerDecomposition) {
+      setIdx(i);
+    } else {
+      setSelectedLayerIdx(i);
+    }
+  };
+
   // 如果当前 idx 被隐藏，自动跳到第一个可见图层
   const visibleIdx = hiddenLayers.has(idx)
     ? images.findIndex((_, k) => !hiddenLayers.has(k))
@@ -152,21 +234,43 @@ export default function AssetDetailDialog({
     setConfirmDel(false);
     setPromptCopied(false);
     setHiddenLayers(new Set());
-  }, [asset.id]);
+    setSoloLayerIdx(null);
+    setSelectedLayerIdx(null);
+    // 图层资产默认走合成；非图层资产强制走单图层（防御性，正常不会进入该分支）
+    setViewMode(asset.isLayerDecomposition ? "composite" : "single");
+  }, [asset.id, asset.isLayerDecomposition]);
+
+  // 视图模式变化时清掉选中高亮（合成 <-> 单图层 概念不同）
+  useEffect(() => {
+    setSelectedLayerIdx(null);
+  }, [viewMode]);
 
   // 键盘快捷键
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
-      else if (e.key === "ArrowLeft" && images.length > 1) {
-        setIdx((i) => (i - 1 + images.length) % images.length);
-      } else if (e.key === "ArrowRight" && images.length > 1) {
-        setIdx((i) => (i + 1) % images.length);
+      // 合成视图下禁用 ←/→（没有"当前图层"概念）
+      else if (
+        (e.key === "ArrowLeft" || e.key === "ArrowRight") &&
+        images.length > 1 &&
+        viewMode === "single"
+      ) {
+        setIdx((i) => {
+          // 用 images.length 配合 idx 自身 + hiddenLayers 计算下一个可见位置
+          // （避免在 handler 里引用 images 整个数组触发 exhaustive-deps）
+          if (images.length === 0) return i;
+          const step = e.key === "ArrowLeft" ? -1 : 1;
+          for (let n = 1; n <= images.length; n++) {
+            const next = (((i + step * n) % images.length) + images.length) % images.length;
+            if (!hiddenLayers.has(next)) return next;
+          }
+          return i;
+        });
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [images.length, onClose]);
+  }, [images.length, onClose, viewMode, hiddenLayers]);
 
   const onCopy = () => {
     // 父组件 onCopyPrompt 已统一处理 clipboard + toast，这里只维护按钮状态。
@@ -177,7 +281,7 @@ export default function AssetDetailDialog({
 
   const onDownloadCur = () => {
     if (!cur?.url) return;
-    const ext = cur.url.startsWith("data:") ? "png" : "png";
+    const ext = detectImageExt(cur, asset.payload.outputFormat);
     const label = cur.name ? `-${cur.name.replace(/\s+/g, "_")}` : `-${effectiveIdx + 1}`;
     onDownload(cur.url, `y-agent-${asset.id}${label}.${ext}`);
   };
@@ -189,7 +293,8 @@ export default function AssetDetailDialog({
       const img = images[i];
       if (img.url) {
         const label = img.name ? `-${img.name.replace(/\s+/g, "_")}` : `-${i + 1}`;
-        onDownload(img.url, `y-agent-${asset.id}${label}.png`);
+        const ext = detectImageExt(img, asset.payload.outputFormat);
+        onDownload(img.url, `y-agent-${asset.id}${label}.${ext}`);
       }
       await new Promise((r) => setTimeout(r, 250));
     }
@@ -228,7 +333,9 @@ export default function AssetDetailDialog({
             )}
             {images.length > 1 && (
               <span className="text-text-muted">
-                {idx + 1} / {images.length}
+                {asset.isLayerDecomposition && viewMode === "composite"
+                  ? `${visibleLayers.length} / ${images.length} 合成`
+                  : `${idx + 1} / ${images.length}`}
               </span>
             )}
           </div>
@@ -244,7 +351,35 @@ export default function AssetDetailDialog({
         {/* 主体：左预览 + 右元数据 */}
         <div className="flex-1 flex min-h-0">
           {/* 左侧：统一尺寸预览区 */}
-          <div className="flex-1 min-w-0 bg-bg-base flex flex-col">
+          <div className="flex-1 min-w-0 bg-bg-base flex flex-col relative">
+            {/* 合成/单图层 视图模式切换（仅图层资产） */}
+            {asset.isLayerDecomposition && images.length > 1 && !editMode && (
+              <div className="absolute top-2 left-2 z-20 flex items-center gap-0.5
+                bg-bg-panel/90 backdrop-blur rounded p-0.5 text-xs border border-border">
+                <button
+                  onClick={() => setViewMode("composite")}
+                  className={`px-2 py-1 rounded flex items-center gap-1 transition-colors ${
+                    viewMode === "composite"
+                      ? "bg-accent text-text-inverse"
+                      : "text-text-secondary hover:bg-bg-elev"
+                  }`}
+                  title="合成视图：所有可见图层按 zIndex 叠放"
+                >
+                  <Grid2X2 className="w-3 h-3" /> 合成
+                </button>
+                <button
+                  onClick={() => setViewMode("single")}
+                  className={`px-2 py-1 rounded flex items-center gap-1 transition-colors ${
+                    viewMode === "single"
+                      ? "bg-accent text-text-inverse"
+                      : "text-text-secondary hover:bg-bg-elev"
+                  }`}
+                  title="单图层视图：一张一张翻看"
+                >
+                  <Image className="w-3 h-3" /> 单图层
+                </button>
+              </div>
+            )}
             <div className="flex-1 flex items-center justify-center p-4 min-h-0">
               {editMode && cur && (cur.localPath || cur.url) ? (
                 <EditStage
@@ -252,6 +387,12 @@ export default function AssetDetailDialog({
                   onBboxChange={(b) => {
                     editBboxRef.current = b;
                   }}
+                />
+              ) : asset.isLayerDecomposition && viewMode === "composite" ? (
+                <LayerCompositeStage
+                  layers={visibleLayers}
+                  baseLayer={baseLayer}
+                  selectedLayer={selectedLayer}
                 />
               ) : (
                 <PreviewStage
@@ -274,11 +415,17 @@ export default function AssetDetailDialog({
                 }}
               />
             )}
-            {/* 多图切换控件 */}
+            {/* 多图切换控件（单图层模式 / 合成模式都显示，但合成模式淡化） */}
             {images.length > 1 && (
-              <div className="flex items-center justify-center gap-2 p-2 border-t border-border bg-bg-panel flex-shrink-0">
+              <div className={`flex items-center justify-center gap-2 p-2 border-t border-border bg-bg-panel flex-shrink-0 ${
+                asset.isLayerDecomposition && viewMode === "composite" ? "opacity-60" : ""
+              }`}>
                 <button
-                  onClick={() =>
+                  onClick={() => {
+                    if (asset.isLayerDecomposition && viewMode === "composite") {
+                      // 合成模式：点切换按钮 = 切到单图层 + 跳到当前选中图层的上一个
+                      setViewMode("single");
+                    }
                     setIdx((i) => {
                       // 跳过隐藏的图层
                       const visible = images
@@ -289,8 +436,8 @@ export default function AssetDetailDialog({
                       const nextPos =
                         (curPos - 1 + visible.length) % visible.length;
                       return visible[nextPos];
-                    })
-                  }
+                    });
+                  }}
                   className="btn-icon"
                   title="上一张（←）"
                 >
@@ -302,12 +449,21 @@ export default function AssetDetailDialog({
                     return (
                       <button
                         key={i}
-                        onClick={() => !isHidden && setIdx(i)}
+                        onClick={() => {
+                          if (isHidden) return;
+                          // 合成模式：点缩略图 = 切到单图层 + 定位
+                          if (asset.isLayerDecomposition && viewMode === "composite") {
+                            setViewMode("single");
+                          }
+                          setIdx(i);
+                        }}
                         className={`relative flex-shrink-0 w-10 h-10 rounded overflow-hidden border-2 transition-colors
                           ${isHidden ? "border-border opacity-40" : i === idx ? "border-accent" : "border-border hover:border-border-strong"}
                         `}
                         title={
-                          isHidden
+                          asset.isLayerDecomposition && viewMode === "composite"
+                            ? `${img.name ?? `图层 ${i + 1}`}（点击切到单图层视图）`
+                            : isHidden
                             ? `${img.name ?? `图 ${i + 1}`}（已隐藏，点亮显示）`
                             : img.name ?? `图 ${i + 1}`
                         }
@@ -329,7 +485,10 @@ export default function AssetDetailDialog({
                   })}
                 </div>
                 <button
-                  onClick={() =>
+                  onClick={() => {
+                    if (asset.isLayerDecomposition && viewMode === "composite") {
+                      setViewMode("single");
+                    }
                     setIdx((i) => {
                       const visible = images
                         .map((_, k) => k)
@@ -338,8 +497,8 @@ export default function AssetDetailDialog({
                       const curPos = visible.indexOf(i);
                       const nextPos = (curPos + 1) % visible.length;
                       return visible[nextPos];
-                    })
-                  }
+                    });
+                  }}
                   className="btn-icon"
                   title="下一张（→）"
                 >
@@ -442,26 +601,45 @@ export default function AssetDetailDialog({
                   <h3 className="text-[10px] text-text-muted uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
                     <Layers className="w-3 h-3" /> 图层列表
                     <span className="text-text-muted/60 normal-case">
-                      ({images.filter((_, k) => !hiddenLayers.has(k)).length} / {images.length} 可见)
+                      ({visibleLayers.length} / {images.length} 可见{soloLayerIdx !== null ? " · Solo" : ""})
                     </span>
                   </h3>
                   <div className="space-y-1">
                     {images.map((img, i) => {
                       const isHidden = hiddenLayers.has(i);
+                      const isSoloed = soloLayerIdx === i;
                       const isBase = (img.zIndex ?? 0) === 0;
-                      const bb = img.boundingBox?.absolute;
+                      // 优先显示 normalized（5.0 Pro 官方"任意尺寸重建"字段，
+                      // aspect-independent）；缺失时 fallback 到 absolute（老数据）。
+                      const bbNorm = img.boundingBox?.normalized;
+                      const bbAbs = img.boundingBox?.absolute;
+                      const isSelected = selectedLayerIdx === i;
                       return (
                         <div
                           key={i}
-                          className={`flex items-start gap-2 p-2 rounded border transition-colors
-                            ${isHidden ? "border-border bg-bg-base opacity-60" : "border-border bg-bg-elev hover:border-border-strong"}
+                          onClick={() => onLayerRowClick(i)}
+                          className={`flex items-start gap-2 p-2 rounded border transition-colors cursor-pointer
+                            ${isSelected ? "border-l-2 border-l-accent border-border-strong" : ""}
+                            ${isHidden
+                              ? "border-border bg-bg-base opacity-60"
+                              : isSoloed
+                              ? "border-accent/60 bg-accent/10"
+                              : "border-border bg-bg-elev hover:border-border-strong"}
                           `}
                         >
                           <SafeImage
                             src={imageInput(img)}
                             alt=""
-                            className="w-12 h-12 object-cover rounded flex-shrink-0 cursor-pointer"
-                            onClick={() => !isHidden && setIdx(i)}
+                            className="w-12 h-12 object-cover rounded flex-shrink-0"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (isHidden) return;
+                              // 缩略图点击 = 切到单图层并定位（与底条行为一致）
+                              if (asset.isLayerDecomposition && viewMode === "composite") {
+                                setViewMode("single");
+                              }
+                              setIdx(i);
+                            }}
                           />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5 text-xs">
@@ -483,20 +661,32 @@ export default function AssetDetailDialog({
                                 {img.description}
                               </p>
                             )}
-                            {bb && (
+                            {(bbNorm || bbAbs) && (
                               <p className="text-[10px] text-text-muted/70 mt-0.5 font-mono flex items-center gap-1">
                                 <Frame className="w-2.5 h-2.5" />
-                                [{bb.join(", ")}]
+                                {bbNorm
+                                  ? `[${bbNorm.join(", ")}] (0-1000)`
+                                  : `[${bbAbs!.join(", ")}] (px)`}
                               </p>
                             )}
                           </div>
-                          <div className="flex flex-col gap-0.5 flex-shrink-0">
+                          <div
+                            className="flex flex-col gap-0.5 flex-shrink-0"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <button
                               onClick={() => toggleLayerVisible(i)}
                               className="btn-icon p-1"
-                              title={isHidden ? "显示" : "隐藏"}
+                              title={isHidden ? "显示此图层" : "隐藏此图层"}
                             >
                               {isHidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                            </button>
+                            <button
+                              onClick={() => toggleSolo(i)}
+                              className={`btn-icon p-1 ${isSoloed ? "!bg-accent/30 !text-accent" : ""}`}
+                              title={isSoloed ? "取消 Solo" : "Solo：只看此图层"}
+                            >
+                              <Focus className="w-3.5 h-3.5" />
                             </button>
                             <button
                               onClick={() => img.url && onDownload(img.url, `y-agent-${asset.id}-${img.name ?? i + 1}.png`)}
@@ -511,6 +701,16 @@ export default function AssetDetailDialog({
                       );
                     })}
                   </div>
+                  {/* 全部显示按钮：仅当有图层被隐藏或处于 solo 模式时显示 */}
+                  {(hiddenLayers.size > 0 || soloLayerIdx !== null) && (
+                    <button
+                      onClick={showAllLayers}
+                      className="mt-2 w-full btn text-xs h-7"
+                      title="清除所有隐藏 / Solo，恢复显示所有图层"
+                    >
+                      <Eye className="w-3.5 h-3.5" /> 全部显示
+                    </button>
+                  )}
                 </section>
               )}
 

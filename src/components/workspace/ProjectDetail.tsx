@@ -9,7 +9,7 @@ import { useToast } from "@/components/shared/Toast";
 import { usePrompt } from "@/components/shared/PromptProvider";
 import { confirmDialog } from "@/lib/dialog";
 import { useProjectBootstrap } from "@/lib/hooks/useProjectBootstrap";
-import { MODEL_OPTIONS, type Asset } from "@/lib/types";
+import { MODEL_OPTIONS, type Asset, type ModelOption } from "@/lib/types";
 import {
   clearSession as dbClearSession,
   assetIds as dbAssetIds,
@@ -28,7 +28,7 @@ import { route } from "@/lib/agent-router";
 import { loadLlmConfig } from "@/lib/llm-config";
 import { llmChatLoop, type LLMConfig, type ChatMessage as LLMChatMessage } from "@/lib/llm";
 import { AGENT_TOOLS, renderSystemPrompt } from "@/lib/agent-tools";
-import { executePlan, executePlanStream, learnFromGeneration } from "@/lib/agent-flow";
+import { executePlanStream, learnFromGeneration } from "@/lib/agent-flow";
 import { log } from "@/lib/logger";
 
 interface Props {
@@ -375,6 +375,8 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
         content: renderSystemPrompt({
           styleHints: agentCtx?.styleHints,
           recentModels: agentCtx?.recentModels,
+          // P7：把 PromptBar 选定的模型注入 system prompt，作为 LLM 默认生图模型的强偏好
+          userModelName: model.name,
         }),
       },
       ...messages
@@ -459,12 +461,22 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
             if (!prompt) {
               return { result: "错误：prompt 不能为空" };
             }
+            // P7：模型选择以 PromptBar 为准。LLM 传 model 是受控 hint（系统 prompt 已说明：
+            // 显式要求切换时才传），所以保留 args.model 覆盖；没传就 fallback 到 PromptBar。
             const useModel = String(args.model ?? model.id);
             const useSize = String(args.size ?? size);
             const refRequired = !!args.ref_required;
-            const maxImages = Math.max(1, Math.min(4, Number(args.max_images) || 1));
+            let maxImages = Math.max(1, Math.min(4, Number(args.max_images) || 1));
             lastModel = useModel;
             const useModelOpt = MODEL_OPTIONS.find((m) => m.id === useModel) ?? model;
+            // P7：能力位预检——若当前模型不支持 maxImages>1 igroupGeneration，主动降级到 1
+            // 并给用户一个 toast 提示；不静默篡改 LLM 决策
+            if (maxImages > 1 && !useModelOpt.capabilities.groupGeneration) {
+              toast.warn(
+                `${useModelOpt.name} 不支持 N 张组图，已自动改为 1 张。要生成 ${maxImages} 张变体请先在 PromptBar 切到 5.0 Lite。`
+              );
+              maxImages = 1;
+            }
 
             if (refRequired && refs.length === 0) {
               return { result: "用户当前没有提供参考图。请先向用户说明需要参考图，或改用不依赖参考图的方案。" };
@@ -477,20 +489,44 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
               args: { prompt, size: useSize, refRequired, maxImages },
               status: "running",
             });
+            // P7：对话模式改走 executePlanStream（流式）。5.0 Pro 自动 fallback 到非流式。
+            // - partial 回调：用户能看到"已就绪 N/M"
+            // - onCompleted 后拿到主资产（含最终 costMs / isDemo）
             try {
-              const result = await executePlan(
+              const streamPlan: Parameters<typeof executePlanStream>[0] = {
+                prompt,
+                modelId: useModel,
+                modelName: useModelOpt.name,
+                size: useSize,
+                images: refs.length > 0 ? refs : undefined,
+              };
+              if (maxImages > 1) streamPlan.maxImages = maxImages;
+              const result = await executePlanStream(
+                streamPlan,
+                currentProject.id,
                 {
-                  prompt,
-                  modelId: useModel,
-                  modelName: useModelOpt.name,
-                  size: useSize,
-                  images: refs.length > 0 ? refs : undefined,
-                  maxImages: maxImages > 1 ? maxImages : undefined,
-                },
-                currentProject.id
+                  onPartialAsset: (asset) => {
+                    // partial 资产已经由 executePlanStream 内部入库；这里只 push 到 toolAssets
+                    // 让 chat 消息也展示这张图（避免在 chat 流里漏图）。
+                    toolAssets.push(asset);
+                  },
+                  onPartialFailed: (info) => {
+                    // 单张失败也展示给用户，不让 LLM 误以为全部成功
+                    appendToolCall({
+                      id: crypto.randomUUID(),
+                      toolName: "jimeng.generate_image.partial_failed",
+                      args: { index: info.index, code: info.code, message: info.message },
+                      status: "failed",
+                      result: `第 ${(info.index ?? -1) + 1} 张生成失败：${info.message ?? info.code ?? "未知"}`,
+                    });
+                  },
+                }
               );
               isDemo = result.isDemo;
-              toolAssets.push(result.asset);
+              // 主资产已在 stream 完成时入库；如果 plan.maxImages == 1 的话它和 partial[0] 是同一张；
+              // 已经 push 过的话不要再 push 避免重复。
+              const alreadyPushed = toolAssets.some((a) => a.id === result.asset.id);
+              if (!alreadyPushed) toolAssets.push(result.asset);
               const imgs = result.asset.payload.urls.map((u) => ({ url: u }));
               updateToolCall(tcId, {
                 status: "done",
@@ -633,14 +669,23 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
 
     const agentId = crypto.randomUUID();
     const planGroupCount = decision.groupCount ?? groupCount;
-    const plan = {
+    // P7：plan 不再存 modelId/modelName（避免和 PromptBar 双源），执行时统一读 model state。
+    // 兼容老数据：onConfirmPlan 里如果 plan.modelId 存在仍能用（fallback）。
+    const plan: {
+      prompt: string;
+      size: string;
+      image?: string[];
+      maxImages?: number;
+      suggestedModelName?: string;
+    } = {
       prompt: decision.prompt,
-      modelId: decision.model.id,
-      modelName: decision.model.name,
       size: decision.size ?? size,
       image: refs.length > 0 ? [...refs] : undefined,
       maxImages: planGroupCount > 1 ? planGroupCount : undefined,
     };
+    if (decision.suggestedModelName) {
+      plan.suggestedModelName = decision.suggestedModelName;
+    }
     const skillLog = {
       matchedSkill: decision.skillName,
       triggerType: decision.triggerType,
@@ -684,23 +729,44 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     setGenerating(true);
     const events: AgentEvent[] = [];
     const off = agentEvents.on((e) => events.push(e));
+    // P7：模型以 PromptBar state 为准（plan 不再存 modelId）。
+    // 兼容老数据：plan.modelId 若存在仍允许使用，避免老 chat 历史出 bug。
+    const useModelId = plan.modelId ?? model.id;
+    const useModelOpt: ModelOption =
+      MODEL_OPTIONS.find((m) => m.id === useModelId) ?? model;
+    const useModelName = useModelOpt.name;
+    // P7：能力位预检——maxImages 与 groupGeneration 不匹配时降级 + toast
+    let useMaxImages = plan.maxImages;
+    if (useMaxImages && useMaxImages > 1 && !useModelOpt.capabilities.groupGeneration) {
+      toast.warn(
+        `${useModelName} 不支持 ${useMaxImages} 张组图，已自动改为 1 张。要 N 张变体请在 PromptBar 切到 5.0 Lite。`
+      );
+      useMaxImages = 1;
+    }
     try {
       agentEvents.emit({
         type: "tool_start",
         toolName: "jimeng.generate_image",
-        model: plan.modelId,
-        args: { prompt: plan.prompt, size: plan.size, maxImages: plan.maxImages },
+        model: useModelId,
+        args: { prompt: plan.prompt, size: plan.size, maxImages: useMaxImages },
       });
-      const result = await executePlan(
+      // P7：规则降级也走 executePlanStream（5.0 Pro 自动 fallback 到非流式）。
+      // 组图场景：partial 资产独立入库；主资产是 onCompleted 返回的（首张 partial 复用）。
+      const result = await executePlanStream(
         {
           prompt: plan.prompt,
-          modelId: plan.modelId,
-          modelName: plan.modelName,
+          modelId: useModelId,
+          modelName: useModelName,
           size: plan.size,
-          images: plan.image,
-          maxImages: plan.maxImages && plan.maxImages > 1 ? plan.maxImages : undefined,
+          ...(plan.image ? { images: plan.image } : {}),
+          ...(useMaxImages && useMaxImages > 1 ? { maxImages: useMaxImages } : {}),
         },
-        currentProject.id
+        currentProject.id,
+        {
+          onPartialFailed: (info) => {
+            toast.warn(`第 ${(info.index ?? -1) + 1} 张生成失败：${info.message ?? info.code ?? "未知"}`);
+          },
+        }
       );
       const { asset, costMs, isDemo } = result;
       agentEvents.emit({
@@ -719,7 +785,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
                 pendingPlan: undefined,
                 assets: [asset],
                 skillLog: m.skillLog
-                  ? { ...m.skillLog, costMs, isDemo, modelUsed: plan.modelId, modelName: plan.modelName }
+                  ? { ...m.skillLog, costMs, isDemo, modelUsed: useModelId, modelName: useModelName }
                   : undefined,
                 events: [...events, { type: "turn_end", assistantMessage: { id: msgId, role: "agent", content: "", createdAt: Date.now() } }],
               }
@@ -732,14 +798,14 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
         pendingPlan: null,
         assetIds: [asset.id],
         skillLog: msg.skillLog
-          ? { ...msg.skillLog, costMs, isDemo, modelUsed: plan.modelId, modelName: plan.modelName }
+          ? { ...msg.skillLog, costMs, isDemo, modelUsed: useModelId, modelName: useModelName }
           : undefined,
       });
       // 自动学习
       const userMsgs = messages.filter((m) => m.role === "user");
       const lastUserText = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : "";
       if (agentCtx && lastUserText) {
-        await learnFromGeneration(agentCtx, lastUserText, plan.modelId, currentProject.id, setAgentCtx);
+        await learnFromGeneration(agentCtx, lastUserText, useModelId, currentProject.id, setAgentCtx);
       }
       reload({ silent: true });
     } catch (e: any) {
@@ -830,6 +896,8 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
             generating={generating}
             onConfirmPlan={onConfirmPlan}
             onCancelPlan={onCancelPlan}
+            // P7：让 PlanCard 展示"将使用 X 模型"
+            currentModelName={model.name}
           />
         ) : tab === "tools" ? (
           <ToolsTab

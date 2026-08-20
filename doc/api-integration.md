@@ -254,7 +254,54 @@ UI 配合：
 
 响应里每张图带 `zIndex` / `name` / `description`，UI 可以按 zIndex 叠放展示。
 
-**当前 Y-agent 状态**：Schema / Rust 端都支持了，但前端 AssetBoard 还没做图层 UI（计划在 M3 一起做）。
+**当前 Y-agent 状态**：Schema / Rust 端都支持了；`AssetDetailDialog` 已实现 PS 风格的合成视图与图层面板（见下）。
+
+#### 1.7.0 图层信息持久化核对（M3 补丁）
+
+**全链路无损入库**——所有图层信息都已经持久化在 `assets.payload` 字段，足够 1:1 重建原图：
+
+```
+5.0 Pro API
+  └─ resp.data[].{z_index, name, description, size, output_format,
+                  bounding_box.{absolute, normalized}, url, isBase64}
+       │
+       ▼ Rust 解析 (src-tauri/src/jimeng.rs:227-252)
+GeneratedImage (Rust struct, jimeng.rs:264-291)
+  #[serde(rename_all = "camelCase")]
+  -> { url, isBase64, zIndex, name, description, size,
+       outputFormat, boundingBox, error, localPath }
+       │
+       ▼ serde JSON → Tauri IPC
+GeneratedImage (TS src/lib/types.ts:199-215)
+       │
+       ▼ (src/lib/agent-flow.ts:215 layers: resp.images)
+buildAssetPayload({ layers, layerLocalPaths, ... })
+       │
+       ▼ Tauri create_asset (commands.rs:492-554)
+  - serde_json::to_string(&params.payload)  ---> SQLite assets.payload TEXT
+       │
+       ▼ Tauri list_assets → row_to_asset
+  - serde_json::from_str(&s)  ---> 前端收到 asset.payload.layers[i] (完整)
+```
+
+**CI 证据**：`src/lib/asset-payload.test.ts` 的 round-trip 用例断言
+所有图层字段（含 `boundingBox.normalized`）在 JSON 序列化 → 反序列化
+后无任何字段丢失。
+
+**推荐字段**：`boundingBox.normalized`（0-1000）aspect-independent，
+是 5.0 Pro 官方"任意尺寸重建"方案。`LayerCompositeStage` 优先使用，
+老数据（缺 normalized）由 `layerRectNormalized` 自动 fallback 铺满。
+
+#### 1.7.1 前端合成视图（M3 升级）
+
+- `src/components/workspace/LayerCompositeStage.tsx`：把可见图层按 zIndex 升序叠放在一个固定比例的画布上。**定位用 `boundingBox.normalized` (0-1 浮点 × base 像素)**，aspect-independent，5.0 Pro 官方推荐；底图容器 aspect 用 onLoad 校正后的 base 自然像素（API 报告的 `size` 偶尔不准，作为初值兜底）。
+- `src/lib/layer-view.ts`：
+  - `pickVisibleLayers(layers, hidden, solo)` 派生"应在画布上渲染的图层"——`solo` 优先于 `hidden`
+  - `layerRectNormalized(layer)` 解析 `boundingBox.normalized` 为 [0,1] 浮点矩形（缺/越界/反向 → 铺满）
+  - 上述两个纯函数有 11 个 Vitest 用例（`layer-view.test.ts`）覆盖
+- `AssetDetailDialog` 顶部加「合成 / 单图层」切换 pill，默认走合成；右侧图层面板新增 Solo（`Focus` 图标，互斥）和"全部显示"按钮（仅在有隐藏/solo 时出现）；图层面板行优先显示 `boundingBox.normalized` 数值（`[l, t, r, b] (0-1000)`），缺失时回退显示 `boundingBox.absolute` 像素值。
+- 合成视图下：键盘 ←/→ 禁用（没有"当前图层"概念）；缩略图条 opacity-60 淡化，hover 提示"点击切到单图层视图"。
+- 选中图层（点击行）会在合成画布上画 accent 描边 + 名称 tag；行点击在单图层模式切 idx，在合成模式置 selectedLayerIdx。
 
 ### 1.8 流式输出（P1，5.0 Lite / 4.5 / 4.0 支持，5.0 Pro 不支持）
 
@@ -354,7 +401,31 @@ Y-agent 集成：
 **错误码**：
 - `400 invalid parameter` → transparent + jpeg 互斥（前端已防）
 - `model not support` → 切到 5.0 Pro
+- `transparent background requires a png` → 输入图不是真 PNG，或 PNG 不带至少 1 个透明像素。
+  Y-agent 已在 `runTool` 阶段对入参 PNG data URL 左上角补 1 个透明像素
+  （`@/lib/image-alpha-patch.ensureHasTransparentPixel`）绕过该校验；该错误码仅在
+  源图不是真 PNG（例如 .png 扩展名但实际是 JPEG 字节）时出现。
 - 其它错误码同普通生图
+
+**入参补丁（Y-agent 自动处理）**：
+
+即梦 5.0 Pro `background: transparent` 接口对入参图有一个隐性前置校验：必须是**有 alpha 通道、且至少 1 个 alpha < 255 像素**的 PNG。普通由 5.0 Lite/Pro 出的不透明 PNG 也会被拒。
+
+Y-agent 策略：**不教育用户去手动改图**，而是在 `runTool.buildGenParams` 对 `image[]` 中每张 PNG data URL 自动走 `ensureHasTransparentPixel`：
+
+- 用浏览器 `<img>` + `OffscreenCanvas`（不支持时回退 HTMLCanvasElement）解码
+- 把 (0,0) 像素的 alpha 置 0，重新打包成 PNG data URL
+- 原图字节 0 改动；只有"飞过 API 的那份"被改
+- 失败 / 非 PNG / CORS 拒 → 静默回退原 URL，让后端 `explain_error` 兜底
+- 缓存按 sourceUrl，避免重选同一图重复 decode
+
+**MIME 推断改进**（同步）：
+
+`commands::read_image_data_url` 从"按扩展名决定 MIME"升级为 **magic bytes 优先、扩展名兜底**：
+- 命中 PNG/JPEG/WebP/GIF/SVG/XML → 用真实 MIME
+- 都不识别 → 回退到原扩展名逻辑（保持 BMP/TIFF/ICO 等老格式兼容）
+
+避免"以 `.png` 结尾但实际是 JPEG 字节"被错标为 `image/png` 发给 API。
 
 **Skill 模板**：
 - `src/skills/builtin/icon-pack-transparent/SKILL.md`（图标合集 + 透明背景）
@@ -516,17 +587,25 @@ SkillPicker UI（`SkillPicker.tsx`）按 group 分组渲染：
   - 任何阶段报错都走 `onProgress('error', ...)` 并 reject，UI 负责 catch + toast
   - `ToolProgress { phase, message, partialCount?, totalCount? }` 进度回调
 
-#### 透明工具的 PNG 校验
+#### 透明工具的入参处理
 
-5.0 Pro 的 `background: transparent` **严格要求输入图是 PNG**（不是 JPEG）。`ToolsTab` 检测当前选中的资产：
+5.0 Pro 的 `background: transparent` 接口对入参图有两个隐性约束：① 必须是 PNG（不是 JPEG/WebP）；② PNG 必须有至少 1 个 alpha < 255 的透明像素。
+
+`ToolsTab` 检测当前选中的资产：
 
 - 是 JPEG → 禁用提交按钮，黄色提示条告诉用户怎么解决（"去批量组图用输出格式 PNG 重出一张" / "用局部编辑把这张图转一道再回来选"）
 - `isAssetJpeg(asset)` 优先看 `payload.outputFormat`，回退看 URL 扩展名（兼容老数据 / 外部导入）
 
-`commands::explain_error` 也加了对应的中文提示：
+不透明 PNG 不会被前端预检拦截（前端没有扫像素的能力，且这会引入额外 IO）；Y-agent 走
+**入参补丁**自动处理：见 § 1.10「入参补丁（Y-agent 自动处理）」。简单说，`runTool` 阶段
+会把每张 PNG data URL 左上角 1 像素改成透明再发，原图不动。
+
+`commands::explain_error` 兜底文案（仅在 API 仍拒时显示，通常说明源图不是真 PNG）：
 
 ```
-"5.0 Pro 的「背景透明」要求输入图必须是 PNG 格式。请在「去背」工具里改用 PNG 来源的资产，或先用「局部编辑」把图重出为 PNG 格式。"
+"5.0 Pro 的「背景透明」要求输入图是带至少一个透明像素的 PNG（不透明 PNG、JPEG、WebP 都会被拒）。
+通常 Y-agent 已经自动处理了左上角 1 像素，若仍报此错，多半是源图不是真 PNG
+（例如 .png 扩展名但实际是 JPEG 字节），请换一张真 PNG 再试。"
 ```
 
 匹配关键字：`transparent background requires a png`（API 实际报错）。
@@ -611,6 +690,63 @@ Prompt 格式（5.0 Pro 文档要求）：
 - 想 AI 主动反问 → 用 OpenAI 或 DeepSeek
 - 想省钱 + 接受"瞎猜" → 用 DeepSeek
 - 中文专业术语准确度 → 豆包
+
+---
+
+## Part 2.5 P7 · 对话模式模型决策权
+
+> 让 PromptBar 里选定的模型成为对话生图的**权威**，LLM 不再私自切换；规则路由也不再覆盖用户选择。
+
+### 2.5.1 设计原则
+
+- **模型决策权归属**：用户在 PromptBar（底部输入框）选定的 `model` 是单一真相源
+- **LLM 行为**：`jimeng_generate_image` 工具的 `model` 字段是**受控 hint**
+  - 默认不要传（system prompt 注入 `userModelName` 作为强偏好）
+  - 仅当用户消息里**显式要求**（"用 4.5 重新画"/"换成 Pro 做图层拆分"）时才传
+  - 传了就尊重（受控升级路径）
+- **规则路由**：`agent-router.ts::pickModel` 不再覆盖用户当前模型
+  - Skill 推荐降级为 UI 提示（`RouteDecision.suggestedModelName`）
+  - PlanCard 在用户当前模型 ≠ Skill 推荐时显示"💡 Skill 推荐 X 更合适"提示
+- **能力位预检**：`runLlmTurn` 和 `onConfirmPlan` 在执行前用 `modelCapabilities()` 检查
+  - 例：用户选 5.0 Pro + `max_images > 1` → 自动降级到 1 + toast 提示
+  - 例：用户选 Lite + 想要图层拆分 → LLM 应主动反问"切 Pro 吗？"
+
+### 2.5.2 数据流
+
+```
+用户切到 5.0 Pro
+  ↓
+useProjectBootstrap.setModel(proModel)
+  ↓
+PromptBar.onChange → ProjectDetail state 同步
+  ↓
+runLlmTurn 调用：
+  - renderSystemPrompt({ userModelName: proModel.name })  // 注入 system prompt
+  - 工具回调：args.model ?? proModel.id  // 受控 hint
+  - 能力位预检：useModelOpt.capabilities.groupGeneration
+  - executePlanStream（流式 partial 入库）
+  ↓
+onConfirmPlan 调用：
+  - useModelId = plan.modelId ?? model.id  // 兼容老 chat 数据
+  - 能力位预检
+  - executePlanStream
+```
+
+### 2.5.3 关键代码改动
+
+| 文件 | 改动 |
+|---|---|
+| `src/lib/agent-tools.ts` | `jimeng_generate_image.model` 字段 description 改为"通常不要传"；`renderSystemPrompt` 新增 `userModelName` 参数 |
+| `src/lib/agent-router.ts` | `pickModel` 不覆盖用户；新增 `skillModelSuggestion` + `RouteDecision.suggestedModelName` |
+| `src/lib/agent-event.ts` | `PendingPlan.modelId/modelName` 改 optional；新增 `suggestedModelName` |
+| `src/components/workspace/ProjectDetail.tsx` | `runLlmTurn` 改走 `executePlanStream` + 能力位预检；`runRulePlan` plan 不再存 modelId；`onConfirmPlan` 用当前 model；`renderSystemPrompt` 调用注入 `userModelName` |
+| `src/components/workspace/ChatMessageList.tsx` | PlanCard 展示 currentModelName + suggestedModelName 提示；按钮 generating 时禁用；ToolCallCard 工具名中文化 |
+
+### 2.5.4 兼容性
+
+- 老 chat 历史里的 `pendingPlan.modelId/modelName` 仍可读（字段变 optional），`onConfirmPlan` 有 `plan.modelId ?? model.id` 的 fallback
+- 老 chat 历史里没有 `suggestedModelName`，UI 静默不显示
+- LLM 传了未知的 `model`（不在枚举里）→ fallback 到 PromptBar + 静默 log
 
 ---
 
