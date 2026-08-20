@@ -34,6 +34,7 @@ pub fn run() {
             commands::set_api_key,
             commands::clear_api_key,
             commands::jimeng_generate,
+            commands::jimeng_generate_stream,
             commands::list_projects,
             commands::create_project,
             commands::delete_project,

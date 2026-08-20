@@ -4,7 +4,7 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 const KEY_KV: &str = "jimeng_api_key";
 
@@ -137,6 +137,84 @@ pub async fn jimeng_generate(
             message: e.message,
         }),
     })
+}
+
+// ---------- P1: 流式生成 ----------
+
+/// 启动一次流式生图，立即返回 request_id。后台 task 通过 Tauri event
+/// `jimeng://stream` 持续推 StreamEvent，payload 里的 request_id 用来匹配本次请求。
+///
+/// 流事件类型（payload.type）：
+/// - partial_image     → URL 单图完成
+/// - partial_image_b64 → b64 单图完成
+/// - partial_failed    → 单图失败
+/// - completed         → 全部完成（带 usage）
+/// - aborted           → 流中断（InternalServiceError / 网络断开 / 顶层 error）
+#[tauri::command]
+pub async fn jimeng_generate_stream(
+    params: JsGenerateParams,
+    state: State<'_, Mutex<AppState>>,
+    app: AppHandle,
+) -> Result<String, String> {
+    let (api_key, p) = {
+        let s = state.lock().map_err(map_err)?;
+        let enc = s.storage.get_kv(KEY_KV).map_err(map_err)?;
+        let key = enc
+            .ok_or_else(|| "API Key 未设置".to_string())
+            .and_then(|e| s.cipher.decrypt(&e).map_err(map_err))?;
+        (
+            key,
+            GenerateImageParams {
+                model: params.model,
+                prompt: params.prompt,
+                image: params.image,
+                size: params.size,
+                sequential_image_generation: params.sequential,
+                sequential_image_generation_options: params
+                    .max_images
+                    .map(|n| jimeng::SequentialOptions { max_images: n }),
+                response_format: Some("url".to_string()),
+                layer_decomposition: params.layer_decomposition,
+                watermark: params.watermark,
+                output_format: params.output_format,
+                tools: params
+                    .tools
+                    .map(|v| v.into_iter().map(|t| jimeng::ToolSpec { kind: t }).collect()),
+                optimize_prompt_options: params
+                    .optimize_prompt_mode
+                    .map(|m| jimeng::OptimizePromptOptions { mode: Some(m) }),
+                background: params.background,
+            },
+        )
+    };
+
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let app_for_emit = app.clone();
+    let rid_for_task = request_id.clone();
+    // 后台 task：跑流式循环，每收到一个事件就 emit 到前端
+    tokio::spawn(async move {
+        let app_inside = app_for_emit.clone();
+        let result = jimeng::generate_stream(
+            &api_key,
+            p,
+            rid_for_task.clone(),
+            move |event| {
+                let _ = app_inside.emit("jimeng://stream", &event);
+            },
+        )
+        .await;
+        if let Err(e) = result {
+            // 兜底：stream 函数本身没 emit Aborted 时（理论上不应发生）
+            let _ = app_for_emit.emit(
+                "jimeng://stream",
+                &jimeng::StreamEvent::Aborted {
+                    request_id: rid_for_task.clone(),
+                    reason: e.to_string(),
+                },
+            );
+        }
+    });
+    Ok(request_id)
 }
 
 // ---------- Projects ----------

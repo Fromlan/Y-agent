@@ -1,4 +1,5 @@
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 
 const ENDPOINT: &str = "https://ark.cn-beijing.volces.com/api/v3/images/generations";
@@ -360,4 +361,296 @@ pub async fn generate(
         usage: parsed.usage,
         error: top_error,
     })
+}
+
+// ============================================================================
+// P1：流式输出（SSE）
+// ============================================================================
+
+/// 流式事件。前端通过 Tauri event `jimeng://stream` 接收，按 `request_id` 过滤。
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum StreamEvent {
+    /// 单图成功：URL 直链
+    PartialImage {
+        request_id: String,
+        index: i32,
+        url: String,
+        size: Option<String>,
+    },
+    /// 单图成功：base64（response_format=b64_json 或 partial_image 事件）
+    PartialImageB64 {
+        request_id: String,
+        index: i32,
+        b64: String,
+    },
+    /// 单图失败（组图场景下某张失败）
+    PartialFailed {
+        request_id: String,
+        index: Option<i32>,
+        code: Option<String>,
+        message: Option<String>,
+    },
+    /// 全部完成，附带最终 usage
+    Completed {
+        request_id: String,
+        usage: Option<Usage>,
+    },
+    /// 流中断（InternalServiceError / 网络断开 / 顶层 error）
+    Aborted {
+        request_id: String,
+        reason: String,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+struct SseEvent {
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    // partial_image 字段
+    url: Option<String>,
+    size: Option<String>,
+    #[serde(rename = "b64_json")]
+    b64_json: Option<String>,
+    #[serde(rename = "partial_image_index")]
+    partial_image_index: Option<i32>,
+    // error 字段
+    error: Option<ApiError>,
+    // completed 字段
+    usage: Option<Usage>,
+}
+
+/// 流式调用即梦 API。每收到一个事件就调 `on_event`，由调用方负责转发（典型用法：Tauri emit）。
+/// `InternalServiceError` 一出现就中断流并 emit `Aborted`。
+pub async fn generate_stream<F>(
+    api_key: &str,
+    params: GenerateImageParams,
+    request_id: String,
+    mut on_event: F,
+) -> anyhow::Result<()>
+where
+    F: FnMut(StreamEvent) + Send + 'static,
+{
+    validate_params(&params).map_err(anyhow::Error::msg)?;
+    // P1：5.0 Pro 不支持流式（文档：Pro 仅 lite/4.5/4.0 支持 stream）
+    if params.model == "doubao-seedream-5-0-pro-260628" {
+        return Err(anyhow::anyhow!(
+            "InvalidParameter: 5.0 Pro 不支持流式输出（stream），请改用 5.0 Lite / 4.5 / 4.0"
+        ));
+    }
+    if is_demo_key(api_key) {
+        return demo_stream(&params, &request_id, on_event).await;
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(300)) // 流式超时放宽
+        .build()?;
+
+    let mut body = serde_json::to_value(&params)?;
+    if body.get("watermark").is_none() {
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert("watermark".into(), serde_json::Value::Bool(false));
+        }
+    }
+    // P1：流式开关。Y-agent 永远显式发 stream:true 触发增量事件。
+    body.as_object_mut()
+        .map(|o| o.insert("stream".into(), serde_json::Value::Bool(true)));
+    log::info!(
+        "jimeng stream: model={}, request_id={}, prompt_len={}",
+        params.model,
+        request_id,
+        params.prompt.len()
+    );
+
+    let resp = client
+        .post(ENDPOINT)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .header("Accept", "text/event-stream")
+        .json(&body)
+        .send()
+        .await?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        on_event(StreamEvent::Aborted {
+            request_id: request_id.clone(),
+            reason: format!("API {}: {}", status.as_u16(), text),
+        });
+        anyhow::bail!("API {}: {}", status.as_u16(), text);
+    }
+
+    let mut stream = resp.bytes_stream();
+    let mut buffer = String::new();
+    let mut aborted_reason: Option<String> = None;
+
+    while let Some(chunk_res) = stream.next().await {
+        let chunk = match chunk_res {
+            Ok(c) => c,
+            Err(e) => {
+                aborted_reason = Some(format!("network error: {e}"));
+                break;
+            }
+        };
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+        // 按 "\n\n" 切分完整事件
+        while let Some(idx) = buffer.find("\n\n") {
+            let raw = buffer[..idx].to_string();
+            buffer = buffer[idx + 2..].to_string();
+            process_sse_event(&raw, &request_id, &mut on_event, &mut aborted_reason);
+            if aborted_reason.is_some() {
+                break;
+            }
+        }
+        if aborted_reason.is_some() {
+            break;
+        }
+    }
+    // 处理末尾残留（不带空行的事件）
+    if !buffer.trim().is_empty() && aborted_reason.is_none() {
+        process_sse_event(&buffer, &request_id, &mut on_event, &mut aborted_reason);
+    }
+
+    if let Some(reason) = aborted_reason {
+        on_event(StreamEvent::Aborted {
+            request_id: request_id.clone(),
+            reason: reason.clone(),
+        });
+        anyhow::bail!("stream aborted: {reason}");
+    }
+    Ok(())
+}
+
+/// 解析单个 SSE 事件（已剥掉空行）。可能产生 0~2 个 StreamEvent（partial_image 可能再带 partial_succeeded）。
+fn process_sse_event<F>(
+    raw: &str,
+    request_id: &str,
+    on_event: &mut F,
+    aborted_reason: &mut Option<String>,
+) where
+    F: FnMut(StreamEvent),
+{
+    // 拼接所有 data: 行
+    let mut data = String::new();
+    for line in raw.lines() {
+        if let Some(rest) = line.strip_prefix("data:") {
+            if !data.is_empty() {
+                data.push('\n');
+            }
+            data.push_str(rest.trim_start());
+        }
+        // 其它行（event: / id: / retry: / :注释）忽略
+    }
+    if data.is_empty() || data == "[DONE]" {
+        return;
+    }
+    let parsed: SseEvent = match serde_json::from_str(&data) {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!("sse parse failed: {e}; data: {data}");
+            return;
+        }
+    };
+    let kind = parsed.kind.as_deref().unwrap_or("");
+    match kind {
+        "image_generation.partial_succeeded" => {
+            if let Some(url) = parsed.url {
+                on_event(StreamEvent::PartialImage {
+                    request_id: request_id.to_string(),
+                    index: parsed.partial_image_index.unwrap_or(0),
+                    url,
+                    size: parsed.size,
+                });
+            } else if let Some(b64) = parsed.b64_json {
+                on_event(StreamEvent::PartialImageB64 {
+                    request_id: request_id.to_string(),
+                    index: parsed.partial_image_index.unwrap_or(0),
+                    b64,
+                });
+            } else {
+                log::warn!("partial_succeeded but no url/b64");
+            }
+        }
+        "image_generation.partial_image" => {
+            // 纯 b64_json partial（OpenAI 协议风格）
+            if let Some(b64) = parsed.b64_json {
+                on_event(StreamEvent::PartialImageB64 {
+                    request_id: request_id.to_string(),
+                    index: parsed.partial_image_index.unwrap_or(0),
+                    b64,
+                });
+            }
+        }
+        "image_generation.partial_failed" => {
+            let code = parsed.error.as_ref().and_then(|e| e.code.clone());
+            let message = parsed.error.as_ref().and_then(|e| e.message.clone());
+            on_event(StreamEvent::PartialFailed {
+                request_id: request_id.to_string(),
+                index: parsed.partial_image_index,
+                code: code.clone(),
+                message,
+            });
+            // 文档：InternalServiceError 直接中断
+            let is_internal = code
+                .as_deref()
+                .map(|c| c.eq_ignore_ascii_case("InternalServiceError"))
+                .unwrap_or(false);
+            if is_internal {
+                *aborted_reason = Some("InternalServiceError: server error".into());
+            }
+        }
+        "image_generation.completed" => {
+            on_event(StreamEvent::Completed {
+                request_id: request_id.to_string(),
+                usage: parsed.usage,
+            });
+        }
+        _ => log::debug!("sse: unhandled kind: {kind}"),
+    }
+}
+
+/// Demo 模式：每 200ms 推一张图，4 张后 emit Completed。同一份占位 SVG（与 generate() 一致）。
+async fn demo_stream<F>(
+    params: &GenerateImageParams,
+    request_id: &str,
+    mut on_event: F,
+) -> anyhow::Result<()>
+where
+    F: FnMut(StreamEvent),
+{
+    let count = params
+        .sequential_image_generation_options
+        .as_ref()
+        .map(|o| o.max_images.min(4) as i32)
+        .unwrap_or(1);
+    let label = if params.prompt.chars().count() > 60 {
+        let mut s: String = params.prompt.chars().take(60).collect();
+        s.push('…');
+        s
+    } else {
+        params.prompt.clone()
+    };
+    let url = make_demo_svg(&label);
+    for i in 0..count {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        on_event(StreamEvent::PartialImage {
+            request_id: request_id.to_string(),
+            index: i,
+            url: url.clone(),
+            size: Some("1024x1024".into()),
+        });
+    }
+    on_event(StreamEvent::Completed {
+        request_id: request_id.to_string(),
+        usage: Some(Usage {
+            generated_images: Some(count),
+            input_images: None,
+            output_tokens: None,
+            total_tokens: None,
+            tool_usage: None,
+        }),
+    });
+    Ok(())
 }
