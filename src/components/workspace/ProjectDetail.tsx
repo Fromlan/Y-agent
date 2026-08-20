@@ -726,6 +726,10 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
                       }
                     }
                   }}
+                  onAssetCreated={() => {
+                    // P3：局部编辑后入库的资产走 reload（保持排序与筛选一致）
+                    reload({ silent: true });
+                  }}
                 />
               )}
             </div>

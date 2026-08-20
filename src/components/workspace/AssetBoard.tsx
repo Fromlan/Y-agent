@@ -17,6 +17,8 @@ interface Props {
   onDownload: (url: string, filename: string) => void;
   onDelete: (id: string) => void;
   onBatchDelete: (ids: string[]) => void | Promise<void>;
+  /** P3：局部编辑生成新资产时通知父组件刷新列表 */
+  onAssetCreated?: (asset: Asset) => void;
 }
 
 /**
@@ -33,6 +35,7 @@ export default function AssetBoard({
   onDownload,
   onDelete,
   onBatchDelete,
+  onAssetCreated,
 }: Props) {
   const toast = useToast();
 
@@ -236,6 +239,7 @@ export default function AssetBoard({
           onCopyPrompt={onCopyPrompt}
           onDownload={onDownload}
           onDelete={onDelete}
+          onAssetCreated={onAssetCreated}
         />
       )}
     </div>

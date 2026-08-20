@@ -219,6 +219,10 @@ export interface AssetPayload {
   layers?: GeneratedImage[];
   /** P0：API 顶层 usage 入库，便于"今日生成 N 张"统计 */
   usage?: Usage;
+  /** P3：局部编辑溯源——哪个资产编辑出来的 */
+  parentAssetId?: string;
+  /** P3：局部编辑时画的 bbox（图像素坐标，x1 y1 x2 y2） */
+  bbox?: { x1: number; y1: number; x2: number; y2: number };
 }
 
 export interface Asset {

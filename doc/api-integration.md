@@ -276,6 +276,39 @@ Y-agent 集成：
 - 验证 `5.0 Pro + stream` 互斥（在 `jimeng::validate_params` 后加 stream 专属 check）
 - 5.0 Pro + stream 走 Rust 端直接报错：`InvalidParameter: 5.0 Pro 不支持流式输出（stream），请改用 5.0 Lite / 4.5 / 4.0`
 
+### 1.9 局部编辑（P3，5.0 Pro 专属）
+
+```typescript
+// 前端：在资产详情页"局部编辑"按钮
+// 1. 用户画 bbox（图像素坐标，屏幕自动换算）
+// 2. 拼 prompt: `${userPrompt} <bbox>${x1} ${y1} ${x2} ${y2}</bbox>`
+// 3. 调 jimengGenerate({ model: "doubao-seedream-5-0-pro-260628", prompt, image: [srcUrl] })
+// 4. createAsset 新资产，payload.parentAssetId = 源图 id，payload.bbox = 框
+```
+
+Rust 端：
+- 与普通生图同走 `jimeng::generate`，无新 command
+- `validate_params` 不拦截 `<bbox>` 标签（是 prompt 内容，Y-agent 拼好后传进来）
+- bbox 合法性由前端校验（x1<x2, y1<y2, 在图内），Rust 端不重复检查
+
+Y-agent 集成：
+- 资产详情页 `AssetDetailDialog.tsx` 多了「局部编辑」按钮（仅 5.0 Pro 资产可见）
+- 进入编辑模式：`EditStage` 显示原图 + 覆盖层，用户拖鼠标画框
+- `EditBar` 底部输入 prompt + 提交/取消，Enter 也提交
+- 提交后调 `jimengGenerate` → `createAsset` → `onAssetCreated` 通知 ProjectDetail reload
+- 新资产 `payload.parentAssetId` 记录源图；`payload.bbox` 记录画的框
+
+**与流式输出互斥**：
+- 5.0 Pro 走非流式（局部编辑调用 `jimengGenerate` 而非 `jimengGenerateStream`）
+- 这与 P1 的 5.0 Pro 自动 fallback 到 `executePlan` 一致
+
+**错误码**：
+- `400 bbox out of range` / `400 invalid bbox` → 框坐标异常（理论上前端已校验，服务端兜底）
+- `model_not_support` → 切到 5.0 Pro
+- 其它错误码同普通生图
+
+**Skill 模板**：`src/skills/builtin/local-edit-bbox/SKILL.md`（用户描述"局部编辑/改图/框内改"时自动触发）
+
 ---
 
 ## Part 2. LLM API（OpenAI 兼容协议）

@@ -20,10 +20,14 @@ import {
   Eye,
   EyeOff,
   Frame,
+  Brush,
+  Send,
 } from "lucide-react";
 import type { Asset, GeneratedImage } from "@/lib/types";
 import { assetMainImage, flatAssetImages } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
+import { generateImage as jimengGenerate, explainError } from "@/lib/jimeng";
+import { createAsset } from "@/lib/assets";
 
 interface Props {
   asset: Asset;
@@ -31,6 +35,8 @@ interface Props {
   onCopyPrompt: (text: string) => void;
   onDownload: (url: string, filename: string) => void;
   onDelete: (id: string) => void;
+  /** P3：局部编辑后生成新资产，通知上层刷新列表 */
+  onAssetCreated?: (asset: Asset) => void;
 }
 
 /**
@@ -46,12 +52,76 @@ export default function AssetDetailDialog({
   onCopyPrompt,
   onDownload,
   onDelete,
+  onAssetCreated,
 }: Props) {
   const images = flatAssetImages(asset);
   const [idx, setIdx] = useState(0);
   const toast = useToast();
   const [confirmDel, setConfirmDel] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
+  // P3：局部编辑模式（画 bbox + 5.0 Pro 重新出图）
+  const [editMode, setEditMode] = useState(false);
+  const [editPrompt, setEditPrompt] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
+  const editBboxRef = useRef<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+
+  // 5.0 Pro 局部编辑：把用户画的 bbox 拼成 <bbox>x1 y1 x2 y2</bbox>，源图作 image 输入
+  const doLocalEdit = useCallback(
+    async (srcImg: GeneratedImage) => {
+      if (!srcImg.url) return;
+      const bbox = editBboxRef.current;
+      if (!bbox) {
+        toast.warn("请先在图上画一个矩形框");
+        return;
+      }
+      const userPrompt = editPrompt.trim();
+      if (!userPrompt) {
+        toast.warn("请输入修改指令（例如：在框内加一束花）");
+        return;
+      }
+      // 文档示例：把 bbox 写进 prompt，<bbox>x1 y1 x2 y2</bbox>，坐标是源图像素
+      const builtPrompt = `${userPrompt} <bbox>${bbox.x1} ${bbox.y1} ${bbox.x2} ${bbox.y2}</bbox>`;
+      setEditBusy(true);
+      const t0 = Date.now();
+      try {
+        const resp = await jimengGenerate({
+          model: "doubao-seedream-5-0-pro-260628",
+          prompt: builtPrompt,
+          image: [srcImg.url],
+          size: asset.size || "2k",
+        });
+        const newAsset = await createAsset({
+          projectId: asset.projectId,
+          prompt: builtPrompt,
+          model: "doubao-seedream-5-0-pro-260628",
+          modelName: "Seedream 5.0 Pro（局部编辑）",
+          size: asset.size || "2k",
+          refCount: 1,
+          costMs: Date.now() - t0,
+          isLayerDecomposition: false,
+          payload: {
+            urls: resp.images.map((i) => i.url),
+            usage: resp.usage,
+            // P3：保留溯源信息（编辑历史）
+            parentAssetId: asset.id,
+            bbox,
+          },
+        });
+        onAssetCreated?.(newAsset);
+        toast.success("局部编辑完成，已入库到资产库");
+        setEditMode(false);
+        setEditPrompt("");
+        editBboxRef.current = null;
+      } catch (e: any) {
+        const raw = e?.message ?? String(e);
+        const friendly = await explainError(raw).catch(() => raw);
+        toast.error(friendly);
+      } finally {
+        setEditBusy(false);
+      }
+    },
+    [asset.id, asset.projectId, asset.size, editPrompt, onAssetCreated, toast]
+  );
   // P2：图层可见性。被隐藏的图层不参与左右切换、不显示在主预览。
   const [hiddenLayers, setHiddenLayers] = useState<Set<number>>(new Set());
   const toggleLayerVisible = (i: number) => {
@@ -169,11 +239,34 @@ export default function AssetDetailDialog({
           {/* 左侧：统一尺寸预览区 */}
           <div className="flex-1 min-w-0 bg-bg-base flex flex-col">
             <div className="flex-1 flex items-center justify-center p-4 min-h-0">
-              <PreviewStage
-                image={cur}
-                fallbackUrl={assetMainImage(asset)}
-              />
+              {editMode && cur?.url ? (
+                <EditStage
+                  imageUrl={cur.url}
+                  onBboxChange={(b) => {
+                    editBboxRef.current = b;
+                  }}
+                />
+              ) : (
+                <PreviewStage
+                  image={cur}
+                  fallbackUrl={assetMainImage(asset)}
+                />
+              )}
             </div>
+            {/* P3：编辑模式的 prompt + 提交栏 */}
+            {editMode && cur?.url && (
+              <EditBar
+                busy={editBusy}
+                prompt={editPrompt}
+                onPromptChange={setEditPrompt}
+                onSubmit={() => doLocalEdit(cur)}
+                onCancel={() => {
+                  setEditMode(false);
+                  setEditPrompt("");
+                  editBboxRef.current = null;
+                }}
+              />
+            )}
             {/* 多图切换控件 */}
             {images.length > 1 && (
               <div className="flex items-center justify-center gap-2 p-2 border-t border-border bg-bg-panel flex-shrink-0">
@@ -436,6 +529,15 @@ export default function AssetDetailDialog({
 
             {/* 底部操作栏 */}
             <div className="p-3 border-t border-border flex items-center gap-2 flex-shrink-0">
+              {!editMode && asset.model === "doubao-seedream-5-0-pro-260628" && cur?.url && (
+                <button
+                  onClick={() => setEditMode(true)}
+                  className="btn text-xs h-8"
+                  title="在图上画框，5.0 Pro 按框局部重新出图"
+                >
+                  <Brush className="w-3.5 h-3.5" /> 局部编辑
+                </button>
+              )}
               <button onClick={onCopy} className="btn text-xs h-8 flex-1">
                 <Copy className="w-3.5 h-3.5" /> 复制
               </button>
@@ -654,4 +756,149 @@ function formatRelative(t: number): string {
   const d = Math.floor(h / 24);
   if (d < 30) return `${d} 天前`;
   return new Date(t).toLocaleDateString("zh-CN");
+}
+
+/**
+ * P3：局部编辑的画框舞台。
+ * - 显示原图 + 一个覆盖层
+ * - 用户在覆盖层画矩形 → 记录图像素坐标 (bbox)
+ * - 通过 onBboxChange callback 把 bbox 同步给父组件 ref
+ */
+function EditStage({
+  imageUrl,
+  onBboxChange,
+}: {
+  imageUrl: string;
+  onBboxChange: (
+    bbox: { x1: number; y1: number; x2: number; y2: number } | null
+  ) => void;
+}) {
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const [naturalSize, setNaturalSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  const [drawn, setDrawn] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
+
+  // bbox 变化时同步给父组件（包括清空）
+  useEffect(() => {
+    onBboxChange(drawn);
+  }, [drawn, onBboxChange]);
+
+  // 屏幕坐标 → 图像素坐标
+  const screenToImage = (clientX: number, clientY: number) => {
+    const img = imgRef.current;
+    if (!img || !naturalSize.w || !naturalSize.h) return null;
+    const rect = img.getBoundingClientRect();
+    // 点在图片外的部分直接丢弃
+    if (
+      clientX < rect.left ||
+      clientX > rect.right ||
+      clientY < rect.top ||
+      clientY > rect.bottom
+    ) {
+      return null;
+    }
+    const relX = (clientX - rect.left) / rect.width;
+    const relY = (clientY - rect.top) / rect.height;
+    return {
+      x: Math.max(0, Math.min(naturalSize.w, Math.round(relX * naturalSize.w))),
+      y: Math.max(0, Math.min(naturalSize.h, Math.round(relY * naturalSize.h))),
+    };
+  };
+
+  const onDown = (e: React.MouseEvent) => {
+    const pt = screenToImage(e.clientX, e.clientY);
+    if (!pt) return;
+    setDrag(pt);
+    setDrawn({ x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y });
+  };
+  const onMove = (e: React.MouseEvent) => {
+    if (!drag) return;
+    const pt = screenToImage(e.clientX, e.clientY);
+    if (!pt) return;
+    setDrawn({ x1: drag.x, y1: drag.y, x2: pt.x, y2: pt.y });
+  };
+  const onUp = () => setDrag(null);
+
+  return (
+    <div
+      onMouseDown={onDown}
+      onMouseMove={onMove}
+      onMouseUp={onUp}
+      onMouseLeave={onUp}
+      className="relative w-full max-w-[640px] aspect-[16/10] bg-bg-elev rounded-md overflow-hidden border border-border select-none cursor-crosshair"
+      title="拖动鼠标在图上画一个矩形框"
+    >
+      <img
+        ref={imgRef}
+        src={imageUrl}
+        alt=""
+        onLoad={(e) => {
+          const t = e.currentTarget;
+          setNaturalSize({ w: t.naturalWidth, h: t.naturalHeight });
+        }}
+        className="w-full h-full object-contain pointer-events-none"
+        draggable={false}
+      />
+      {drawn && (
+        <div
+          className="absolute border-2 border-accent bg-accent/15 pointer-events-none"
+          style={{
+            left: `${(Math.min(drawn.x1, drawn.x2) / Math.max(naturalSize.w, 1)) * 100}%`,
+            top: `${(Math.min(drawn.y1, drawn.y2) / Math.max(naturalSize.h, 1)) * 100}%`,
+            width: `${(Math.abs(drawn.x2 - drawn.x1) / Math.max(naturalSize.w, 1)) * 100}%`,
+            height: `${(Math.abs(drawn.y2 - drawn.y1) / Math.max(naturalSize.h, 1)) * 100}%`,
+          }}
+        >
+          <span className="absolute -top-6 left-0 bg-accent text-white text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap">
+            bbox [{Math.min(drawn.x1, drawn.x2)}, {Math.min(drawn.y1, drawn.y2)}, {Math.max(drawn.x1, drawn.x2)}, {Math.max(drawn.y1, drawn.y2)}]
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * P3：编辑模式底栏（prompt + 提交/取消）
+ * - bbox 已由 EditStage 通过 onBboxChange 同步到父组件 ref
+ * - 这里只读 prompt，按 Enter 或点提交
+ */
+function EditBar({
+  busy,
+  prompt,
+  onPromptChange,
+  onSubmit,
+  onCancel,
+}: {
+  busy: boolean;
+  prompt: string;
+  onPromptChange: (v: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="border-t border-border bg-bg-panel p-3 flex items-center gap-2 flex-shrink-0">
+      <input
+        type="text"
+        value={prompt}
+        onChange={(e) => onPromptChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !busy) onSubmit();
+        }}
+        placeholder="修改指令（例：在框内加一束花）"
+        disabled={busy}
+        className="flex-1 input text-sm"
+      />
+      <button onClick={onCancel} className="btn text-xs h-8" disabled={busy}>
+        取消
+      </button>
+      <button
+        onClick={onSubmit}
+        className="btn btn-primary text-xs h-8"
+        disabled={busy}
+      >
+        <Send className="w-3.5 h-3.5" /> {busy ? "生成中…" : "提交"}
+      </button>
+    </div>
+  );
 }
