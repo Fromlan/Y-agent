@@ -7,6 +7,7 @@
  */
 
 import { log } from "@/lib/logger";
+import type { Asset } from "@/lib/types";
 
 export interface LLMConfig {
   provider: "deepseek" | "doubao" | "openai" | "custom";
@@ -183,18 +184,60 @@ export async function llmChat(
 /**
  * 多轮对话循环：跑 LLM → 执行 tool_calls → 把结果作为 tool 消息追加 → 再次跑 LLM → 直到没有 tool_call
  * 最多 5 轮防爆栈
+ *
+ * P6：支持流式输出（onDelta 回调 + onTextDone 收尾）。
+ * - onDelta(delta): 每次 LLM 推送一段新文字时触发
+ * - onTextDone(text): 整段 LLM 响应结束时触发（含 tool_calls 之前的 final text）
+ * - executeTool: 工具调用，emit tool_start / tool_end
+ * - onToolStart(name, args) / onToolEnd(name, assets) / onToolError: 让 UI 实时反映工具状态
  */
+export interface LLMChatLoopCallbacks {
+  onDelta?: (delta: string) => void;
+  onTextDone?: (text: string) => void;
+  onToolStart?: (name: string, args: any) => void;
+  onToolEnd?: (name: string, assets: Asset[]) => void;
+  onToolError?: (name: string, err: string) => void;
+}
 export async function llmChatLoop(
   cfg: LLMConfig,
   messages: ChatMessage[],
   tools: ToolDefinition[],
-  executeTool: (name: string, args: any) => Promise<{ result: string; artifacts?: any[] }>
+  executeTool: (name: string, args: any) => Promise<{ result: string; artifacts?: any[] }>,
+  callbacks?: LLMChatLoopCallbacks
 ): Promise<{ messages: ChatMessage[]; finalContent: string }> {
   const working = [...messages];
   const MAX_TURNS = 5;
   let finalContent = "";
   for (let i = 0; i < MAX_TURNS; i++) {
-    const resp = await llmChat(cfg, working, tools);
+    // 流式拉一次
+    const stream = await llmChatStream(cfg, working, tools);
+    let buf = "";
+    let resp: LLMResponse;
+    try {
+      for await (const delta of stream) {
+        if (delta.content) {
+          buf += delta.content;
+          callbacks?.onDelta?.(delta.content);
+        }
+      }
+      // stream 完成后读 final 元数据（最后一段 stream chunk 会带 usage / finish_reason）
+      const final = await stream.final;
+      resp = {
+        content: buf || null,
+        tool_calls: final.tool_calls,
+        finish_reason: final.finish_reason ?? "stop",
+        usage: final.usage,
+      };
+      callbacks?.onTextDone?.(buf);
+    } catch (e) {
+      // 流式出错时回退到非流式（保持兼容）
+      log.warn("llm", "stream failed, fallback to non-stream:", e);
+      resp = await llmChat(cfg, working, tools);
+      if (resp.content) {
+        buf = resp.content;
+        callbacks?.onTextDone?.(buf);
+      }
+    }
     if (resp.content) finalContent = resp.content;
     if (!resp.tool_calls || resp.tool_calls.length === 0) {
       // 正常结束
@@ -221,12 +264,273 @@ export async function llmChatLoop(
           tool_call_id: tc.id,
           content: `工具 ${tc.function.name} 的参数 JSON 解析失败：${e?.message ?? e}。请重新生成正确格式的参数。`,
         });
+        callbacks?.onToolError?.(tc.function.name, `参数 JSON 解析失败：${e?.message ?? e}`);
         continue;
       }
-      const { result } = await executeTool(tc.function.name, args);
-      working.push({ role: "tool", tool_call_id: tc.id, content: result });
+      callbacks?.onToolStart?.(tc.function.name, args);
+      try {
+        const { result } = await executeTool(tc.function.name, args);
+        working.push({ role: "tool", tool_call_id: tc.id, content: result });
+        // 尝试从 result 里抽 assets（约定 JSON 里有 { assets: [...] }）
+        try {
+          const parsed = JSON.parse(result);
+          if (Array.isArray(parsed?.assets)) {
+            callbacks?.onToolEnd?.(tc.function.name, parsed.assets);
+          }
+        } catch {
+          // result 不是 JSON，跳过
+        }
+      } catch (e: any) {
+        const msg = e?.message ?? String(e);
+        log.warn("llm", "tool execution failed:", tc.function.name, e);
+        working.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: `工具 ${tc.function.name} 执行失败：${msg}`,
+        });
+        callbacks?.onToolError?.(tc.function.name, msg);
+      }
     }
     // 继续下一轮
   }
   return { messages: working, finalContent };
+}
+
+/**
+ * P6：流式 LLM 调（OpenAI SSE 协议）
+ * - 返回 AsyncIterable<{ content?: string }>，每个 chunk 包含一段新文字
+ * - final Promise<LLMResponse> 等 stream 跑完后 resolve，携带 tool_calls / finish_reason / usage
+ * - 用 EventSource 不行（POST 需带 body），用 fetch + ReadableStream 手工解析 SSE
+ */
+export interface StreamChunk {
+  content?: string;
+}
+export interface StreamFinal {
+  tool_calls?: ToolCall[];
+  finish_reason?: string;
+  usage?: LLMResponse["usage"];
+}
+export interface LLMStream {
+  [Symbol.asyncIterator](): AsyncIterator<StreamChunk>;
+  final: Promise<StreamFinal>;
+}
+
+export function llmChatStream(
+  cfg: LLMConfig,
+  messages: ChatMessage[],
+  tools?: ToolDefinition[]
+): Promise<LLMStream> {
+  if (!cfg.apiKey) throw new Error("LLM API Key 未配置");
+  if (!cfg.endpoint) throw new Error("LLM endpoint 未配置");
+  if (!cfg.model) throw new Error("LLM model 未配置");
+
+  // 转换 messages（同 llmChat）
+  const wireMessages = messages.map((m) => {
+    if (m.role === "user" && m.images && m.images.length > 0) {
+      const content: any[] = [{ type: "text", text: m.content ?? "" }];
+      for (const url of m.images) {
+        content.push({ type: "image_url", image_url: { url } });
+      }
+      return { role: m.role, content };
+    }
+    const out: Record<string, unknown> = {
+      role: m.role,
+      content: m.content ?? "",
+    };
+    if (m.tool_calls && m.tool_calls.length > 0) out.tool_calls = m.tool_calls;
+    if (m.tool_call_id) out.tool_call_id = m.tool_call_id;
+    return out;
+  });
+
+  const body: Record<string, unknown> = {
+    model: cfg.model,
+    messages: wireMessages,
+    temperature: 0.7,
+    stream: true,
+  };
+  if (tools && tools.length > 0) {
+    body.tools = tools;
+    body.tool_choice = "auto";
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120_000);
+
+  // final 元数据（最后一个 chunk 解析后 resolve）
+  let resolveFinal!: (v: StreamFinal) => void;
+  const finalPromise = new Promise<StreamFinal>((res) => {
+    resolveFinal = res;
+  });
+
+  // tool_calls 累积（OpenAI 流式 tool_calls 是分段发来的，需要按 index 合并）
+  const toolCallAccum = new Map<number, { id: string; name: string; args: string }>();
+  let finishReason: string | undefined;
+  let usage: LLMResponse["usage"] | undefined;
+
+  // 内部：解析一行 SSE 数据（"data: {...}" 或 "data: [DONE]"）
+  const parseLine = (line: string): { content?: string; done?: boolean } | null => {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("data:")) return null;
+    const payload = trimmed.slice(5).trim();
+    if (payload === "[DONE]") return { done: true };
+    if (!payload) return null;
+    try {
+      const obj = JSON.parse(payload);
+      const choice = obj.choices?.[0];
+      if (!choice) return null;
+      const delta = choice.delta ?? {};
+      // 累积 tool_calls（按 index 分段）
+      if (Array.isArray(delta.tool_calls)) {
+        for (const tc of delta.tool_calls) {
+          const idx = tc.index ?? 0;
+          const acc = toolCallAccum.get(idx) ?? { id: "", name: "", args: "" };
+          if (tc.id) acc.id = tc.id;
+          if (tc.function?.name) acc.name = tc.function.name;
+          if (tc.function?.arguments) acc.args += tc.function.arguments;
+          toolCallAccum.set(idx, acc);
+        }
+      }
+      if (choice.finish_reason) finishReason = choice.finish_reason;
+      if (obj.usage) usage = obj.usage;
+      return { content: delta.content };
+    } catch {
+      return null;
+    }
+  };
+
+  return (async () => {
+    const resp = await fetch(cfg.endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${cfg.apiKey}`,
+        Accept: "text/event-stream",
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    }).catch((e: any) => {
+      clearTimeout(timeout);
+      throw new Error(
+        `LLM 请求失败：${e?.name === "AbortError" ? "请求超时（120s）" : e?.message ?? String(e)}`
+      );
+    });
+
+    if (!resp.ok) {
+      clearTimeout(timeout);
+      const text = await resp.text();
+      throw new Error(`LLM HTTP ${resp.status}: ${text.slice(0, 500)}`);
+    }
+
+    if (!resp.body) {
+      clearTimeout(timeout);
+      throw new Error("LLM 响应无 body（流式不支持）");
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+
+    const queue: (StreamChunk | { done: true })[] = [];
+    let resolveNext: (() => void) | null = null;
+    const wakeNext = () => {
+      const r = resolveNext;
+      resolveNext = null;
+      if (r) r();
+    };
+    let streamClosed = false;
+
+    // 后台 pump：持续读 stream 往 queue 里塞
+    void (async () => {
+      try {
+        let reading = true;
+        while (reading) {
+          const { value, done } = await reader.read();
+          if (done) {
+            reading = false;
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          // SSE 事件以 \n\n 分隔
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? ""; // 最后一个可能不完整
+          for (const evt of parts) {
+            for (const line of evt.split("\n")) {
+              const parsed = parseLine(line);
+              if (!parsed) continue;
+              if (parsed.done) {
+                // 收尾：把累积的 tool_calls 整理出来
+                const tool_calls: ToolCall[] = [];
+                for (const [idx, acc] of toolCallAccum) {
+                  tool_calls[idx] = {
+                    id: acc.id,
+                    type: "function",
+                    function: { name: acc.name, arguments: acc.args || "{}" },
+                  };
+                }
+                resolveFinal({
+                  tool_calls: tool_calls.length > 0 ? tool_calls : undefined,
+                  finish_reason: finishReason,
+                  usage,
+                });
+                streamClosed = true;
+                return;
+              }
+              if (parsed.content) {
+                queue.push({ content: parsed.content });
+                wakeNext();
+              }
+            }
+          }
+        }
+        // body 读完但没收到 [DONE]：也收尾（少数 API 不发 [DONE]）
+        if (!streamClosed) {
+          const tool_calls: ToolCall[] = [];
+          for (const [idx, acc] of toolCallAccum) {
+            tool_calls[idx] = {
+              id: acc.id,
+              type: "function",
+              function: { name: acc.name, arguments: acc.args || "{}" },
+            };
+          }
+          resolveFinal({
+            tool_calls: tool_calls.length > 0 ? tool_calls : undefined,
+            finish_reason: finishReason,
+            usage,
+          });
+          streamClosed = true;
+        }
+      } catch (e) {
+        log.warn("llm-stream", "pump error:", e);
+        if (!streamClosed) {
+          resolveFinal({});
+          streamClosed = true;
+        }
+      } finally {
+        clearTimeout(timeout);
+        wakeNext();
+      }
+    })();
+
+    const iter: AsyncIterator<StreamChunk> = {
+      async next(): Promise<IteratorResult<StreamChunk>> {
+        while (queue.length === 0) {
+          if (streamClosed) return { value: undefined as any, done: true };
+          await new Promise<void>((res) => {
+            resolveNext = res;
+          });
+          resolveNext = null;
+        }
+        const item = queue.shift()!;
+        if ("done" in item) return { value: undefined as any, done: true };
+        return { value: item as StreamChunk, done: false };
+      },
+    };
+
+    return {
+      [Symbol.asyncIterator]() {
+        return iter;
+      },
+      final: finalPromise,
+    };
+  })();
 }

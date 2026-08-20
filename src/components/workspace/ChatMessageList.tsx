@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "@/lib/agent-event";
-import type { AgentEvent } from "@/lib/agent-event";
+import type { AgentEvent, ToolCallRecord } from "@/lib/agent-event";
 import type { Asset } from "@/lib/types";
 import { assetMainImage } from "@/lib/types";
 import { Sparkles, ChevronDown, ChevronRight, Clock, Zap, Check, X } from "lucide-react";
@@ -116,22 +116,39 @@ function MessageItem({
             {message.skillLog && (
               <SkillLog log={message.skillLog} events={message.events} />
             )}
-            {message.content && (
-              <div className="md-content mt-2">
-                <Markdown
-                  remarkPlugins={[remarkGfm]}
-                  components={{
-                    a: ({ href, children }) => (
-                      <a href={href} target="_blank" rel="noopener noreferrer">
-                        {children}
-                      </a>
-                    ),
-                  }}
-                >
-                  {message.content}
-                </Markdown>
+            {/* P6：工具调用内联显示（按调用顺序） */}
+            {message.toolCalls && message.toolCalls.length > 0 && (
+              <div className="mt-2 space-y-1.5">
+                {message.toolCalls.map((tc) => (
+                  <ToolCallCard key={tc.id} tc={tc} />
+                ))}
               </div>
             )}
+            {/* P6：流式内容 + 等待态 + 光标 */}
+            {message.content || message.pending || message.streaming ? (
+              <div className="md-content mt-2 relative">
+                {message.pending && !message.content && (
+                  <PendingDots text="思考中…" />
+                )}
+                {message.content && (
+                  <>
+                    <Markdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        a: ({ href, children }) => (
+                          <a href={href} target="_blank" rel="noopener noreferrer">
+                            {children}
+                          </a>
+                        ),
+                      }}
+                    >
+                      {message.content}
+                    </Markdown>
+                    {message.streaming && <BlinkingCursor />}
+                  </>
+                )}
+              </div>
+            ) : null}
             {message.pendingPlan && onConfirmPlan && (
               <PlanCard
                 plan={message.pendingPlan}
@@ -312,4 +329,100 @@ function triggerLabel(t: "explicit" | "keyword" | "fallback") {
   if (t === "explicit") return <span className="text-accent">显式（/xxx）</span>;
   if (t === "keyword") return <span className="text-accent">关键词匹配</span>;
   return <span className="text-text-muted">默认</span>;
+}
+
+// ============================================================================
+// P6：流式输出 + 工具调用展示
+// ============================================================================
+
+/** 工具调用卡片（内联在 chat 流里） */
+function ToolCallCard({ tc }: { tc: ToolCallRecord }) {
+  const [open, setOpen] = useState(false);
+  const isRunning = tc.status === "running";
+  const isFailed = tc.status === "failed";
+  return (
+    <div
+      className={`border rounded-md text-xs overflow-hidden transition-colors ${
+        isFailed
+          ? "border-red-400/30 bg-red-400/5"
+          : isRunning
+          ? "border-accent/40 bg-accent/5"
+          : "border-border bg-bg-panel"
+      }`}
+    >
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-bg-hover/50"
+      >
+        {open ? (
+          <ChevronDown className="w-3 h-3 text-text-muted flex-shrink-0" />
+        ) : (
+          <ChevronRight className="w-3 h-3 text-text-muted flex-shrink-0" />
+        )}
+        <Zap className={`w-3 h-3 flex-shrink-0 ${isRunning ? "text-accent animate-pulse" : "text-accent"}`} />
+        <span className="font-mono text-text-primary truncate flex-1 min-w-0">
+          {tc.toolName}
+        </span>
+        {isRunning && (
+          <span className="text-text-muted text-[10px] flex items-center gap-1">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+            运行中
+          </span>
+        )}
+        {tc.status === "done" && tc.costMs !== undefined && (
+          <span className="text-text-muted text-[10px] tabular-nums">
+            {(tc.costMs / 1000).toFixed(1)}s
+          </span>
+        )}
+        {isFailed && (
+          <span className="text-red-400 text-[10px]">失败</span>
+        )}
+      </button>
+      {open && (
+        <div className="px-3 py-2 border-t border-border space-y-1.5 text-text-muted">
+          {tc.result && (
+            <div className="text-text-secondary">{tc.result}</div>
+          )}
+          <details>
+            <summary className="cursor-pointer text-text-secondary hover:text-text-primary text-[10px]">
+              参数
+            </summary>
+            <pre className="mt-1 p-1.5 bg-bg-base rounded text-[10px] whitespace-pre-wrap break-all text-text-muted max-h-40 overflow-y-auto">
+              {JSON.stringify(tc.args, null, 2)}
+            </pre>
+          </details>
+          {tc.assets && tc.assets.length > 0 && (
+            <div className="text-[10px] text-text-muted">
+              已生成 {tc.assets.length} 张图（见下方）
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 流式光标（CSS 动画，不引入 framer-motion） */
+function BlinkingCursor() {
+  return (
+    <span
+      aria-hidden
+      className="inline-block w-1.5 h-3.5 ml-0.5 align-text-bottom bg-accent animate-pulse"
+      style={{ verticalAlign: "-0.2em" }}
+    />
+  );
+}
+
+/** 等待态（LLM 还没回任何字） */
+function PendingDots({ text }: { text: string }) {
+  return (
+    <span className="text-text-muted text-sm flex items-center gap-1.5">
+      {text}
+      <span className="inline-flex gap-0.5">
+        <span className="w-1 h-1 rounded-full bg-text-muted animate-bounce" style={{ animationDelay: "0ms" }} />
+        <span className="w-1 h-1 rounded-full bg-text-muted animate-bounce" style={{ animationDelay: "150ms" }} />
+        <span className="w-1 h-1 rounded-full bg-text-muted animate-bounce" style={{ animationDelay: "300ms" }} />
+      </span>
+    </span>
+  );
 }

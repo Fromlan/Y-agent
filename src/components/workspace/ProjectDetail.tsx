@@ -22,7 +22,7 @@ import AssetBoard from "@/components/workspace/AssetBoard";
 import ChatMessageList from "@/components/workspace/ChatMessageList";
 import ModeSwitch, { type InputMode } from "@/components/workspace/ModeSwitch";
 import AgentMemoryPanel from "@/components/workspace/AgentMemoryPanel";
-import { agentEvents, type ChatMessage, type AgentEvent } from "@/lib/agent-event";
+import { agentEvents, type ChatMessage, type AgentEvent, type ToolCallRecord } from "@/lib/agent-event";
 import { route } from "@/lib/agent-router";
 import { loadLlmConfig } from "@/lib/llm-config";
 import { llmChatLoop, type LLMConfig, type ChatMessage as LLMChatMessage } from "@/lib/llm";
@@ -309,6 +309,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     _off: () => void
   ) => {
     const agentId = crypto.randomUUID();
+    // 占位 agent 消息：pending=true 等 LLM 首次返回，streaming=true 时文字逐字追加
     setMessages((prev) => [
       ...prev,
       {
@@ -317,6 +318,9 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
         content: "",
         events: [...events],
         createdAt: Date.now(),
+        pending: true,
+        streaming: false,
+        toolCalls: [],
       },
     ]);
     // 立即插入空消息占位（content=""），后面再 update
@@ -362,62 +366,143 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     let isDemo = false;
     let finalContent = "";
 
-    try {
-      const { finalContent: loopContent } = await llmChatLoop(cfg, llmHistory, AGENT_TOOLS, async (name, args) => {
-        if (name === "jimeng_generate_image") {
-          const prompt = String(args.prompt ?? "").trim();
-          if (!prompt) {
-            return { result: "错误：prompt 不能为空" };
-          }
-          const useModel = String(args.model ?? model.id);
-          const useSize = String(args.size ?? size);
-          const refRequired = !!args.ref_required;
-          const maxImages = Math.max(1, Math.min(4, Number(args.max_images) || 1));
-          lastModel = useModel;
-          const useModelOpt = MODEL_OPTIONS.find((m) => m.id === useModel) ?? model;
-
-          if (refRequired && refs.length === 0) {
-            return { result: "用户当前没有提供参考图。请先向用户说明需要参考图，或改用不依赖参考图的方案。" };
-          }
-
-          agentEvents.emit({
-            type: "tool_start",
-            toolName: "jimeng.generate_image",
-            model: useModel,
-            args: { prompt, size: useSize, refRequired, maxImages },
+    // 流式回调：实时把 LLM 文字 / 工具状态推给 React state
+    let saveTimer: number | null = null;
+    const updateAgent = (updater: (m: ChatMessage) => ChatMessage) => {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === agentId ? updater(m) : m))
+      );
+      // 流式期间防抖写 DB（每 800ms 一次）
+      if (saveTimer === null) {
+        saveTimer = window.setTimeout(() => {
+          saveTimer = null;
+          setMessages((prev) => {
+            const cur = prev.find((m) => m.id === agentId);
+            if (cur) {
+              persistUpdate(agentId, {
+                content: cur.content,
+                events: [...events, ...(cur.events ?? [])].slice(-200),
+              });
+            }
+            return prev;
           });
-          let imgs: { url: string }[];
-          try {
-            const result = await executePlan(
-              {
-                prompt,
-                modelId: useModel,
-                modelName: useModelOpt.name,
-                size: useSize,
-                images: refs.length > 0 ? refs : undefined,
-                maxImages: maxImages > 1 ? maxImages : undefined,
-              },
-              currentProject.id
-            );
-            isDemo = result.isDemo;
-            toolAssets.push(result.asset);
-            imgs = result.asset.payload.urls.map((u) => ({ url: u }));
-            agentEvents.emit({
-              type: "tool_end",
-              costMs: result.costMs,
-              assets: [result.asset],
-              isDemo: result.isDemo,
+        }, 800);
+      }
+    };
+    const appendDelta = (delta: string) => {
+      agentEvents.emit({ type: "text_delta", delta });
+      updateAgent((m) => ({
+        ...m,
+        pending: false,
+        streaming: true,
+        content: m.content + delta,
+      }));
+    };
+    const appendToolCall = (tc: ToolCallRecord) => {
+      agentEvents.emit({ type: "tool_start", toolName: tc.toolName, args: tc.args });
+      updateAgent((m) => ({
+        ...m,
+        toolCalls: [...(m.toolCalls ?? []), tc],
+      }));
+    };
+    const updateToolCall = (id: string, patch: Partial<ToolCallRecord>) => {
+      updateAgent((m) => ({
+        ...m,
+        toolCalls: (m.toolCalls ?? []).map((tc) =>
+          tc.id === id ? { ...tc, ...patch } : tc
+        ),
+      }));
+    };
+
+    try {
+      const { finalContent: loopContent } = await llmChatLoop(
+        cfg,
+        llmHistory,
+        AGENT_TOOLS,
+        async (name, args) => {
+          if (name === "jimeng_generate_image") {
+            const prompt = String(args.prompt ?? "").trim();
+            if (!prompt) {
+              return { result: "错误：prompt 不能为空" };
+            }
+            const useModel = String(args.model ?? model.id);
+            const useSize = String(args.size ?? size);
+            const refRequired = !!args.ref_required;
+            const maxImages = Math.max(1, Math.min(4, Number(args.max_images) || 1));
+            lastModel = useModel;
+            const useModelOpt = MODEL_OPTIONS.find((m) => m.id === useModel) ?? model;
+
+            if (refRequired && refs.length === 0) {
+              return { result: "用户当前没有提供参考图。请先向用户说明需要参考图，或改用不依赖参考图的方案。" };
+            }
+
+            const tcId = crypto.randomUUID();
+            appendToolCall({
+              id: tcId,
+              toolName: "jimeng.generate_image",
+              args: { prompt, size: useSize, refRequired, maxImages },
+              status: "running",
             });
-            return {
-              result: `已生成 ${imgs.length} 张图（模型 ${useModelOpt.name}，尺寸 ${useSize}，${(result.costMs / 1000).toFixed(1)}s）`,
-            };
-          } catch (e: any) {
-            const raw = e?.message ?? String(e);
-            return { result: `生成失败：${await explainError(raw).catch(() => raw)}` };
+            try {
+              const result = await executePlan(
+                {
+                  prompt,
+                  modelId: useModel,
+                  modelName: useModelOpt.name,
+                  size: useSize,
+                  images: refs.length > 0 ? refs : undefined,
+                  maxImages: maxImages > 1 ? maxImages : undefined,
+                },
+                currentProject.id
+              );
+              isDemo = result.isDemo;
+              toolAssets.push(result.asset);
+              const imgs = result.asset.payload.urls.map((u) => ({ url: u }));
+              updateToolCall(tcId, {
+                status: "done",
+                costMs: result.costMs,
+                isDemo: result.isDemo,
+                assets: [result.asset],
+                result: `已生成 ${imgs.length} 张图（${useModelOpt.name}，${(result.costMs / 1000).toFixed(1)}s）`,
+              });
+              agentEvents.emit({
+                type: "tool_end",
+                toolName: "jimeng.generate_image",
+                costMs: result.costMs,
+                assets: [result.asset],
+                isDemo: result.isDemo,
+              });
+              return {
+                result: `已生成 ${imgs.length} 张图（模型 ${useModelOpt.name}，尺寸 ${useSize}，${(result.costMs / 1000).toFixed(1)}s）`,
+              };
+            } catch (e: any) {
+              const raw = e?.message ?? String(e);
+              const friendly = await explainError(raw).catch(() => raw);
+              updateToolCall(tcId, { status: "failed", result: friendly });
+              return { result: `生成失败：${friendly}` };
+            }
           }
+          return { result: `未知工具：${name}` };
+        },
+        {
+          onDelta: appendDelta,
+          onTextDone: () => {
+            agentEvents.emit({ type: "text_done", fullText: "" });
+            updateAgent((m) => ({ ...m, streaming: false }));
+          },
+          onToolStart: (name, args) => {
+            // 已在 appendToolCall 里 emit；这里留作 debug
+            log.debug("llm", "tool start:", name, args);
+          },
+          onToolEnd: (name, assets) => {
+            // 已在 updateToolCall 里 emit
+            log.debug("llm", "tool end:", name, assets.length);
+          },
+          onToolError: (name, err) => {
+            log.warn("llm", "tool error:", name, err);
+          },
         }
-        return { result: `未知工具：${name}` };
-      });
+      );
       finalContent = loopContent;
       if (!finalContent.trim()) finalContent = "已完成。";
     } catch (e: any) {
@@ -434,6 +519,8 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
                 error: friendly,
                 events: [...events],
                 assets: toolAssets.length > 0 ? toolAssets : undefined,
+                streaming: false,
+                pending: false,
               }
             : m
         )
@@ -475,6 +562,8 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
               events: [...events],
               skillLog,
               assets: toolAssets.length > 0 ? toolAssets : undefined,
+              streaming: false,
+              pending: false,
             }
           : m
       )
@@ -580,7 +669,13 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
         currentProject.id
       );
       const { asset, costMs, isDemo } = result;
-      agentEvents.emit({ type: "tool_end", costMs, assets: [asset], isDemo });
+      agentEvents.emit({
+        type: "tool_end",
+        toolName: "jimeng.generate_image",
+        costMs,
+        assets: [asset],
+        isDemo,
+      });
       setMessages((prev) =>
         prev.map((m) =>
           m.id === msgId
