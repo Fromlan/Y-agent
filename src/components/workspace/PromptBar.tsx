@@ -231,7 +231,7 @@ export default function PromptBar({
                   className="text-xs bg-bg-elev border border-border rounded px-1.5 py-0.5
                     text-text-primary focus:outline-none focus:border-accent"
                 >
-                  <option value="">默认</option>
+                  <option value="">PNG（Y-agent 默认）</option>
                   {caps.outputFormats.map((f) => (
                     <option key={f} value={f}>
                       {f.toUpperCase()}
