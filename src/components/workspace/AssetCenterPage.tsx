@@ -5,6 +5,10 @@ import { useSession } from "@/lib/session";
 import { listProjects } from "@/lib/projects";
 import { listAssets, deleteAsset } from "@/lib/assets";
 import { confirmDialog } from "@/lib/dialog";
+import {
+  startAssetEventListener,
+  stopAssetEventListener,
+} from "@/lib/asset-events";
 import type { Asset, Project } from "@/lib/types";
 import AssetBoard from "@/components/workspace/AssetBoard";
 
@@ -58,6 +62,29 @@ export default function AssetCenterPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // 订阅后端"资产本地兜底完成"事件。AssetCenter 是跨项目视图,无 projectId 过滤,
+  // 任何资产的 localPath 落盘都会让对应卡片切到 asset:// 协议,首屏不会出现"图片下载中"长卡顿。
+  useEffect(() => {
+    startAssetEventListener((evt) => {
+      setAssets((prev) =>
+        prev.map((a) => {
+          if (a.id !== evt.assetId) return a;
+          const isLayer = a.isLayerDecomposition && a.payload.layers?.length;
+          const next = { ...a, payload: { ...a.payload } };
+          if (isLayer) {
+            if (evt.layerLocalPaths) next.payload.layerLocalPaths = evt.layerLocalPaths;
+          } else {
+            if (evt.localPaths) next.payload.localPaths = evt.localPaths;
+          }
+          return next;
+        })
+      );
+    });
+    return () => {
+      stopAssetEventListener();
+    };
+  }, []);
 
   // 外部按项目筛选；项目数变化时（load 后）如果之前选的项目已不存在则清理选中
   useEffect(() => {

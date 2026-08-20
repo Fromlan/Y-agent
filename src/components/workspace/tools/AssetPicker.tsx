@@ -18,7 +18,7 @@ interface Props {
  * 共享"从资产库选一张图"弹窗。
  * - 网格缩略图：优先 localPath，缺失时回退 url（由 SafeImage 异步解析）
  * - 选完调 onSelect(asset, sourceUrl)，sourceUrl 是 jimeng API image[] 字段可接受的形式：
- *   - 本地路径 → 调 read_image_data_url 转 dataURL
+ *   - 本地路径 → resolveImageUrl 转 `asset://` URL（Webview 内部协议，Rust fetch 能直接读）
  *   - 外链 URL → 直接用 URL
  *   - dataURL → 直接用
  */

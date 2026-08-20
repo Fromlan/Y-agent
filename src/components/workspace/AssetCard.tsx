@@ -8,6 +8,8 @@ import {
   ImageIcon,
   Droplet,
   HardDrive,
+  AlertTriangle,
+  Loader2,
 } from "lucide-react";
 import type { Asset } from "@/lib/types";
 import { assetMainImage } from "@/lib/types";
@@ -15,6 +17,42 @@ import { useToast } from "@/components/shared/Toast";
 import SafeImage from "@/components/shared/SafeImage";
 
 export type ViewMode = "masonry" | "grid" | "compact";
+
+/**
+ * 资产本地兜底状态徽标。
+ * - 「备份中…」:主图有 http(s) url 但 localPath 还没就位——后端还在拉
+ * - 「图已过期」:后端标 payload.broken=true(URL 失效 / 下载失败)
+ * - 「本地」:已有 localPath 且文件存在(已经在用 asset:// 协议加载)
+ *
+ * 三种状态互斥,优先级 broken > 备份中 > 本地
+ */
+function StatusBadge({ asset }: { asset: Asset }) {
+  const hasLocal =
+    asset.payload.localPaths?.[0] && asset.payload.localPaths[0].length > 0;
+  const firstUrl = asset.payload.urls?.[0] ?? "";
+  const isHttp = firstUrl.startsWith("http://") || firstUrl.startsWith("https://");
+  if (asset.payload.broken) {
+    return (
+      <div
+        className="absolute top-2 right-2 bg-red-500/85 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"
+        title="图链接已失效,建议重新生成"
+      >
+        <AlertTriangle className="w-3 h-3" /> 图已过期
+      </div>
+    );
+  }
+  if (!hasLocal && isHttp) {
+    return (
+      <div
+        className="absolute top-2 right-2 bg-amber-500/85 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"
+        title="正在下载到本地"
+      >
+        <Loader2 className="w-3 h-3 animate-spin" /> 备份中
+      </div>
+    );
+  }
+  return null;
+}
 
 interface Props {
   asset: Asset;
@@ -112,6 +150,7 @@ export default function AssetCard({
         {asset.isLayerDecomposition && (
           <Layers className="absolute top-1 right-1 w-3 h-3 text-accent drop-shadow" />
         )}
+        {!asset.isLayerDecomposition && <StatusBadge asset={asset} />}
         {selectMode && (
           <CheckBox selected={selected} className="top-1 left-1" />
         )}
@@ -147,15 +186,16 @@ export default function AssetCard({
               <Layers className="w-3 h-3" /> 图层
             </div>
           )}
+          {!asset.isLayerDecomposition && <StatusBadge asset={asset} />}
           {asset.payload.transparent && (
             <div className="absolute top-2 left-2 bg-emerald-500/85 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"
               title="PNG 透明背景">
               <Droplet className="w-3 h-3" /> 透明
             </div>
           )}
-          {asset.payload.localPaths?.[0] && (
+          {asset.payload.localPaths?.[0] && !asset.payload.broken && (
             <div className="absolute bottom-2 right-2 bg-blue-500/85 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"
-              title="已下载到本地，URL 失效后仍可查看">
+              title="已下载到本地,URL 失效后仍可查看">
               <HardDrive className="w-3 h-3" /> 本地
             </div>
           )}
@@ -239,6 +279,7 @@ export default function AssetCard({
             <Layers className="w-3 h-3" /> 图层
           </div>
         )}
+        {!asset.isLayerDecomposition && <StatusBadge asset={asset} />}
         {asset.payload.transparent && (
           <div className="absolute top-2 left-2 bg-emerald-500/85 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"
             title="PNG 透明背景">

@@ -20,6 +20,10 @@ import {
   listMessages,
 } from "@/lib/chat-history";
 import { enrichMessagesWithAssets } from "@/lib/chat-enrich";
+import {
+  startAssetEventListener,
+  stopAssetEventListener,
+} from "@/lib/asset-events";
 import { useToast } from "@/components/shared/Toast";
 import { MODEL_OPTIONS, type Asset, type ModelOption } from "@/lib/types";
 import type { ChatMessage } from "@/lib/agent-event";
@@ -129,6 +133,35 @@ export function useProjectBootstrap(projectId: string | undefined): ProjectBoots
       }
     })();
   }, [projectId, reload]);
+
+  // 订阅后端"资产本地兜底完成"事件,增量更新单条资产。
+  // - 不重建 assets 数组引用,React 只 patch 那一条,避免 AssetBoard 整板 re-render
+  // - projectId 切换时重新订阅(实际 listener 是模块级单例,这里是参数 projectId 过滤)
+  useEffect(() => {
+    if (!projectId) return;
+    startAssetEventListener((evt) => {
+      // 跨项目事件:AssetCenter 模式会监听所有;此处按当前 projectId 过滤
+      if (evt.projectId !== projectId) return;
+      setAssets((prev) =>
+        prev.map((a) => {
+          if (a.id !== evt.assetId) return a;
+          // urls 模式资产用 localPaths;layers 模式用 layerLocalPaths;后端两个字段都给,
+          // 这里按资产自身形态选用。
+          const isLayer = a.isLayerDecomposition && a.payload.layers?.length;
+          const next = { ...a, payload: { ...a.payload } };
+          if (isLayer) {
+            if (evt.layerLocalPaths) next.payload.layerLocalPaths = evt.layerLocalPaths;
+          } else {
+            if (evt.localPaths) next.payload.localPaths = evt.localPaths;
+          }
+          return next;
+        })
+      );
+    });
+    return () => {
+      stopAssetEventListener();
+    };
+  }, [projectId]);
 
   return {
     assets,

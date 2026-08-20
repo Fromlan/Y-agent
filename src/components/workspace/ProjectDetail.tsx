@@ -94,26 +94,24 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     hasApiKey().then(setHasKey).catch(() => setHasKey(false));
   }, [currentProject, generating]);
 
-  // P5+：切项目时自动 backfill 一次，把历史"url 有但 localPath 缺"的资产补下本地。
-  // 后端并发下完后写回 DB；这里等 backfill 完再 reload，让 UI 拿到新 localPath。
-  // - 下载成功：reload 让 SafeImage 切到本地路径
-  // - 部分失败：后端会把这些资产标 payload.broken=true；reload 后 UI 可据此显示"已过期"
+  // P5+：切项目时主动 backfill 一次，把历史"url 有但 localPath 缺"的资产补下本地。
+  // 后端并发下完后通过 `assets://local-backfilled` 事件增量更新到 useProjectBootstrap.assets，
+  // 这里 **不再** 调 `reload({ silent: true })`——那样会触发整板 re-render 和重新 IPC。
+  // - 启动期 startup_backfill_assets 已经覆盖了"全库补下"路径,
+  //   此处只是给"用户切到某老项目时再多跑一次"做保险(冷启动之后某项目被外部改了)。
   useEffect(() => {
     if (!currentProject) return;
     let cancelled = false;
     backfillLocalAssets(currentProject.id)
       .then((r) => {
         if (cancelled) return;
-        if (r.downloaded > 0 || r.brokenMarked > 0) {
-          reload({ silent: true });
-          if (r.brokenMarked > 0) {
-            const remaining = r.failed + r.brokenMarked;
-            toast.warn(
-              `已自动备份 ${r.downloaded} 张图到本地，${remaining} 张图链接已失效（建议重新生成）`
-            );
-          } else if (r.downloaded > 0) {
-            toast.info(`已自动备份 ${r.downloaded} 张历史图到本地`);
-          }
+        if (r.brokenMarked > 0) {
+          const remaining = r.failed + r.brokenMarked;
+          toast.warn(
+            `已自动备份 ${r.downloaded} 张图到本地，${remaining} 张图链接已失效（建议重新生成）`
+          );
+        } else if (r.downloaded > 0) {
+          toast.info(`已自动备份 ${r.downloaded} 张历史图到本地`);
         }
       })
       .catch((e) => {
