@@ -240,6 +240,42 @@ if b64.starts_with("data:") {
 
 **当前 Y-agent 状态**：Schema / Rust 端都支持了，但前端 AssetBoard 还没做图层 UI（计划在 M3 一起做）。
 
+### 1.8 流式输出（P1，5.0 Lite / 4.5 / 4.0 支持，5.0 Pro 不支持）
+
+```typescript
+// 前端调用
+const requestId = await generateImageStream(
+  { model: "doubao-seedream-5-0-lite-260128", prompt: "...", maxImages: 4, sequential: "auto" },
+  {
+    onPartial: ({ index, url }) => console.log("第", index + 1, "张就绪", url),
+    onPartialFailed: (info) => console.warn("第", info.index, "张失败", info.code, info.message),
+    onCompleted: (info) => console.log("全部完成", info.usage),
+    onAborted: ({ reason }) => console.error("流中断", reason),
+  }
+);
+```
+
+Rust 端：
+- `jimeng::generate_stream(api_key, params, request_id, on_event)` 走 reqwest `bytes_stream()`，按 `\n\n` 切 SSE 事件
+- 事件类型：`image_generation.partial_succeeded` / `image_generation.partial_image` / `image_generation.partial_failed` / `image_generation.completed`
+- `InternalServiceError` 立即中断流 + emit `Aborted`
+- 顶层 `error` 透传到 `Aborted.reason`
+
+Tauri command：
+- `jimeng_generate_stream` 立即返回 `request_id`（`String`），后台 `tokio::spawn` 跑流式循环
+- 通过 Tauri event `jimeng://stream` 推 `StreamEvent`，payload 里有 `request_id` 用于前端过滤
+
+Demo 模式：每 200ms 推一张 partial_image，4 张后 emit Completed。
+
+Y-agent 集成：
+- `agent-flow.executePlanStream(plan, projectId, callbacks)`：每张 partial 立刻 `createAsset` 入库，UI 实时看到图；completed 时合并为一张主资产返回
+- 5.0 Pro 自动 fallback 到 `executePlan`（非流式）
+- 异常时（`onAborted` 触发）也 `reload()`，已入库的 partial 会出现在资产列表
+
+**错误处理**：
+- 验证 `5.0 Pro + stream` 互斥（在 `jimeng::validate_params` 后加 stream 专属 check）
+- 5.0 Pro + stream 走 Rust 端直接报错：`InvalidParameter: 5.0 Pro 不支持流式输出（stream），请改用 5.0 Lite / 4.5 / 4.0`
+
 ---
 
 ## Part 2. LLM API（OpenAI 兼容协议）
