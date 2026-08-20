@@ -1,0 +1,5 @@
+A single square app icon design for 'Y-agent' desktop application. The icon has rounded square corners (modern macOS / Windows 11 style) with a deep charcoal #0E0F13 background. Centered inside is the Y-agent mark: a clean geometric letter Y in coral red #FF5C4D, with a small coral dot at the fork point (the AI spark node).
+
+The Y is bold, chunky, takes about 55-60% of the icon area, well-balanced with negative space around it. The icon should read clearly at very small sizes (32x32 pixels). No text, no tagline, no surrounding decoration, no gloss, no shadow, no skeuomorphism. Flat, modern, premium.
+
+The rounded corners are exactly the OS-standard radius. The icon is designed to be unmistakable as Y-agent in a dock or taskbar. Square 1:1, 2048x2048, sharp, flat vector style.

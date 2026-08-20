@@ -1,0 +1,7 @@
+Premium brand identity board for 'Y-agent', an AI desktop app for indie game artists. 3x3 grid on deep charcoal canvas #0E0F13, clean gutters, sparse typography, large negative space, presentation deck quality.
+
+LOGO: a geometric 'Y' monogram in coral red #FF5C4D, two angled upper arms meeting a vertical stem, with a small filled coral dot at the apex (AI spark node). Bold, geometric, clean. Wordmark 'Y-agent' in cream #F2EBDB. Tagline 'Make. Iterate. Ship.' in small muted text.
+
+Nine panels: 1. Logo cover: Y monogram + wordmark + tagline on dark. 2. Construction: Y on light grid with thin crosshair guides, 24px overlay, 'Y-CONSTRUCTION' label. 3. Digital app: Tauri dark-mode desktop window mockup, Y logo top-left, prompt bar, coral button. 4. Essence: oversized cream type 'MAKE. ITERATE. SHIP.' with one coral dot. 5. Color: five swatch bars labeled CHARCOAL #0E0F13, SURFACE #16181E, CORAL #FF5C4D (glow), CREAM #F2EBDB, TEAL #5BC2A8. 6. Typography: large 'Aa' in geometric sans, alphabet row, 'Inter / system-ui'. 7. Physical: coral enamel pin or business card with Y mark on dark paper. 8. Image direction: cinematic poster, single coral spark on dark charcoal, halftone, 'Y-agent / 2026'. 9. System detail: dark-mode UI chips (coral Generate button, outlined 4.5 chip, Skill pill, teal ready dot).
+
+Style: premium, sparse, cinematic. Y is the only hero. Coral in 4-5 panels max. No rainbow, no random shapes, no copycat logos. 16:9 aspect ratio, 4K feel.

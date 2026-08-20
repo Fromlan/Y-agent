@@ -25,8 +25,12 @@ vs_BuildTools.exe
 # ===== Build outputs =====
 dist
 dist-ssr
+dist-installers
 target
 node_modules
+
+# ===== Backup directories =====
+*.bak/
 
 # ===== TypeScript incremental build artifacts =====
 *.tsbuildinfo

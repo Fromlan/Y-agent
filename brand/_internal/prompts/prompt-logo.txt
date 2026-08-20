@@ -1,0 +1,7 @@
+A single high-resolution standalone logo mark for 'Y-agent' on a deep charcoal background #0E0F13. The logo is a clean geometric 'Y' character in coral red #FF5C4D, clearly readable as the letter Y.
+
+Construction: the Y has a vertical stem at the bottom, and two diagonal arms branching upward and outward at roughly 45-degree angles from a central fork point. At the exact fork point where the two arms meet the stem, place a small filled coral circle, the 'AI spark node'. The arms extend slightly past the fork to create negative space.
+
+Style: bold geometric sans-serif mark, clean vector-style edges, perfectly symmetrical, the kind of mark you would see at a developer-tools company. Generous negative space around the mark. Premium, intentional, minimal. No text, no tagline, no decorations, just the Y mark centered on charcoal. No gradients, no shadows, no effects.
+
+Square 1:1, 2048x2048, sharp.
