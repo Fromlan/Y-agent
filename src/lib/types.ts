@@ -233,6 +233,8 @@ export interface AssetPayload {
   localPaths?: string[];
   /** P5：图层拆分的图层本地路径（与 layers 平行） */
   layerLocalPaths?: string[];
+  /** P5+：本地兜底失败时由后端标 true（24h URL 失效等），UI 显示"图已过期" */
+  broken?: boolean;
 }
 
 export interface Asset {
