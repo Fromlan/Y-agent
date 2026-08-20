@@ -25,8 +25,24 @@ export interface Skill {
   groupCount?: number;
   /** 是否必须参考图（来自 frontmatter ref_required） */
   refRequired: boolean;
+  /** P6：所属分组（基础生图 / 组图 / 5.0 Pro 专属 / 高级） */
+  group?: SkillGroup;
   /** 模板正文（已剥离 frontmatter） */
   template: string;
+}
+
+/** P6：Skill 分组（按能力维度分类，方便 picker 展示） */
+export type SkillGroup =
+  | "基础生图"
+  | "组图"
+  | "5.0 Pro 专属"
+  | "高级";
+
+/** 按 id 推断默认分组（frontmatter 未声明时用） */
+export function inferSkillGroup(skill: Pick<Skill, "id" | "modelHint" | "groupCount">): SkillGroup {
+  if (skill.groupCount && skill.groupCount > 1) return "组图";
+  if (skill.modelHint === "doubao-seedream-5-0-pro-260628") return "5.0 Pro 专属";
+  return "基础生图";
 }
 
 /**
@@ -64,7 +80,7 @@ export function parseSkillMd(id: string, raw: string): Skill {
     throw new Error(`Skill ${id} 缺少 triggers 字段`);
   }
 
-  return {
+  const skill: Skill = {
     id,
     name: (meta.name as string) ?? id,
     description: (meta.description as string) ?? "",
@@ -73,8 +89,14 @@ export function parseSkillMd(id: string, raw: string): Skill {
     size: meta.size as string | undefined,
     groupCount: meta.group_count !== undefined ? Number(meta.group_count) : undefined,
     refRequired: meta.ref_required === "true",
+    group: meta.group as SkillGroup | undefined,
     template,
   };
+  // P6：未声明 group 时按规则推断
+  if (!skill.group) {
+    skill.group = inferSkillGroup(skill);
+  }
+  return skill;
 }
 
 /**

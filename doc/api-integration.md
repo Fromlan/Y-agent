@@ -401,6 +401,56 @@ Y-agent 集成：
 
 **Skill 模板**：无新增（P5 是基础设施层，P6 的 icon-pack-transparent 等模板会直接受益）
 
+### 1.12 Skill 模板 + Agent 工具扩展（P6）
+
+```typescript
+// 11 个 Skill 模板（4 个分组）
+// 基础生图：character-turnaround / expression-grid / character-sheet / scene-mood / kv-poster
+// 组图：scene-mood-light-variants / character-consistency-set / product-shot-pack / ui-icons
+// 5.0 Pro 专属：layer-separation / local-edit-bbox / icon-pack-transparent / infographic-poster
+
+// 3 个 Agent 工具
+// jimeng_generate_image: 文/图生图 + 7 个可选参数（model/size/ref_required/image/max_images/output_format/background/fast_mode/web_search）
+// jimeng_decompose_layers: 5.0 Pro 图层拆分
+// jimeng_local_edit: 5.0 Pro 局部编辑（bbox 可选）
+```
+
+Skill 模板新增（4 个）：
+
+| Skill | 用途 | 模型 | group_count |
+|---|---|---|---|
+| `scene-mood-light-variants` | 早/午/晚/夜 4 张 | 5.0 Lite | 4 |
+| `character-consistency-set` | 同角色 4 个动作 | 5.0 Lite | 4 |
+| `product-shot-pack` | 主图 + 角度 + 场景 6 张 | 5.0 Lite | 6 |
+| `infographic-poster` | 长 prompt 排版海报 | 5.0 Pro | 1 |
+
+加上之前 P2~P4 已建的 3 个（`layer-separation` / `local-edit-bbox` / `icon-pack-transparent`），总共 12 个。
+
+Agent 工具（3 个）：
+
+| 工具 | schema 关键字段 | 模型 |
+|---|---|---|
+| `jimeng_generate_image` | `prompt / model / size / ref_required / image / max_images / output_format / background / fast_mode / web_search` | 任意 |
+| `jimeng_decompose_layers` | `image / prompt? / model?` | 5.0 Pro 锁定 |
+| `jimeng_local_edit` | `image / edit_prompt / bbox? / model?` | 5.0 Pro 锁定 |
+
+System prompt（`renderSystemPrompt`）升级：
+- 11 个 Skill 模板按 4 个分组列出（基础生图 / 组图 / 5.0 Pro 专属 / 高级）
+- 注入"模型能力矩阵"（哪类需求该用哪个 API）
+- "判断原则"段：默认 5.0 Lite，特殊需求（拆图/局部/透明/排版）升级 5.0 Pro
+
+SkillPicker UI（`SkillPicker.tsx`）按 group 分组渲染：
+- 4 个分组用不同 lucide icon（Wand2 / ImagePlus / Sparkles / Layers）
+- 头部 sticky 展示分组名 + 数量
+- 键盘导航 / 滚动跟随仍按扁平化 idx
+
+`Skill` 类型扩展：
+- 新增 `group?: SkillGroup` 字段
+- `SkillGroup = "基础生图" | "组图" | "5.0 Pro 专属" | "高级"`
+- `inferSkillGroup(skill)` 按 `groupCount` + `modelHint` 自动推断
+
+**冒烟**：12 个 Skill 模板 + 3 个 Agent 工具（demo 模式跑通）
+
 ---
 
 ## Part 2. LLM API（OpenAI 兼容协议）
