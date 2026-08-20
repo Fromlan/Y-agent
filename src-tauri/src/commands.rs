@@ -243,21 +243,21 @@ pub async fn jimeng_generate_stream(
                 let client_for_dl = client_inner.clone();
                 let rid_for_dl = rid_for_localize.clone();
                 // 必须在 spawn 前取出 event 里需要的字段（因为 event 后面要 move）
-                let download_target: Option<(String, i32, String)> = match &event {
-                    jimeng::StreamEvent::PartialImage { url, index, .. } => {
-                        Some((rid_for_dl.clone(), *index, url.clone()))
+                let download_target: Option<(String, i32, String, Option<String>)> = match &event {
+                    jimeng::StreamEvent::PartialImage { url, index, output_format, .. } => {
+                        Some((rid_for_dl.clone(), *index, url.clone(), output_format.clone()))
                     }
                     _ => None,
                 };
-                let b64_target: Option<(String, i32, String)> = match &event {
-                    jimeng::StreamEvent::PartialImageB64 { b64, index, .. } => {
-                        Some((rid_for_dl.clone(), *index, b64.clone()))
+                let b64_target: Option<(String, i32, String, Option<String>)> = match &event {
+                    jimeng::StreamEvent::PartialImageB64 { b64, index, output_format, .. } => {
+                        Some((rid_for_dl.clone(), *index, b64.clone(), output_format.clone()))
                     }
                     _ => None,
                 };
                 let _ = app_inside.emit("jimeng://stream", &event);
 
-                if let Some((rid, idx, url)) = download_target {
+                if let Some((rid, idx, url, output_format)) = download_target {
                     tokio::spawn(async move {
                         if let Some(p) = jimeng::download_to_cache(
                             &client_for_dl,
@@ -276,11 +276,12 @@ pub async fn jimeng_generate_stream(
                                     url,
                                     size: None,
                                     local_path: Some(p.to_string_lossy().to_string()),
+                                    output_format,
                                 },
                             );
                         }
                     });
-                } else if let Some((rid, idx, b64)) = b64_target {
+                } else if let Some((rid, idx, b64, output_format)) = b64_target {
                     tokio::spawn(async move {
                         let dir = cache_for_dl.join(&rid);
                         let _ = tokio::fs::create_dir_all(&dir).await;
@@ -295,6 +296,7 @@ pub async fn jimeng_generate_stream(
                                             index: idx,
                                             b64,
                                             local_path: Some(dst.to_string_lossy().to_string()),
+                                            output_format,
                                         },
                                     );
                                 }
@@ -813,6 +815,147 @@ pub struct BackfillReport {
     pub broken_marked: usize,
 }
 
+/// P6+：回填 payload.outputFormat 报告
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackfillOutputFormatReport {
+    /// 扫到的总资产数
+    pub scanned: usize,
+    /// 缺 outputFormat 字段的资产数
+    pub missing: usize,
+    /// 成功回填的资产数
+    pub updated: usize,
+    /// 跳过（已有字段 / 没法推断）的资产数
+    pub skipped: usize,
+}
+
+#[tauri::command]
+pub fn backfill_output_format(
+    project_id: Option<String>,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<BackfillOutputFormatReport, String> {
+    let s = state.lock().map_err(map_err)?;
+    let conn = s.storage.conn.lock().map_err(map_err)?;
+
+    let sql = if project_id.is_some() {
+        "SELECT id, payload FROM assets WHERE project_id = ?1 ORDER BY created_at DESC"
+    } else {
+        "SELECT id, payload FROM assets ORDER BY created_at DESC"
+    };
+    let mut stmt = conn.prepare(sql).map_err(map_err)?;
+    let rows: Vec<(String, String)> = if let Some(pid) = &project_id {
+        stmt.query_map(params![pid], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(map_err)?
+            .filter_map(|r| r.ok())
+            .collect()
+    } else {
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(map_err)?
+            .filter_map(|r| r.ok())
+            .collect()
+    };
+
+    let mut report = BackfillOutputFormatReport {
+        scanned: rows.len(),
+        missing: 0,
+        updated: 0,
+        skipped: 0,
+    };
+
+    for (id, payload_str) in rows {
+        let mut payload: Value = match serde_json::from_str(&payload_str) {
+            Ok(v) => v,
+            Err(_) => {
+                report.skipped += 1;
+                continue;
+            }
+        };
+        // 已有 outputFormat 字段 → 跳过（避免覆盖）
+        if payload.get("outputFormat").is_some() {
+            continue;
+        }
+        report.missing += 1;
+
+        // 推断格式：优先 transparent（强制 png），否则按 urls[0] 末尾扩展名
+        let is_transparent = payload
+            .get("transparent")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let inferred: Option<&'static str> = if is_transparent {
+            Some("png")
+        } else {
+            // 优先看 layers[0].url（zIndex=0 底图），再看 urls[0]
+            let url_opt = payload
+                .get("layers")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| {
+                    let mut sorted: Vec<&Value> = arr.iter().collect();
+                    sorted.sort_by_key(|l| {
+                        l.get("zIndex")
+                            .or_else(|| l.get("z_index"))
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or(0)
+                    });
+                    sorted.first().and_then(|l| l.get("url")).and_then(|u| u.as_str())
+                })
+                .or_else(|| {
+                    payload
+                        .get("urls")
+                        .and_then(|v| v.as_array())
+                        .and_then(|arr| arr.first().and_then(|u| u.as_str()))
+                });
+            url_opt.and_then(infer_format_from_url)
+        };
+
+        match inferred {
+            Some(fmt) => {
+                if let Some(obj) = payload.as_object_mut() {
+                    obj.insert("outputFormat".to_string(), Value::String(fmt.to_string()));
+                }
+                let new_payload_str = serde_json::to_string(&payload).map_err(map_err)?;
+                conn.execute(
+                    "UPDATE assets SET payload = ?1 WHERE id = ?2",
+                    params![new_payload_str, id],
+                )
+                .map_err(map_err)?;
+                report.updated += 1;
+            }
+            None => {
+                report.skipped += 1;
+            }
+        }
+    }
+
+    Ok(report)
+}
+
+/// 从 URL / data URL 推断图片格式。data URL 取首段 mime；普通 URL 看末尾扩展名。
+/// 返回 "png" / "jpeg" / None。
+fn infer_format_from_url(url: &str) -> Option<&'static str> {
+    // data URL：data:image/png;base64,... 或 data:image/jpeg;base64,...
+    if let Some(rest) = url.strip_prefix("data:") {
+        if rest.starts_with("image/png") {
+            return Some("png");
+        }
+        if rest.starts_with("image/jpeg") || rest.starts_with("image/jpg") {
+            return Some("jpeg");
+        }
+        return None;
+    }
+    // 普通 URL：忽略 query string 和 fragment，看 path 末尾
+    let path = url.split('?').next().unwrap_or(url);
+    let path = path.split('#').next().unwrap_or(path);
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".png") {
+        Some("png")
+    } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        Some("jpeg")
+    } else {
+        // 火山方舟 URL 通常不带扩展名（jfs/tos 内部路径），无法推断 → 跳过
+        None
+    }
+}
+
 #[tauri::command]
 pub async fn backfill_local_assets(
     project_id: Option<String>,
@@ -1053,19 +1196,52 @@ pub fn read_image_data_url(path: String, app: AppHandle) -> Result<String, Strin
         ));
     }
     let bytes = std::fs::read(&canonical_path).map_err(map_err)?;
-    // 按扩展名推断 mime
-    let ext = canonical_path
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or("png")
-        .to_lowercase();
-    let mime = match ext.as_str() {
-        "jpg" | "jpeg" => "image/jpeg",
-        "webp" => "image/webp",
-        "gif" => "image/gif",
-        "svg" => "image/svg+xml",
-        _ => "image/png",
+
+    // MIME 推断策略：magic bytes 优先（覆盖以 .png 结尾但实际是 JPEG 字节的"假 PNG"），
+    // 命中 SVG/XML 时按文本头检测；都不识别则回退到扩展名（保持对 BMP/TIFF/ICO 等老格式的兜底）。
+    let magic_mime: Option<&'static str> = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if bytes.starts_with(b"\xff\xd8\xff") {
+        Some("image/jpeg")
+    } else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else {
+        None
     };
+
+    // SVG / XML 文本头：跳过前导 ASCII 空白再判
+    let head_offset = bytes
+        .iter()
+        .take_while(|b| b.is_ascii_whitespace())
+        .count();
+    let looks_like_svg = head_offset < bytes.len()
+        && (bytes[head_offset..].starts_with(b"<?xml")
+            || bytes[head_offset..].starts_with(b"<svg"));
+
+    let mime = magic_mime
+        .or(if looks_like_svg {
+            Some("image/svg+xml")
+        } else {
+            None
+        })
+        .unwrap_or_else(|| {
+            // 扩展名兜底（保留旧行为）
+            let ext = canonical_path
+                .extension()
+                .and_then(|s| s.to_str())
+                .unwrap_or("png")
+                .to_lowercase();
+            match ext.as_str() {
+                "jpg" | "jpeg" => "image/jpeg",
+                "webp" => "image/webp",
+                "gif" => "image/gif",
+                "svg" => "image/svg+xml",
+                _ => "image/png",
+            }
+        });
+
     Ok(format!("data:{};base64,{}", mime, B64.encode(&bytes)))
 }
 
@@ -1086,9 +1262,10 @@ pub fn explain_error(raw: String) -> String {
     } else if raw.contains("output_format=jpeg 与 background=transparent 互斥") {
         "透明背景必须用 PNG 输出。把「输出格式」切到 PNG，或关掉「透明背景」开关。"
     } else if lower.contains("transparent background requires a png") {
-        // 5.0 Pro 的 background: transparent 要求输入图也是 PNG（不是 JPEG）。
-        // 通常因为源图是 5.0 Lite / 4.5 / 4.0 生成的 JPEG 格式。
-        "5.0 Pro 的「背景透明」要求输入图必须是 PNG 格式。请在「去背」工具里改用 PNG 来源的资产，或先用「局部编辑」把图重出为 PNG 格式。"
+        // API 实际要求：① PNG（不是 JPEG/WebP），② 至少 1 个透明像素。
+        // Y-agent 已在 `runTool` 阶段对图加了 1 个透明像素（image-alpha-patch），
+        // 此处承担兜底——仍报此错通常是源图不是真 PNG（例如 .png 扩展名但实际是 JPEG 字节）。
+        "5.0 Pro 的「背景透明」要求输入图是带至少一个透明像素的 PNG（不透明 PNG、JPEG、WebP 都会被拒）。通常 Y-agent 已经自动处理了左上角 1 像素，若仍报此错，多半是源图不是真 PNG（例如 .png 扩展名但实际是 JPEG 字节），请换一张真 PNG 再试。"
     } else if lower.contains("internalserviceerror") {
         "服务端内部错误（通常 5xx）。重试一次，或等几分钟后回来。"
     } else if lower.contains("invalidparameter") {

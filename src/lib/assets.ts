@@ -42,3 +42,25 @@ export async function backfillLocalAssets(
 ): Promise<BackfillReport> {
   return await invoke<BackfillReport>("backfill_local_assets", { projectId });
 }
+
+/** P6+：回填 payload.outputFormat 报告（一次性修复 P4 之前入库的资产）
+ *  - scanned: 扫到的总资产数
+ *  - missing: 缺 outputFormat 字段的资产数
+ *  - updated: 成功回填的资产数（按 URL 末尾扩展名或 transparent 标志推断）
+ *  - skipped: 跳过的（已有字段 / URL 无法推断 / payload 解析失败）
+ * 火山方舟 URL 不带扩展名时无法推断，会被跳过（属正常情况）。
+ */
+export interface BackfillOutputFormatReport {
+  scanned: number;
+  missing: number;
+  updated: number;
+  skipped: number;
+}
+
+export async function backfillOutputFormat(
+  projectId?: string
+): Promise<BackfillOutputFormatReport> {
+  return await invoke<BackfillOutputFormatReport>("backfill_output_format", {
+    projectId,
+  });
+}

@@ -43,6 +43,7 @@ pub fn run() {
             commands::list_assets,
             commands::delete_asset,
             commands::backfill_local_assets,
+            commands::backfill_output_format,
             commands::get_pref,
             commands::set_pref,
             commands::explain_error,
