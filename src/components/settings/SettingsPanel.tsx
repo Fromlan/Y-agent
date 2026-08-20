@@ -424,7 +424,15 @@ export default function SettingsPanel({ open, onClose }: Props) {
 
         {/* 关于 */}
         <div className="border-t border-border px-5 py-3 flex items-center justify-between text-[11px] text-text-muted bg-bg-elev/40">
-          <span>{APP_NAME}</span>
+          <div className="flex items-center gap-2">
+            <img src="/logo.svg" alt="Y-agent" className="w-5 h-5" />
+            <div className="flex flex-col leading-tight">
+              <span className="font-semibold text-text-primary text-xs">{APP_NAME}</span>
+              <span className="text-text-muted tracking-wide">
+                Make · Iterate · Ship
+              </span>
+            </div>
+          </div>
           <span className="font-mono" title="v0.1.0 = package.json / build-tag = git + 时间">
             v{APP_VERSION} · {BUILD_TAG}
           </span>
