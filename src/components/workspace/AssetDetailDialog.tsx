@@ -17,6 +17,9 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize2,
+  Eye,
+  EyeOff,
+  Frame,
 } from "lucide-react";
 import type { Asset, GeneratedImage } from "@/lib/types";
 import { assetMainImage, flatAssetImages } from "@/lib/types";
@@ -46,16 +49,32 @@ export default function AssetDetailDialog({
 }: Props) {
   const images = flatAssetImages(asset);
   const [idx, setIdx] = useState(0);
-  const cur = images[idx];
   const toast = useToast();
   const [confirmDel, setConfirmDel] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
+  // P2：图层可见性。被隐藏的图层不参与左右切换、不显示在主预览。
+  const [hiddenLayers, setHiddenLayers] = useState<Set<number>>(new Set());
+  const toggleLayerVisible = (i: number) => {
+    setHiddenLayers((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  };
+  // 如果当前 idx 被隐藏，自动跳到第一个可见图层
+  const visibleIdx = hiddenLayers.has(idx)
+    ? images.findIndex((_, k) => !hiddenLayers.has(k))
+    : idx;
+  const effectiveIdx = visibleIdx === -1 ? idx : visibleIdx;
+  const cur = images[effectiveIdx];
 
   // 切换资产/打开时归零
   useEffect(() => {
     setIdx(0);
     setConfirmDel(false);
     setPromptCopied(false);
+    setHiddenLayers(new Set());
   }, [asset.id]);
 
   // 键盘快捷键
@@ -82,7 +101,8 @@ export default function AssetDetailDialog({
   const onDownloadCur = () => {
     if (!cur?.url) return;
     const ext = cur.url.startsWith("data:") ? "png" : "png";
-    onDownload(cur.url, `y-agent-${asset.id}-${idx + 1}.${ext}`);
+    const label = cur.name ? `-${cur.name.replace(/\s+/g, "_")}` : `-${effectiveIdx + 1}`;
+    onDownload(cur.url, `y-agent-${asset.id}${label}.${ext}`);
   };
 
   const onDownloadAll = async () => {
@@ -90,7 +110,10 @@ export default function AssetDetailDialog({
     // 分批触发，避免浏览器把连续下载当广告拦截。
     for (let i = 0; i < images.length; i++) {
       const img = images[i];
-      if (img.url) onDownload(img.url, `y-agent-${asset.id}-${i + 1}.png`);
+      if (img.url) {
+        const label = img.name ? `-${img.name.replace(/\s+/g, "_")}` : `-${i + 1}`;
+        onDownload(img.url, `y-agent-${asset.id}${label}.png`);
+      }
       await new Promise((r) => setTimeout(r, 250));
     }
   };
@@ -156,7 +179,17 @@ export default function AssetDetailDialog({
               <div className="flex items-center justify-center gap-2 p-2 border-t border-border bg-bg-panel flex-shrink-0">
                 <button
                   onClick={() =>
-                    setIdx((i) => (i - 1 + images.length) % images.length)
+                    setIdx((i) => {
+                      // 跳过隐藏的图层
+                      const visible = images
+                        .map((_, k) => k)
+                        .filter((k) => !hiddenLayers.has(k));
+                      if (visible.length === 0) return i;
+                      const curPos = visible.indexOf(i);
+                      const nextPos =
+                        (curPos - 1 + visible.length) % visible.length;
+                      return visible[nextPos];
+                    })
                   }
                   className="btn-icon"
                   title="上一张（←）"
@@ -164,29 +197,49 @@ export default function AssetDetailDialog({
                   <ChevronLeft className="w-4 h-4" />
                 </button>
                 <div className="flex items-center gap-1 overflow-x-auto max-w-[60%]">
-                  {images.map((img, i) => (
-                    <button
-                      key={i}
-                      onClick={() => setIdx(i)}
-                      className={`flex-shrink-0 w-10 h-10 rounded overflow-hidden border-2 transition-colors
-                        ${i === idx ? "border-accent" : "border-border hover:border-border-strong"}
-                      `}
-                      title={img.name ?? `图 ${i + 1}`}
-                    >
-                      {img.url ? (
-                        <img
-                          src={img.url}
-                          alt=""
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-full bg-bg-elev" />
-                      )}
-                    </button>
-                  ))}
+                  {images.map((img, i) => {
+                    const isHidden = hiddenLayers.has(i);
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => !isHidden && setIdx(i)}
+                        className={`relative flex-shrink-0 w-10 h-10 rounded overflow-hidden border-2 transition-colors
+                          ${isHidden ? "border-border opacity-40" : i === idx ? "border-accent" : "border-border hover:border-border-strong"}
+                        `}
+                        title={
+                          isHidden
+                            ? `${img.name ?? `图 ${i + 1}`}（已隐藏，点亮显示）`
+                            : img.name ?? `图 ${i + 1}`
+                        }
+                      >
+                        {img.url ? (
+                          <img
+                            src={img.url}
+                            alt=""
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-bg-elev" />
+                        )}
+                        {isHidden && (
+                          <EyeOff className="absolute inset-0 m-auto w-3.5 h-3.5 text-white drop-shadow" />
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
                 <button
-                  onClick={() => setIdx((i) => (i + 1) % images.length)}
+                  onClick={() =>
+                    setIdx((i) => {
+                      const visible = images
+                        .map((_, k) => k)
+                        .filter((k) => !hiddenLayers.has(k));
+                      if (visible.length === 0) return i;
+                      const curPos = visible.indexOf(i);
+                      const nextPos = (curPos + 1) % visible.length;
+                      return visible[nextPos];
+                    })
+                  }
                   className="btn-icon"
                   title="下一张（→）"
                 >
@@ -272,6 +325,84 @@ export default function AssetDetailDialog({
                   />
                 </div>
               </section>
+
+              {/* P2：图层面板（仅 layer_decomposition 资产） */}
+              {asset.isLayerDecomposition && images.length > 0 && (
+                <section>
+                  <h3 className="text-[10px] text-text-muted uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                    <Layers className="w-3 h-3" /> 图层列表
+                    <span className="text-text-muted/60 normal-case">
+                      ({images.filter((_, k) => !hiddenLayers.has(k)).length} / {images.length} 可见)
+                    </span>
+                  </h3>
+                  <div className="space-y-1">
+                    {images.map((img, i) => {
+                      const isHidden = hiddenLayers.has(i);
+                      const isBase = (img.zIndex ?? 0) === 0;
+                      const bb = img.boundingBox?.absolute;
+                      return (
+                        <div
+                          key={i}
+                          className={`flex items-start gap-2 p-2 rounded border transition-colors
+                            ${isHidden ? "border-border bg-bg-base opacity-60" : "border-border bg-bg-elev hover:border-border-strong"}
+                          `}
+                        >
+                          <img
+                            src={img.url}
+                            alt=""
+                            className="w-12 h-12 object-cover rounded flex-shrink-0 cursor-pointer"
+                            onClick={() => !isHidden && setIdx(i)}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 text-xs">
+                              {isBase ? (
+                                <span className="px-1.5 py-0.5 bg-accent/20 text-accent rounded text-[10px] font-medium">
+                                  底图
+                                </span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 bg-bg-panel text-text-muted rounded text-[10px]">
+                                  图层 {img.zIndex}
+                                </span>
+                              )}
+                              <span className="text-text-primary truncate flex-1" title={img.name}>
+                                {img.name ?? `图层 ${i + 1}`}
+                              </span>
+                            </div>
+                            {img.description && (
+                              <p className="text-[10px] text-text-muted mt-0.5 line-clamp-2">
+                                {img.description}
+                              </p>
+                            )}
+                            {bb && (
+                              <p className="text-[10px] text-text-muted/70 mt-0.5 font-mono flex items-center gap-1">
+                                <Frame className="w-2.5 h-2.5" />
+                                [{bb.join(", ")}]
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex flex-col gap-0.5 flex-shrink-0">
+                            <button
+                              onClick={() => toggleLayerVisible(i)}
+                              className="btn-icon p-1"
+                              title={isHidden ? "显示" : "隐藏"}
+                            >
+                              {isHidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                            </button>
+                            <button
+                              onClick={() => img.url && onDownload(img.url, `y-agent-${asset.id}-${img.name ?? i + 1}.png`)}
+                              className="btn-icon p-1"
+                              title="导出该图层"
+                              disabled={!img.url}
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
 
               {/* 时间信息 */}
               <section>
