@@ -27,6 +27,15 @@ pub fn run() {
 
             let state = AppState::new(app_dir.clone())?;
             app.manage(Mutex::new(state));
+
+            // 启动时全量自检:扫所有资产,补下缺失 / 文件已不存在的本地缓存。
+            // fire-and-forget,不等结果——前端通过 `assets://local-backfilled`
+            // 事件拿到增量更新,避免切项目时整板 re-render。
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                commands::startup_backfill_assets(app_handle).await;
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

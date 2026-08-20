@@ -9,9 +9,24 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 const KEY_KV: &str = "jimeng_api_key";
+/// 资产本地兜底完成事件。Rust 端在 `payload.localPaths` 写库成功后 emit,
+/// 前端按 assetId 增量更新 in-memory asset 状态,避免整板 re-render。
+pub const ASSET_LOCAL_BACKFILLED_EVENT: &str = "assets://local-backfilled";
 
 fn map_err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
+}
+
+/// 资产本地兜底完成事件 payload(camelCase 序列化给前端)。
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetLocalBackfilled {
+    pub asset_id: String,
+    pub project_id: String,
+    /// urls 模式的 localPaths(可空:layers 模式资产不会带)
+    pub local_paths: Option<Vec<String>>,
+    /// layers 模式的 layerLocalPaths
+    pub layer_local_paths: Option<Vec<String>>,
 }
 
 // ---------- API Key ----------
@@ -534,6 +549,7 @@ pub async fn create_asset(
     spawn_local_path_backfill(
         app,
         id.clone(),
+        params.project_id.clone(),
         extract_urls_for_backfill(&params.payload),
         extract_local_paths_for_backfill(&params.payload),
     );
@@ -578,11 +594,36 @@ pub fn list_assets(
 }
 
 #[tauri::command]
-pub fn delete_asset(id: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-    let s = state.lock().map_err(map_err)?;
-    let conn = s.storage.conn.lock().map_err(map_err)?;
-    conn.execute("DELETE FROM assets WHERE id = ?1", params![id])
-        .map_err(map_err)?;
+pub fn delete_asset(
+    id: String,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<(), String> {
+    // 1) 先拿 app_data_dir,后面清文件要拼路径
+    let app_dir = {
+        let s = state.lock().map_err(map_err)?;
+        s.storage.app_dir.clone()
+    };
+    // 2) 删 DB 行
+    {
+        let s = state.lock().map_err(map_err)?;
+        let conn = s.storage.conn.lock().map_err(map_err)?;
+        conn.execute("DELETE FROM assets WHERE id = ?1", params![id])
+            .map_err(map_err)?;
+    }
+    // 3) 异步清本地缓存目录,失败仅 log(不阻断前端)
+    let cache_dir = app_dir.join("assets").join(&id);
+    tauri::async_runtime::spawn(async move {
+        match tokio::fs::remove_dir_all(&cache_dir).await {
+            Ok(_) => log::info!("asset cache dir removed: {}", cache_dir.display()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // 文件早被外部删了,正常
+            }
+            Err(e) => log::warn!(
+                "failed to remove asset cache dir {}: {e}",
+                cache_dir.display()
+            ),
+        }
+    });
     Ok(())
 }
 
@@ -725,10 +766,11 @@ fn write_local_paths_to_payload(
 /// 后台异步补下 localPath 的核心 task。
 /// - 串行下载避免瞬时打满带宽
 /// - 全部下完或部分失败后，统一写回一次 DB
-/// - 不向前端发任何事件（用户 reload 资产列表时自然拿到新 localPath）
+/// - 写库成功 → emit `assets://local-backfilled` 事件，前端增量更新(避免整板 reload)
 fn spawn_local_path_backfill(
     app: AppHandle,
     asset_id: String,
+    project_id: String,
     urls: Vec<String>,
     mut existing: Vec<Option<String>>,
 ) {
@@ -788,17 +830,38 @@ fn spawn_local_path_backfill(
         }
         // 写回 DB
         let state_in_spawn: tauri::State<Mutex<AppState>> = app.state();
-        let result: Result<(), String> = (|| {
+        let write_result: Result<Vec<String>, String> = (|| {
             let g = state_in_spawn.lock().map_err(map_err)?;
             let conn = g.storage.conn.lock().map_err(map_err)?;
             write_local_paths_to_payload(&conn, &app_dir, &asset_id, &existing)?;
             if any_failed {
                 mark_asset_broken(&conn, &asset_id).ok();
             }
-            Ok(())
+            // 把 cleaned 后(写回 DB 后的)local_paths 序列化回去给前端
+            let cleaned: Vec<String> = existing
+                .iter()
+                .map(|p| p.clone().unwrap_or_default())
+                .collect();
+            Ok(cleaned)
         })();
-        if let Err(e) = result {
-            log::warn!("backfill write failed for {asset_id}: {e}");
+        match write_result {
+            Ok(cleaned) => {
+                // 通知前端：这条资产已经下载到本地，请增量更新 React state。
+                // emit 同时给两个字段都发 cleaned——前端按自己 payload 形态
+                // (urls 还是 layers)选用 localPaths / layerLocalPaths。
+                let payload = AssetLocalBackfilled {
+                    asset_id: asset_id.clone(),
+                    project_id: project_id.clone(),
+                    local_paths: Some(cleaned.clone()),
+                    layer_local_paths: Some(cleaned),
+                };
+                if let Err(e) = app.emit(ASSET_LOCAL_BACKFILLED_EVENT, payload) {
+                    log::warn!("emit {ASSET_LOCAL_BACKFILLED_EVENT} failed: {e}");
+                }
+            }
+            Err(e) => {
+                log::warn!("backfill write failed for {asset_id}: {e}");
+            }
         }
     });
 }
@@ -956,53 +1019,63 @@ fn infer_format_from_url(url: &str) -> Option<&'static str> {
     }
 }
 
-#[tauri::command]
-pub async fn backfill_local_assets(
+/// 同步扫出「localPath 缺位 / 文件已不在磁盘」的资产。
+/// 共享给 backfill_local_assets(项目级) 和 startup_backfill(全量)。
+fn scan_backfill_candidates(
     project_id: Option<String>,
-    state: State<'_, Mutex<AppState>>,
-    app: AppHandle,
-) -> Result<BackfillReport, String> {
-    // 1. 同步：扫出所有"缺 localPath"的资产
-    let candidates: Vec<(String, Vec<String>, Vec<Option<String>>)> = {
-        let s = state.lock().map_err(map_err)?;
-        let conn = s.storage.conn.lock().map_err(map_err)?;
-        let sql = if project_id.is_some() {
-            "SELECT id, payload FROM assets WHERE project_id = ?1 ORDER BY created_at DESC"
-        } else {
-            "SELECT id, payload FROM assets ORDER BY created_at DESC"
-        };
-        let mut stmt = conn.prepare(sql).map_err(map_err)?;
-        let rows: Vec<(String, String)> = if let Some(pid) = &project_id {
-            stmt.query_map(params![pid], |r| Ok((r.get(0)?, r.get(1)?)))
-                .map_err(map_err)?
-                .filter_map(|r| r.ok())
-                .collect()
-        } else {
-            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
-                .map_err(map_err)?
-                .filter_map(|r| r.ok())
-                .collect()
-        };
-        rows.into_iter()
-            .filter_map(|(id, payload_str)| {
-                let payload: Value = serde_json::from_str(&payload_str).ok()?;
-                let urls = extract_urls_for_backfill(&payload);
-                if urls.is_empty() {
-                    return None;
-                }
-                let existing = extract_local_paths_for_backfill(&payload);
-                // 只有"缺至少一个"的才参与
-                if existing
-                    .iter()
-                    .all(|p| p.as_deref().is_some_and(|s| !s.is_empty()))
-                {
-                    return None;
-                }
-                Some((id, urls, existing))
-            })
+    state: &Mutex<AppState>,
+) -> Result<Vec<(String, String, Vec<String>, Vec<Option<String>>)>, String> {
+    let s = state.lock().map_err(map_err)?;
+    let conn = s.storage.conn.lock().map_err(map_err)?;
+    let sql = if project_id.is_some() {
+        "SELECT id, project_id, payload FROM assets WHERE project_id = ?1 ORDER BY created_at DESC"
+    } else {
+        "SELECT id, project_id, payload FROM assets ORDER BY created_at DESC"
+    };
+    let mut stmt = conn.prepare(sql).map_err(map_err)?;
+    let rows: Vec<(String, String, String)> = if let Some(pid) = &project_id {
+        stmt.query_map(params![pid], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map_err(map_err)?
+            .filter_map(|r| r.ok())
+            .collect()
+    } else {
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map_err(map_err)?
+            .filter_map(|r| r.ok())
             .collect()
     };
+    Ok(rows
+        .into_iter()
+        .filter_map(|(id, project_id, payload_str)| {
+            let payload: Value = serde_json::from_str(&payload_str).ok()?;
+            let urls = extract_urls_for_backfill(&payload);
+            if urls.is_empty() {
+                return None;
+            }
+            let existing = extract_local_paths_for_backfill(&payload);
+            // 条件 1:localPaths 至少有缺位
+            let has_missing = existing
+                .iter()
+                .any(|p| p.as_deref().is_none_or(|s| s.is_empty()));
+            // 条件 2:已有 path 但文件已被外部删除
+            let has_dead_file = existing.iter().any(|p| {
+                p.as_deref()
+                    .is_some_and(|s| !s.is_empty() && !std::path::Path::new(s).exists())
+            });
+            if !has_missing && !has_dead_file {
+                return None;
+            }
+            Some((id, project_id, urls, existing))
+        })
+        .collect())
+}
 
+/// 共用的「并发下载 + 写库 + emit 事件」核心。
+/// candidates 由 scan_backfill_candidates 给出;调用方各自做同步扫描,然后把结果 move 进来。
+async fn download_and_write_candidates(
+    candidates: Vec<(String, String, Vec<String>, Vec<Option<String>>)>,
+    app: AppHandle,
+) -> Result<BackfillReport, String> {
     let total = candidates.len();
     if total == 0 {
         return Ok(BackfillReport {
@@ -1013,19 +1086,18 @@ pub async fn backfill_local_assets(
         });
     }
 
-    // 2. 异步：每条资产单独 tokio::spawn，并发拉取
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| format!("reqwest client build failed: {e}"))?;
-    let app_dir = {
-        let s = state.lock().map_err(map_err)?;
-        s.storage.app_dir.clone()
+    let app_dir = match app.path().app_data_dir() {
+        Ok(d) => d,
+        Err(e) => return Err(format!("app_data_dir failed: {e}")),
     };
     let cache_dir = app_dir.join("assets");
 
     let mut handles = Vec::with_capacity(total);
-    for (asset_id, urls, mut existing) in candidates.into_iter() {
+    for (asset_id, project_id, urls, mut existing) in candidates.into_iter() {
         while existing.len() < urls.len() {
             existing.push(None);
         }
@@ -1037,8 +1109,11 @@ pub async fn backfill_local_assets(
             let mut changed = false;
             let mut all_ok = true;
             for (i, url) in urls.iter().enumerate() {
-                if existing[i].as_deref().is_some_and(|s| !s.is_empty()) {
-                    continue;
+                // 已存在且文件还在 → 跳过
+                if let Some(p) = existing[i].as_deref() {
+                    if !p.is_empty() && std::path::Path::new(p).exists() {
+                        continue;
+                    }
                 }
                 if let Some(p) =
                     jimeng::download_to_cache(&client, url, &cache_dir, &asset_id, i).await
@@ -1050,26 +1125,35 @@ pub async fn backfill_local_assets(
                 }
             }
             if !changed {
-                return (asset_id, false, false);
+                return (asset_id, project_id, false, false, None);
             }
             // 写回 DB
             let state_in_spawn: tauri::State<Mutex<AppState>> = app_for_state.state();
-            let write_ok = match state_in_spawn.lock() {
+            let write_result: Result<Option<Vec<String>>, String> = match state_in_spawn.lock() {
                 Ok(g) => match g.storage.conn.lock() {
                     Ok(conn) => {
-                        let r = write_local_paths_to_payload(
-                            &conn,
-                            &app_dir_inner,
-                            &asset_id,
-                            &existing,
-                        );
-                        r.is_ok()
+                        let r =
+                            write_local_paths_to_payload(&conn, &app_dir_inner, &asset_id, &existing);
+                        if r.is_ok() {
+                            let cleaned: Vec<String> = existing
+                                .iter()
+                                .map(|p| p.clone().unwrap_or_default())
+                                .collect();
+                            Ok(Some(cleaned))
+                        } else {
+                            Err(r.unwrap_err())
+                        }
                     }
-                    Err(_) => false,
+                    Err(_) => Ok(None),
                 },
-                Err(_) => false,
+                Err(_) => Ok(None),
             };
-            (asset_id, all_ok, write_ok)
+            let cleaned = match write_result {
+                Ok(c) => c,
+                Err(_) => None,
+            };
+            let write_ok = cleaned.is_some();
+            (asset_id, project_id, all_ok, write_ok, cleaned)
         });
         handles.push(handle);
     }
@@ -1079,20 +1163,34 @@ pub async fn backfill_local_assets(
     let mut broken_marked = 0usize;
     for h in handles {
         match h.await {
-            Ok((id, all_ok, write_ok)) => {
+            Ok((id, project_id, all_ok, write_ok, cleaned)) => {
                 if write_ok {
                     downloaded += 1;
                     if !all_ok {
                         // 部分下载失败 → 标 broken
-                        let state_now: tauri::State<Mutex<AppState>> = app.state();
-                        let lock_result = state_now.lock();
-                        if let Ok(g) = lock_result {
-                            let conn_result = g.storage.conn.lock();
-                            if let Ok(conn) = conn_result {
-                                if mark_asset_broken(&conn, &id).is_ok() {
-                                    broken_marked += 1;
-                                }
-                            }
+                        // 用 block 把 State 的生命周期限制在块内,避免与 Result 临时值重叠
+                        let marked = {
+                            let state_for_broken: tauri::State<Mutex<AppState>> = app.state();
+                            let g = state_for_broken.lock().ok();
+                            let conn = g.as_ref().and_then(|g| g.storage.conn.lock().ok());
+                            conn.as_deref()
+                                .and_then(|c| mark_asset_broken(c, &id).ok())
+                                .is_some()
+                        };
+                        if marked {
+                            broken_marked += 1;
+                        }
+                    }
+                    // emit 事件让前端增量更新(避免整板 reload)
+                    if let Some(cleaned) = cleaned {
+                        let payload = AssetLocalBackfilled {
+                            asset_id: id,
+                            project_id,
+                            local_paths: Some(cleaned.clone()),
+                            layer_local_paths: Some(cleaned),
+                        };
+                        if let Err(e) = app.emit(ASSET_LOCAL_BACKFILLED_EVENT, payload) {
+                            log::warn!("emit {ASSET_LOCAL_BACKFILLED_EVENT} failed: {e}");
                         }
                     }
                 } else {
@@ -1117,6 +1215,37 @@ pub async fn backfill_local_assets(
         failed,
         broken_marked,
     })
+}
+
+#[tauri::command]
+pub async fn backfill_local_assets(
+    project_id: Option<String>,
+    state: State<'_, Mutex<AppState>>,
+    app: AppHandle,
+) -> Result<BackfillReport, String> {
+    let candidates = scan_backfill_candidates(project_id, &state)?;
+    download_and_write_candidates(candidates, app).await
+}
+
+/// 启动时全量自检:扫所有项目下「localPath 缺位 / 文件已不在磁盘」的资产,后台拉取并写回。
+/// - 由 `lib.rs` 在 `setup` 阶段通过 `tokio::spawn` 调用,不等结果
+/// - 完成后通过 `assets://local-backfilled` 事件告知前端
+pub async fn startup_backfill_assets(app: AppHandle) {
+    let state: tauri::State<Mutex<AppState>> = app.state();
+    let candidates = match scan_backfill_candidates(None, &state) {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("startup backfill scan failed: {e}");
+            return;
+        }
+    };
+    match download_and_write_candidates(candidates, app).await {
+        Ok(r) => log::info!(
+            "startup backfill done: scanned={} downloaded={} failed={} broken_marked={}",
+            r.scanned, r.downloaded, r.failed, r.broken_marked
+        ),
+        Err(e) => log::warn!("startup backfill failed: {e}"),
+    }
 }
 
 /// 给 payload 标 `broken: true`（供 UI 提示用户重新生成）。
