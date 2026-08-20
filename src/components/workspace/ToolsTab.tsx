@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+﻿import { useState, useRef, useEffect } from "react";
 import {
   Layers,
   X,
@@ -360,7 +360,7 @@ function BatchForm({ projectId, onRun, busy }: FormProps) {
   const lite = MODEL_OPTIONS.find((m) => m.id === LITE_ID) ?? MODEL_OPTIONS[0];
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState<ModelOption>(lite);
-  const [size, setSize] = useState("2K");
+  const [size, setSize] = useState("2k");
   const [count, setCount] = useState(4);
   const [fastMode, setFastMode] = useState(false);
   const [outputFormat, setOutputFormat] = useState<"" | "png" | "jpeg">("png");
@@ -479,7 +479,7 @@ function WebSearchForm({ projectId, onRun, busy }: FormProps) {
   const lite = MODEL_OPTIONS.find((m) => m.id === LITE_ID) ?? MODEL_OPTIONS[0];
   const caps = modelCapabilities(lite.id);
   const [prompt, setPrompt] = useState("");
-  const [size, setSize] = useState("2K");
+  const [size, setSize] = useState("2k");
   const [outputFormat, setOutputFormat] = useState<"" | "png" | "jpeg">("png");
   const submit = () => {
     if (!prompt.trim()) return;
@@ -555,7 +555,7 @@ function TransparentForm({ projectId, assets, onRun, busy }: ImageFormProps) {
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [pickOpen, setPickOpen] = useState(false);
   const [prompt, setPrompt] = useState("保持主体不变，背景改为透明");
-  const [size, setSize] = useState("2K");
+  const [size, setSize] = useState("2k");
   const [fastMode, setFastMode] = useState(false);
   const isJpeg = selectedAsset ? isAssetJpeg(selectedAsset) : false;
   const submit = () => {
@@ -682,7 +682,7 @@ function LayerForm({ projectId, assets, onRun, busy }: ImageFormProps) {
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [pickOpen, setPickOpen] = useState(false);
   const [prompt, setPrompt] = useState("将图像拆分为底图与可编辑图层");
-  const [size, setSize] = useState("2K");
+  const [size, setSize] = useState("2k");
   const [fastMode, setFastMode] = useState(false);
   const submit = () => {
     if (!sourceUrl) return;
@@ -778,7 +778,7 @@ function LocalEditForm({ projectId, assets, onRun, busy }: ImageFormProps) {
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [pickOpen, setPickOpen] = useState(false);
   const [prompt, setPrompt] = useState("");
-  const [size, setSize] = useState("2K");
+  const [size, setSize] = useState("2k");
   const [fastMode, setFastMode] = useState(false);
   // bbox 用图像素坐标（API 文档要求的格式）
   const [bbox, setBbox] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(
