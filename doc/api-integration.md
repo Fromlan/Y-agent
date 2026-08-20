@@ -443,13 +443,14 @@ Y-agent 策略：**不教育用户去手动改图**，而是在 `runTool.buildGe
 
 ```typescript
 // 前端：SafeImage 组件自动用 imageInput(img) 优先取 localPath
-// 通过 invoke("read_image_data_url", { path }) 转成 data: URL
-// 同一路径缓存 data URL，避免重复 IPC
+// 通过 convertFileSrc(path) 转成 `asset://localhost/<encoded>` URL
+// Webview 内部 asset 协议处理器直读本地磁盘,零 IPC、零 base64 编码
+// 同一路径缓存 asset URL,避免重复字符串处理
 
-// 入库：asset-flow 把 localPaths 写进 payload（普通生图与图层拆分都覆盖）
-// 资产卡 / 资产详情：优先用 localPath，缺失回退 url
-// AssetCard 右下角"本地"徽章
-// SettingsPanel 今日用量：聚合近 24h 内所有项目的 asset.payload.usage
+// 入库:asset-flow 把 localPaths 写进 payload(普通生图与图层拆分都覆盖)
+// 资产卡 / 资产详情:优先用 localPath,缺失回退 url
+// AssetCard 右上"备份中" / "图已过期" / 右下"本地"徽标
+// SettingsPanel 今日用量:聚合近 24h 内所有项目的 asset.payload.usage
 ```
 
 Rust 端：
@@ -457,23 +458,43 @@ Rust 端：
   - 30s 超时，仅下载 http(s) URL
   - 自动推断扩展名（默认 png）
   - 父目录自动创建
-- `commands::read_image_data_url(path) -> String`
+- `commands::read_image_data_url(path) -> String`  *(已弃用,仅留作 fallback / 旧版兼容)*
   - 路径必须在 `app_data_dir/assets/` 下（防越权）
-  - 按扩展名推断 mime
-  - 同步返回 base64 data URL（图片通常 < 5MB，IPC 够用）
+  - 按 magic bytes 推断 mime（PNG/JPEG/WebP/GIF/SVG）
+  - 同步返回 base64 data URL
 - `commands::jimeng_generate` 拿 batch_id = uuid，下载所有图
 - `commands::jimeng_generate_stream` 每个 partial 异步下载，再 emit 一条带 localPath 的事件
 
 前端：
 - `src/lib/image-resolver.ts`
-  - `resolveImageUrl(input)` async，按 schema 走不同分支
-  - `resolveImageUrlSync(input)` 从内存缓存拿
-  - `prefetchImageUrl(input)` 静默预解析
-  - dataUrlCache: Map 缓存
+  - `localPathToAssetUrl(absolutePath)` 同步转 `asset://` URL,模块级 `Map` 缓存
+  - `resolveImageUrl(input)` async:http(s)/data/blob/asset 原值;本地路径走 `localPathToAssetUrl`
+  - `resolveImageUrlSync(input)` 同步版:缓存命中或同步调 `localPathToAssetUrl`
+  - `prefetchImageUrl(input)` 预热(asset 协议零成本,主要是早期版本占位,目前是 no-op)
 - `src/components/shared/SafeImage.tsx`
-  - 替代 `<img>`：先同步拿缓存值，effect 里再异步解析替换
+  - 替代 `<img>`:先同步拿缓存值,effect 里再异步解析替换
   - 卸载时 `cancelled = true` 防止 stale update
 - `imageInput(img) => img.localPath ?? img.url` helper
+
+**Tauri 2 asset 协议(3 件套,缺一不可)**:
+- `Cargo.toml` 必须开 `tauri` 的 `protocol-asset` feature:
+  ```toml
+  tauri = { version = "2.1.1", features = ["protocol-asset"] }
+  ```
+- `tauri.conf.json` `app.security.csp` 必须放行 asset 协议:
+  - `img-src` 加 `asset:` (macOS / Linux) + `http://asset.localhost` (Windows WebView2)
+- `tauri.conf.json` `app.security.assetProtocol` 必须显式开启并配 scope(默认是空,任何 `asset://` 请求都会被协议层静默拒绝,WebView 显示 broken image 而**不发任何网络请求**):
+  ```json
+  "assetProtocol": {
+    "enable": true,
+    "scope": ["$APPDATA/assets/**", "$APPDATA/assets/*"]
+  }
+  ```
+- `convertFileSrc()` 是 Tauri 2 内置,Windows 返回 `http://asset.localhost/<encoded>`,macOS/Linux 返回 `asset://localhost/<encoded>`
+
+**踩坑记录**:
+- 漏配 `assetProtocol.scope` 时 `<img src="asset://...">` 触发 `error` 事件但**不发起任何网络请求**——这是协议层拒绝,不是 404。WebView 不会 console.log 错误,只能从 DOM 的 `<img>.complete === true && naturalWidth === 0` 看出。
+- 不需要 `core:asset-protocol:default` 之类的 capability 权限(用 `protocol-asset` feature 即可)
 
 Y-agent 集成：
 - AssetCard / AssetDetailDialog / ResultGrid 全部用 SafeImage
@@ -489,23 +510,31 @@ Y-agent 集成：
 **Skill 模板**：无新增（P5 是基础设施层，P6 的 icon-pack-transparent 等模板会直接受益）
 
 
-#### P5+ 增强：入库自动兜底 + 主动 backfill
+#### P5+ 增强：入库自动兜底 + 主动 backfill + 启动自检
 
 P5 处理的是「新图下载 + 优先用 localPath」，但遗留一个问题：**P5 之前入的库没有 localPath**。如果用户历史项目里几千张图都靠外链 URL，24h 后会全失效。P5+ 解决这个：
 
-- **任何 `create_asset` 入库即后台兜底**：Rust 端 `create_asset` 改 async，DB 写完立刻 `spawn_local_path_backfill` 串行下缺图的 localPath，写完异步回 `payload.localPaths`。用户响应不等下载（先用 url 看图）
-- **主动 backfill**：`commands::backfill_local_assets(project_id?)` 扫「urls 有但 localPaths 缺」的资产，每条 `tokio::spawn` 并发下。返回 `BackfillReport { scanned, downloaded, failed, brokenMarked }`
-- **失败标 broken**：下载失败的资产标 `payload.broken = true`。前端目前不消费这个字段，**未来 UI 可以**给「图已过期」角标 + 提示重生成
+- **任何 `create_asset` 入库即后台兜底**：Rust 端 `create_asset` 写完 DB 后立刻 `spawn_local_path_backfill` 串行下缺图的 localPath，写完异步回 `payload.localPaths`。用户响应不等下载（先用 url 看图）。写库成功后 emit `assets://local-backfilled` 事件，前端增量更新
+- **主动 backfill**：`commands::backfill_local_assets(project_id?)` 扫「urls 有但 localPaths 缺 或 路径指向的文件已不存在」的资产，每条 `tokio::spawn` 并发下。返回 `BackfillReport { scanned, downloaded, failed, brokenMarked }`
+- **启动时全量自检**：`commands::startup_backfill_assets(app)` 在 `lib.rs::run` 的 `setup` 阶段通过 `tauri::async_runtime::spawn` 调用一次,扫全库「缺 / 文件已不存在」的资产,后台补下。fire-and-forget,不阻塞启动
+- **失败标 broken**：下载失败的资产标 `payload.broken = true`。AssetCard 右上角显示「图已过期」红标
 - **路径安全**：写回时 `canonicalize` 后必须在 `app_data_dir/assets/` 下（防越权，校验失败则该项记空字符串不入 payload）
+- **事件驱动,不再 reload-storm**:本地兜底完成时 emit `assets://local-backfilled` 事件(camelCase payload, 含 `assetId` / `projectId` / `localPaths` / `layerLocalPaths`),前端用 `setAssets(prev => map(...))` 增量更新单条,React 不重建整个 `assets` 数组引用 → AssetBoard 不会整板 re-render
 
-前端：
-- `src/lib/assets.ts::backfillLocalAssets(projectId?)` 暴露给前端（走 Tauri IPC）
-- `ProjectDetail` 切项目时 `useEffect([currentProject?.id])` 自动跑一次。下载成功/部分失败时 `reload({ silent: true })` 让 SafeImage 切到本地
-- 静默失败不打扰用户（最坏情况就是 24h 后图片过期，与改之前一样）
+前端:
+- `src/lib/assets.ts::backfillLocalAssets(projectId?)` 暴露给前端(走 Tauri IPC)
+- `src/lib/asset-events.ts` 事件订阅单例(`startAssetEventListener` / `stopAssetEventListener`)
+- `useProjectBootstrap` 订阅事件,按 projectId 过滤后 `setAssets` 增量更新
+- `AssetCenterPage` 同样订阅(无 projectId 过滤,跨项目视图)
+- `ProjectDetail` 切项目时 `useEffect([currentProject?.id])` 自动跑一次 `backfillLocalAssets` 但 **不再 reload** — 让事件流自然更新
+- 静默失败不打扰用户(最坏情况就是 24h 后图片过期,与改之前一样)
 
-两个 helper：
-- `extract_urls_for_backfill(payload)`：支持两种 payload —— 普通 `payload.urls[]`、图层拆分 `payload.layers[]`（按 zIndex 升序）
-- `extract_local_paths_for_backfill(payload)`：平行数组（urls 模式写 `localPaths`，图层模式写 `layerLocalPaths`），缺位填 None 让 backfill 知道要补哪里
+两个 helper:
+- `extract_urls_for_backfill(payload)`:支持两种 payload —— 普通 `payload.urls[]`、图层拆分 `payload.layers[]`(按 zIndex 升序)
+- `extract_local_paths_for_backfill(payload)`:平行数组(urls 模式写 `localPaths`,图层模式写 `layerLocalPaths`),缺位填 None 让 backfill 知道要补哪里
+
+**资产删除清理**:
+- `commands::delete_asset(id, app)` 删 DB 行后,异步 `tokio::fs::remove_dir_all(app_data_dir/assets/<id>/)`,失败仅 log 不报错(下次启动可清孤儿目录)
 
 **与 P5 的关系**：
 - P5 = jimeng_generate 路径下载（同步生图 / 流式 partial）
@@ -580,7 +609,7 @@ SkillPicker UI（`SkillPicker.tsx`）按 group 分组渲染：
 
 #### 共享组件
 
-- `src/components/workspace/tools/AssetPicker.tsx`：从资产库选一张图（弹窗）。回调用 `resolveImageUrl` 把路径转成 jimeng API 接受的格式（本地路径 → dataURL / 外链 URL 直传 / dataURL 直传）
+- `src/components/workspace/tools/AssetPicker.tsx`：从资产库选一张图（弹窗）。回调用 `resolveImageUrl` 把路径转成 jimeng API 接受的格式（本地路径 → `asset://` URL / 外链 URL 直传 / dataURL 直传）
 - `src/components/workspace/tools/runTool.ts`：统一执行 helper
   - 模型支持 stream（5.0 Lite / 4.5 / 4.0）→ `runToolStream`，partial 立刻入主资产，completed 时合并
   - 模型不支持 stream（5.0 Pro）→ `runToolSync`，阶段提示：requesting → downloading → persisting → done

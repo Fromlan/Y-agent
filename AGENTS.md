@@ -24,6 +24,8 @@ Y-agent — 游戏美术 AI 工作台。Tauri 2 桌面应用，封装即梦（�
 - `src/` — React 18 + TypeScript 前端
   - `src/components/` — UI 组件（layout / settings / shared / workspace）
   - `src/lib/` — API 客户端、Agent 引擎、工具函数
+    - `src/lib/image-resolver.ts` — 本地路径 ↔ `asset://` URL 转换（前端零 IPC 直读本地图片）
+    - `src/lib/asset-events.ts` — 后端 `assets://local-backfilled` 事件订阅单例
   - `src/skills/builtin/` — M2 预置的 6 个 Skill 模板（character-sheet / character-turnaround / expression-grid / kv-poster / scene-mood / ui-icons）
 - `src-tauri/` — Rust 后端（Tauri 2 + reqwest + rusqlite + aes-gcm）
   - `src-tauri/capabilities/` — Tauri 权限声明
@@ -43,7 +45,7 @@ Y-agent — 游戏美术 AI 工作台。Tauri 2 桌面应用，封装即梦（�
 
 ## Testing instructions
 
-- **有 Vitest 单测**（`src/**/*.test.ts`）。当前覆盖 agent-memory / agent-router / logger 三组纯函数模块。新增纯函数时配套加测试
+- **有 Vitest 单测**（`src/**/*.test.ts`）。当前覆盖 agent-memory / agent-router / logger / asset-payload / image-resolver 五组纯函数模块。新增纯函数时配套加测试
 - **没有 e2e 测试**。每个里程碑靠手动冒烟：见 `doc/plan-jimeng-full-integration.md`
 - 冒烟最小集：启动应用 → 选「Demo 模式」→ 跑一次生图 → 切到「资产」tab 看结果
 - 新功能必须：
@@ -51,7 +53,8 @@ Y-agent — 游戏美术 AI 工作台。Tauri 2 桌面应用，封装即梦（�
   2. `pnpm lint` 0 warning
   3. `pnpm test` 全过
   4. README 中的「快速试用」步骤仍能跑通
-  5. 如果动了 API 客户端 / Skill 模板，**新增/修改要更新 `doc/api-integration.md`**
+  5. 如果动了 API 客户端 / Skill 模板 / 资产库存读协议，**新增/修改要更新 `doc/api-integration.md`**
+  6. 资产库相关改动需验证 CSP 放行 `asset:` 协议（`tauri.conf.json` 的 `app.security.csp.img-src`）
 
 ## PR & commit conventions
 
