@@ -7,7 +7,7 @@
  *
  * 抽到这里的目的是消除三处复制粘贴。
  */
-import { generateImage } from "@/lib/jimeng";
+import { generateImage, generateImageStream } from "@/lib/jimeng";
 import { createAsset } from "@/lib/assets";
 import { addStyleHints, recordModel, saveAgentContext, type AgentContext } from "@/lib/agent-memory";
 import { assetIds as dbAssetIds, persistUpdate } from "@/lib/chat-history";
@@ -35,6 +35,110 @@ export interface PlanResult {
   asset: Asset;
   costMs: number;
   isDemo: boolean;
+}
+
+export interface PlanStreamCallbacks {
+  /** 单张图 partial 成功 + 已入库后触发（用户能立刻看到图） */
+  onPartialAsset?: (asset: Asset, index: number) => void;
+  /** 单图生成失败（组图场景下 1 张失败） */
+  onPartialFailed?: (info: { index?: number; code?: string; message?: string }) => void;
+}
+
+/** 流式版本的 executePlan。逐张 partial 入库；completed 时合并为一张"主资产"返回。 */
+export async function executePlanStream(
+  plan: PlanArgs,
+  projectId: string,
+  callbacks: PlanStreamCallbacks = {}
+): Promise<PlanResult> {
+  const t0 = Date.now();
+  // 5.0 Pro 不支持流式 — 退回非流式
+  if (plan.modelId === "doubao-seedream-5-0-pro-260628") {
+    return executePlan(plan, projectId);
+  }
+
+  const partials: { url: string; index: number }[] = [];
+  const failedIndices: number[] = [];
+
+  return await new Promise<PlanResult>((resolve, reject) => {
+    generateImageStream(
+      {
+        model: plan.modelId,
+        prompt: plan.prompt,
+        image: plan.images,
+        size: plan.size,
+        sequential: plan.maxImages && plan.maxImages > 1 ? "auto" : undefined,
+        maxImages: plan.maxImages && plan.maxImages > 1 ? plan.maxImages : undefined,
+        outputFormat: plan.outputFormat,
+        tools: plan.tools,
+        optimizePromptMode: plan.optimizePromptMode,
+        background: plan.background,
+        layerDecomposition: plan.layerDecomposition,
+      },
+      {
+        onPartial: ({ index, url }) => {
+          partials.push({ index, url });
+          // partial 成功即入库（让用户早点看到图）
+          createAsset({
+            projectId,
+            prompt: plan.prompt,
+            model: plan.modelId,
+            modelName: plan.modelName,
+            size: plan.size,
+            refCount: plan.images?.length ?? 0,
+            costMs: 0, // 流式 partial 阶段还没法算最终耗时
+            isLayerDecomposition: !!plan.layerDecomposition,
+            payload: { urls: [url] },
+          })
+            .then((asset) => callbacks.onPartialAsset?.(asset, index))
+            .catch((e) => console.error("partial asset save failed", e));
+        },
+        onPartialFailed: (info) => {
+          failedIndices.push(info.index ?? -1);
+          callbacks.onPartialFailed?.(info);
+        },
+        onCompleted: (info) => {
+          const costMs = Date.now() - t0;
+          const isLayer = !!plan.layerDecomposition;
+          // 主资产：单图就 partials[0]，组图就 urls 全量（其它 partial 已经独立入库了）
+          if (partials.length === 0) {
+            reject(new Error("流式生图未产出任何图"));
+            return;
+          }
+          createAsset({
+            projectId,
+            prompt: plan.prompt,
+            model: plan.modelId,
+            modelName: plan.modelName,
+            size: plan.size,
+            refCount: plan.images?.length ?? 0,
+            costMs,
+            isLayerDecomposition: isLayer,
+            payload: {
+              urls: partials.sort((a, b) => a.index - b.index).map((p) => p.url),
+              usage: info.usage,
+            },
+          })
+            .then((asset) =>
+              resolve({
+                asset,
+                costMs,
+                isDemo: false,
+              })
+            )
+            .catch((e) => reject(e));
+        },
+        onAborted: ({ reason }) => {
+          // 流中断：把已经入库的 partials 留下，告诉上层流断了
+          // 用一个特殊 error message 让前端能识别
+          const err = new Error(
+            `流式生图中断：${reason}（已完成 ${partials.length} 张，失败 ${failedIndices.length} 张）`
+          );
+          (err as Error & { partials?: number }).partials = partials.length;
+          reject(err);
+        },
+      }
+    ).catch((e) => reject(e));
+  });
 }
 
 /**

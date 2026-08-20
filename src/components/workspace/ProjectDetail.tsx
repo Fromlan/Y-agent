@@ -1,15 +1,15 @@
 import { useEffect, useState, useRef } from "react";
 import { ArrowLeft, Brain, KeyRound, Trash2 } from "lucide-react";
 import { useSession } from "@/lib/session";
-import { deleteAsset, createAsset } from "@/lib/assets";
+import { deleteAsset } from "@/lib/assets";
 import { renameProject } from "@/lib/projects";
-import { generateImage, explainError } from "@/lib/jimeng";
+import { explainError } from "@/lib/jimeng";
 import { hasApiKey } from "@/lib/api-key";
 import { useToast } from "@/components/shared/Toast";
 import { usePrompt } from "@/components/shared/PromptProvider";
 import { confirmDialog } from "@/lib/dialog";
 import { useProjectBootstrap } from "@/lib/hooks/useProjectBootstrap";
-import { MODEL_OPTIONS, type Asset, type AssetPayload } from "@/lib/types";
+import { MODEL_OPTIONS, type Asset } from "@/lib/types";
 import {
   clearSession as dbClearSession,
   assetIds as dbAssetIds,
@@ -27,7 +27,7 @@ import { route } from "@/lib/agent-router";
 import { loadLlmConfig } from "@/lib/llm-config";
 import { llmChatLoop, type LLMConfig, type ChatMessage as LLMChatMessage } from "@/lib/llm";
 import { AGENT_TOOLS, renderSystemPrompt } from "@/lib/agent-tools";
-import { executePlan, learnFromGeneration } from "@/lib/agent-flow";
+import { executePlan, executePlanStream, learnFromGeneration } from "@/lib/agent-flow";
 import { log } from "@/lib/logger";
 
 interface Props {
@@ -180,50 +180,51 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
       return;
     }
     setGenerating(true);
-    const start = Date.now();
+    // P1：流式生图。Lite/4.5/4.0 走 SSE，5.0 Pro 自动 fallback 到非流式。
+    let partialCount = 0;
     try {
-      const resp = await generateImage({
-        model: model.id,
-        prompt: prompt.trim(),
-        image: refs.length > 0 ? refs : undefined,
-        size,
-        sequential: groupCount > 1 ? "auto" : undefined,
-        maxImages: groupCount > 1 ? groupCount : undefined,
-        layerDecomposition: model.supportsLayerDecomposition && layerDecomp ? true : undefined,
-        outputFormat: outputFormat || undefined,
-        tools: webSearch ? ["web_search"] : undefined,
-        optimizePromptMode: fastMode ? "fast" : undefined,
-        background: transparent ? "transparent" : undefined,
-      });
-      const costMs = Date.now() - start;
-      const isLayer = !!(model.supportsLayerDecomposition && layerDecomp);
-      const payload: AssetPayload = isLayer
-        ? { urls: [], layers: resp.images, usage: resp.usage }
-        : { urls: resp.images.map((i) => i.url), usage: resp.usage };
-      try {
-        await createAsset({
-          projectId: currentProject.id,
+      await executePlanStream(
+        {
           prompt: prompt.trim(),
-          model: model.id,
+          modelId: model.id,
           modelName: model.name,
           size,
-          refCount: refs.length,
-          costMs,
-          isLayerDecomposition: isLayer,
-          payload,
-        });
-        await reload({ silent: true });
-        toast.success("已入库到资产库");
-        setPrompt("");
-        setRefs([]);
-      } catch (saveErr: any) {
-        console.error("save asset failed:", saveErr);
-        toast.warn(`资产入库失败：${saveErr?.message ?? saveErr}`);
-      }
+          images: refs.length > 0 ? refs : undefined,
+          maxImages: groupCount > 1 ? groupCount : undefined,
+          layerDecomposition: model.supportsLayerDecomposition && layerDecomp ? true : undefined,
+          outputFormat: outputFormat || undefined,
+          tools: webSearch ? ["web_search"] : undefined,
+          optimizePromptMode: fastMode ? "fast" : undefined,
+          background: transparent ? "transparent" : undefined,
+        },
+        currentProject.id,
+        {
+          onPartialAsset: () => {
+            partialCount++;
+            toast.info(`已就绪 ${partialCount} / ${groupCount}`);
+          },
+          onPartialFailed: (info) => {
+            toast.warn(`第 ${(info.index ?? -1) + 1} 张生成失败：${info.message ?? info.code ?? "未知"}`);
+          },
+        }
+      );
+      // 走完（executePlanStream resolve 等于 onCompleted）
+      await reload({ silent: true });
+      toast.success(
+        partialCount > 1
+          ? `已入库到资产库（${partialCount} 张）`
+          : "已入库到资产库"
+      );
+      setPrompt("");
+      setRefs([]);
     } catch (e: any) {
       const raw = e?.message ?? String(e);
       const friendly = await explainError(raw).catch(() => raw);
       toast.error(friendly);
+      // 流式中断时也要 reload（已 partial 入库的图要显示）
+      if (partialCount > 0) {
+        await reload({ silent: true });
+      }
     } finally {
       setGenerating(false);
     }
