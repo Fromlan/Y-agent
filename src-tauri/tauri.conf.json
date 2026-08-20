@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Y-agent · 游戏美术 AI 工作台",
+        "title": "Y-agent · Make. Iterate. Ship.",
         "width": 1280,
         "height": 800,
         "minWidth": 960,
@@ -38,7 +38,7 @@
       "icons/icon.ico"
     ],
     "category": "DeveloperTool",
-    "shortDescription": "Y-agent · 游戏美术 AI 工作台",
+    "shortDescription": "Y-agent · 游戏美术 AI 工作台 · Make. Iterate. Ship.",
     "longDescription": "调用即梦（豆包 Seedream）API，为游戏美术师提供从概念设计到成品的全流程 AI 辅助工具。"
   }
 }
