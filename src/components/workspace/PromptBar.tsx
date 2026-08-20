@@ -1,6 +1,6 @@
-import { ArrowUp, Plus, X, Layers } from "lucide-react";
+import { ArrowUp, Plus, X, Layers, Search, Zap, Image as ImageIcon, Droplet } from "lucide-react";
 import { useToast } from "@/components/shared/Toast";
-import { MODEL_OPTIONS, type ModelOption } from "@/lib/types";
+import { MODEL_OPTIONS, modelCapabilities, type ModelOption } from "@/lib/types";
 import SizeSelect from "@/components/workspace/SizeSelect";
 import ModelSelect from "@/components/workspace/ModelSelect";
 import { pickImageAsDataUrl } from "@/lib/image-file";
@@ -21,6 +21,15 @@ interface Props {
   setGroupCount: (n: number) => void;
   layerDecomp: boolean;
   setLayerDecomp: (b: boolean) => void;
+  // P0 新增：能力位开关
+  webSearch: boolean;
+  setWebSearch: (b: boolean) => void;
+  fastMode: boolean;
+  setFastMode: (b: boolean) => void;
+  outputFormat: "png" | "jpeg" | "";
+  setOutputFormat: (f: "png" | "jpeg" | "") => void;
+  transparent: boolean;
+  setTransparent: (b: boolean) => void;
   generating: boolean;
   onSubmit: () => void;
 }
@@ -38,18 +47,29 @@ export default function PromptBar({
   setGroupCount,
   layerDecomp,
   setLayerDecomp,
+  webSearch,
+  setWebSearch,
+  fastMode,
+  setFastMode,
+  outputFormat,
+  setOutputFormat,
+  transparent,
+  setTransparent,
   generating,
   onSubmit,
 }: Props) {
   const toast = useToast();
   const [showSkillPicker, setShowSkillPicker] = useState(false);
 
+  // 能力位驱动：模型换了之后，不支持的开关要重置
+  const caps = modelCapabilities(model.id);
+
   const onPickRef = async () => {
     try {
       const dataUrl = await pickImageAsDataUrl();
       if (!dataUrl) return;
-      if (refs.length >= 4) {
-        toast.warn("参考图最多 4 张");
+      if (refs.length >= caps.maxInputImages) {
+        toast.warn(`当前模型最多 ${caps.maxInputImages} 张参考图`);
         return;
       }
       setRefs((p) => [...p, dataUrl]);
@@ -126,29 +146,29 @@ export default function PromptBar({
           <div className="flex items-center gap-2 pt-1 border-t border-border flex-wrap">
             <button
               className="btn-icon"
-              title="添加参考图（最多 4 张，单张 ≤ 8MB）"
+              title={`添加参考图（最多 ${caps.maxInputImages} 张，单张 ≤ 8MB）`}
               onClick={onPickRef}
             >
               <Plus className="w-4 h-4" />
             </button>
             <ModelSelect value={model} onChange={setModel} />
             <SizeSelect value={size} onChange={setSize} modelId={model.id} />
-            {model.supportsGroupGeneration && (
+            {caps.groupGeneration && (
               <label className="text-xs text-text-secondary flex items-center gap-1.5">
                 数量
                 <input
                   type="number"
                   min={1}
-                  max={4}
+                  max={caps.maxGroupImages}
                   value={groupCount}
                   onChange={(e) =>
-                    setGroupCount(Math.max(1, Math.min(4, Number(e.target.value) || 1)))
+                    setGroupCount(Math.max(1, Math.min(caps.maxGroupImages, Number(e.target.value) || 1)))
                   }
                   className="w-12 input text-center"
                 />
               </label>
             )}
-            {model.supportsLayerDecomposition && (
+            {caps.layerDecomposition && (
               <label
                 className="text-xs text-text-secondary flex items-center gap-1.5 cursor-pointer"
                 title="将参考图拆为底图 + 多个图层（仅 5.0 Pro）"
@@ -161,6 +181,78 @@ export default function PromptBar({
                 />
                 <Layers className="w-3.5 h-3.5" />
                 拆分图层
+              </label>
+            )}
+            {/* P0：能力位开关（按 caps 显隐） */}
+            {caps.webSearch && (
+              <label
+                className="text-xs text-text-secondary flex items-center gap-1.5 cursor-pointer"
+                title="联网搜索：模型会先搜互联网再出图（天气、商品等实时信息）"
+              >
+                <input
+                  type="checkbox"
+                  checked={webSearch}
+                  onChange={(e) => setWebSearch(e.target.checked)}
+                  className="accent-accent"
+                />
+                <Search className="w-3.5 h-3.5" />
+                联网
+              </label>
+            )}
+            {caps.fastMode && (
+              <label
+                className="text-xs text-text-secondary flex items-center gap-1.5 cursor-pointer"
+                title="极速模式：牺牲一点画质换速度（仅 5.0 Pro / 4.0）"
+              >
+                <input
+                  type="checkbox"
+                  checked={fastMode}
+                  onChange={(e) => setFastMode(e.target.checked)}
+                  className="accent-accent"
+                />
+                <Zap className="w-3.5 h-3.5" />
+                极速
+              </label>
+            )}
+            {caps.outputFormats.length > 1 && (
+              <label
+                className="text-xs text-text-secondary flex items-center gap-1.5 cursor-pointer"
+                title="输出文件格式（4.5/4.0 仅 JPEG）"
+              >
+                <ImageIcon className="w-3.5 h-3.5" />
+                <select
+                  value={outputFormat}
+                  onChange={(e) => setOutputFormat(e.target.value as "png" | "jpeg" | "")}
+                  className="text-xs bg-bg-elev border border-border rounded px-1.5 py-0.5
+                    text-text-primary focus:outline-none focus:border-accent"
+                >
+                  <option value="">默认</option>
+                  {caps.outputFormats.map((f) => (
+                    <option key={f} value={f}>
+                      {f.toUpperCase()}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {caps.background && (
+              <label
+                className="text-xs text-text-secondary flex items-center gap-1.5 cursor-pointer"
+                title="输出 PNG 透明背景（仅 5.0 Pro 图生图场景）"
+              >
+                <input
+                  type="checkbox"
+                  checked={transparent}
+                  onChange={(e) => {
+                    setTransparent(e.target.checked);
+                    if (e.target.checked && outputFormat !== "png") {
+                      setOutputFormat("png"); // transparent 强制 png
+                    }
+                  }}
+                  className="accent-accent"
+                />
+                <Droplet className="w-3.5 h-3.5" />
+                透明背景
               </label>
             )}
             <div className="flex-1" />

@@ -1,9 +1,35 @@
 import { useState } from "react";
-import { MODEL_OPTIONS, type ModelOption } from "@/lib/types";
+import { MODEL_OPTIONS, modelCapabilities, type ModelOption, type ModelCapabilities } from "@/lib/types";
 
 interface Props {
   value: ModelOption;
   onChange: (m: ModelOption) => void;
+}
+
+/**
+ * 给自定义 ID 构造 ModelOption。能力矩阵走 modelCapabilities() 兜底（5.0 Lite 风格）。
+ */
+function buildCustomOption(id: string): ModelOption {
+  return {
+    id,
+    name: id ? `自定义: ${id}` : "自定义",
+    supportsLayerDecomposition: modelCapabilities(id).layerDecomposition,
+    supportsGroupGeneration: modelCapabilities(id).groupGeneration,
+    capabilities: modelCapabilities(id),
+  };
+}
+
+function summarizeCaps(c: ModelCapabilities): string {
+  const flags: string[] = [];
+  if (c.webSearch) flags.push("联网");
+  if (c.stream) flags.push("流式");
+  if (c.fastMode) flags.push("极速");
+  if (c.background) flags.push("透明");
+  if (c.layerDecomposition) flags.push("图层");
+  if (c.interactiveEdit) flags.push("bbox");
+  if (c.outputFormats.includes("png") && c.outputFormats.includes("jpeg")) flags.push("PNG/JPEG");
+  else if (c.outputFormats.includes("jpeg")) flags.push("仅 JPEG");
+  return flags.length > 0 ? flags.join(" · ") : "基础生图";
 }
 
 export default function ModelSelect({ value, onChange }: Props) {
@@ -22,13 +48,7 @@ export default function ModelSelect({ value, onChange }: Props) {
           const v = e.target.value;
           if (v === "CUSTOM") {
             setEditing(true);
-            const m: ModelOption = {
-              id: customId || "custom-",
-              name: "自定义",
-              supportsLayerDecomposition: false,
-              supportsGroupGeneration: true,
-            };
-            onChange(m);
+            onChange(buildCustomOption(customId || "custom-"));
           } else {
             const m = MODEL_OPTIONS.find((x) => x.id === v);
             if (m) onChange(m);
@@ -43,6 +63,13 @@ export default function ModelSelect({ value, onChange }: Props) {
           </option>
         ))}
       </select>
+      {/* 选中模型的能力位摘要（连同 hint） */}
+      <span
+        className="text-[10px] text-text-muted"
+        title={value.hint ?? summarizeCaps(value.capabilities)}
+      >
+        {summarizeCaps(value.capabilities)}
+      </span>
       {(isCustom || editing) && (
         <input
           type="text"
@@ -51,12 +78,7 @@ export default function ModelSelect({ value, onChange }: Props) {
             const v = e.target.value;
             setCustomId(v);
             localStorage.setItem("y-agent.customModelId", v);
-            onChange({
-              id: v,
-              name: v ? `自定义: ${v}` : "自定义",
-              supportsLayerDecomposition: false,
-              supportsGroupGeneration: true,
-            });
+            onChange(buildCustomOption(v));
           }}
           placeholder="ep-xxxxxxxx 或模型名"
           className="w-44 text-xs bg-bg-elev border border-border rounded px-2 py-1

@@ -23,6 +23,12 @@ export interface PlanArgs {
   images?: string[];
   /** >1 时触发组图 */
   maxImages?: number;
+  /** P0：可选能力位（透传到 jimeng API） */
+  outputFormat?: "png" | "jpeg";
+  tools?: Array<"web_search">;
+  optimizePromptMode?: "standard" | "fast";
+  background?: "transparent" | "opaque";
+  layerDecomposition?: boolean;
 }
 
 export interface PlanResult {
@@ -47,8 +53,17 @@ export async function executePlan(
     size: plan.size,
     sequential: plan.maxImages && plan.maxImages > 1 ? "auto" : undefined,
     maxImages: plan.maxImages && plan.maxImages > 1 ? plan.maxImages : undefined,
+    outputFormat: plan.outputFormat,
+    tools: plan.tools,
+    optimizePromptMode: plan.optimizePromptMode,
+    background: plan.background,
+    layerDecomposition: plan.layerDecomposition,
   });
   const costMs = Date.now() - t0;
+  const isLayer = !!plan.layerDecomposition;
+  const payload = isLayer
+    ? { urls: [], layers: resp.images, usage: resp.usage }
+    : { urls: resp.images.map((i) => i.url), usage: resp.usage };
   const asset = await createAsset({
     projectId,
     prompt: plan.prompt,
@@ -57,8 +72,8 @@ export async function executePlan(
     size: plan.size,
     refCount: plan.images?.length ?? 0,
     costMs,
-    isLayerDecomposition: false,
-    payload: { urls: resp.images.map((i) => i.url) },
+    isLayerDecomposition: isLayer,
+    payload,
   });
   return { asset, costMs, isDemo: resp.isDemo };
 }

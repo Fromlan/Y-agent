@@ -60,6 +60,20 @@ pub struct JsGenerateParams {
     /// Seedream API 默认 true，Y-agent 显式补 false 关闭。
     #[serde(default)]
     pub watermark: Option<bool>,
+    /// 输出文件格式：png | jpeg。仅 5.0 Pro / 5.0 Lite 支持；
+    /// 4.5 / 4.0 固定 jpeg，由 Rust 端 validate_params 拦截。
+    #[serde(default)]
+    pub output_format: Option<String>,
+    /// 工具调用。当前仅支持 web_search（5.0 Lite 专属）。
+    /// 前端传 `["web_search"]` → Rust 端序列化为 `[{type:"web_search"}]`。
+    #[serde(default)]
+    pub tools: Option<Vec<String>>,
+    /// 提示词优化模式：standard | fast。fast 仅 5.0 Pro / 4.0 支持。
+    #[serde(default)]
+    pub optimize_prompt_mode: Option<String>,
+    /// 背景透明：transparent | opaque。仅 5.0 Pro 专属。
+    #[serde(default)]
+    pub background: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -67,6 +81,13 @@ pub struct JsGenerateParams {
 pub struct JsGenerateResponse {
     pub images: Vec<GeneratedImage>,
     pub is_demo: bool,
+    /// API 顶层 usage（生成张数 / token / 工具调用次数等）。
+    /// Rust 端透传，前端可选做用量统计。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<jimeng::Usage>,
+    /// API 顶层 error（整个请求都没生成图时）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<jimeng::ApiError>,
 }
 
 #[tauri::command]
@@ -94,6 +115,14 @@ pub async fn jimeng_generate(
                 response_format: Some("url".to_string()),
                 layer_decomposition: params.layer_decomposition,
                 watermark: params.watermark,
+                output_format: params.output_format,
+                tools: params
+                    .tools
+                    .map(|v| v.into_iter().map(|t| jimeng::ToolSpec { kind: t }).collect()),
+                optimize_prompt_options: params
+                    .optimize_prompt_mode
+                    .map(|m| jimeng::OptimizePromptOptions { mode: Some(m) }),
+                background: params.background,
             },
         )
     };
@@ -102,6 +131,11 @@ pub async fn jimeng_generate(
     Ok(JsGenerateResponse {
         images: result.images,
         is_demo: result.is_demo,
+        usage: result.usage,
+        error: result.error.map(|e| jimeng::ApiError {
+            code: e.code,
+            message: e.message,
+        }),
     })
 }
 
@@ -385,8 +419,16 @@ pub fn explain_error(raw: String) -> String {
     let lower = raw.to_lowercase();
     let hint = if lower.contains("invalidendpointormodel.notfound") || lower.contains("\"code\":\"notfound\"") {
         "模型 ID 不存在或账号未开通。在 [火山方舟控制台](https://console.volcengine.com/ark/region:cn-beijing/openManagement) 检查模型详情。"
+    } else if raw.contains("5.0 Pro 不支持组图") {
+        "5.0 Pro 不支持组图（sequential_image_generation），请改用 5.0 Lite / 4.5 / 4.0，或去掉「数量」参数。"
+    } else if raw.contains("仅支持 jpeg 输出") {
+        "该模型（4.5/4.0）仅支持 jpeg 输出。去掉「PNG」开关，或改用 5.0 Pro / 5.0 Lite。"
+    } else if raw.contains("fast 仅 5.0 Pro / 4.0 支持") {
+        "fast 极速模式仅 5.0 Pro / 4.0 支持。当前模型不支持，关掉「极速模式」开关再试。"
+    } else if lower.contains("internalserviceerror") {
+        "服务端内部错误（通常 5xx）。重试一次，或等几分钟后回来。"
     } else if lower.contains("invalidparameter") {
-        "参数错误。检查 size 是否小写（如 `2k` 而非 `2K`），或单图请求去掉了 `sequential_image_generation` 字段。"
+        "参数错误。常见原因：size 写了大写（应是 `2k` 不是 `2K`）；或单图请求去掉了 `sequential_image_generation` 字段；或图层拆分场景误传 `output_format: jpeg`。"
     } else if lower.contains("authentication") {
         "API Key 无效或已过期。打开设置重新填写。"
     } else if lower.contains("accessdenied") {

@@ -75,6 +75,11 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   const [groupCount, setGroupCount] = useState(1);
   const [layerDecomp, setLayerDecomp] = useState(false);
   const [generating, setGenerating] = useState(false);
+  // P0：新增能力位开关
+  const [webSearch, setWebSearch] = useState(false);
+  const [fastMode, setFastMode] = useState(false);
+  const [outputFormat, setOutputFormat] = useState<"" | "png" | "jpeg">("");
+  const [transparent, setTransparent] = useState(false);
 
   // 输入模式：生图（M1 直调）/ 对话（Agent 路由）
   const [inputMode, setInputMode] = useState<InputMode>("chat");
@@ -170,6 +175,10 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
       toast.warn("图层拆分模式只支持单图输出");
       return;
     }
+    if (transparent && refs.length === 0) {
+      toast.warn("透明背景模式需要至少 1 张带透明通道的输入图");
+      return;
+    }
     setGenerating(true);
     const start = Date.now();
     try {
@@ -181,12 +190,16 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
         sequential: groupCount > 1 ? "auto" : undefined,
         maxImages: groupCount > 1 ? groupCount : undefined,
         layerDecomposition: model.supportsLayerDecomposition && layerDecomp ? true : undefined,
+        outputFormat: outputFormat || undefined,
+        tools: webSearch ? ["web_search"] : undefined,
+        optimizePromptMode: fastMode ? "fast" : undefined,
+        background: transparent ? "transparent" : undefined,
       });
       const costMs = Date.now() - start;
       const isLayer = !!(model.supportsLayerDecomposition && layerDecomp);
       const payload: AssetPayload = isLayer
-        ? { urls: [], layers: resp.images }
-        : { urls: resp.images.map((i) => i.url) };
+        ? { urls: [], layers: resp.images, usage: resp.usage }
+        : { urls: resp.images.map((i) => i.url), usage: resp.usage };
       try {
         await createAsset({
           projectId: currentProject.id,
@@ -763,6 +776,14 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
           setGroupCount={setGroupCount}
           layerDecomp={layerDecomp}
           setLayerDecomp={setLayerDecomp}
+          webSearch={webSearch}
+          setWebSearch={setWebSearch}
+          fastMode={fastMode}
+          setFastMode={setFastMode}
+          outputFormat={outputFormat}
+          setOutputFormat={setOutputFormat}
+          transparent={transparent}
+          setTransparent={setTransparent}
           generating={generating}
           onSubmit={onSubmit}
         />

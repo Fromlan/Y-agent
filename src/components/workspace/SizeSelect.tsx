@@ -1,15 +1,10 @@
+import { modelCapabilities } from "@/lib/types";
+
 interface Props {
   value: string;
   onChange: (v: string) => void;
   modelId: string;
 }
-
-const PRESETS_BY_MODEL: Record<string, string[]> = {
-  "doubao-seedream-5-0-pro-260628": ["1k", "1.5k", "2k"],
-  "doubao-seedream-5-0-lite-260128": ["2k", "3k", "4k"],
-  "doubao-seedream-4-5-251128": ["2k", "4k"],
-  "doubao-seedream-4-0-250828": ["1k", "2k", "4k"],
-};
 
 const SIZE_LABELS: Record<string, string> = {
   "1k": "1K",
@@ -20,7 +15,9 @@ const SIZE_LABELS: Record<string, string> = {
 };
 
 export default function SizeSelect({ value, onChange, modelId }: Props) {
-  const options = PRESETS_BY_MODEL[modelId] ?? ["1k", "2k"];
+  // P0：能力矩阵驱动，避免写死 4 个 model id。custom 也走 modelCapabilities() 兜底。
+  const caps = modelCapabilities(modelId);
+  const options = caps.sizePresets.length > 0 ? caps.sizePresets : ["1k", "2k"];
   return (
     <select
       value={value}
