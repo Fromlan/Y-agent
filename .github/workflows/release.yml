@@ -53,14 +53,17 @@ jobs:
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
 
-      # tauri-action 自动：跑 tauri build、收集产物、创建 release、上传 asset
-      # tagName / releaseName / releaseBody 自动从 git tag 推断（v0.1.0 → 0.1.0）
-      # 不传 tagName 让它自动用当前 tag
+      #       # tauri-action 自动：跑 tauri build、收集产物、创建 release、上传 asset
+      # tagName 必须传，否则 tauri-action 跑完 build 后跳过 upload（v0.1.0 踩过这个坑）
       - name: Build & publish (tauri-action)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          # 从 ref 推断当前 tag（refs/tags/v0.1.0 → v0.1.0）
+          tagName: ${{ github.ref_name }}
+          releaseName: "Y-agent ${{ github.ref_name }}"
+          releaseBody: "自动 release · 由 release.yml 触发 · 见仓库 CHANGELOG / commits"
           # 强制只出 NSIS，避免本地 config 差异导致多/少产物
           # 改回 "all" 时去掉这一行；想加 macOS dmg / Linux deb 时 platform 矩阵已就绪
           args: --bundles nsis
