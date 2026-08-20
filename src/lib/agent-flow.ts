@@ -9,6 +9,7 @@
  */
 import { generateImage, generateImageStream } from "@/lib/jimeng";
 import { createAsset } from "@/lib/assets";
+import { buildAssetPayload, resolveFormat } from "@/lib/asset-payload";
 import { addStyleHints, recordModel, saveAgentContext, type AgentContext } from "@/lib/agent-memory";
 import { assetIds as dbAssetIds, persistUpdate } from "@/lib/chat-history";
 import type { Asset, ModelOption } from "@/lib/types";
@@ -75,10 +76,18 @@ export async function executePlanStream(
         layerDecomposition: plan.layerDecomposition,
       },
       {
-        onPartial: ({ index, url }) => {
+        onPartial: ({ index, url, outputFormat }) => {
           partials.push({ index, url });
           // partial 成功即入库（让用户早点看到图）
           const isTransparent = plan.background === "transparent";
+          // Rust 端从入参推算 outputFormat 后透传过来（5.0 系列 = Some，4.5/4.0 = None）。
+          // 配合 reqFormat + 模型兜底，5.0 Lite 默认场景 partial 资产也能正确写入
+          // outputFormat 字段，详情页"格式"显示 PNG（而不是 "—"）。
+          const partialFormat = resolveFormat({
+            respFormat: outputFormat,
+            reqFormat: plan.outputFormat,
+            modelId: plan.modelId,
+          });
           createAsset({
             projectId,
             prompt: plan.prompt,
@@ -88,11 +97,13 @@ export async function executePlanStream(
             refCount: plan.images?.length ?? 0,
             costMs: 0, // 流式 partial 阶段还没法算最终耗时
             isLayerDecomposition: !!plan.layerDecomposition,
-            payload: {
-              urls: [url],
-              ...(isTransparent ? { transparent: true } : {}),
-              ...(plan.outputFormat ? { outputFormat: plan.outputFormat } : {}),
-            },
+            payload: buildAssetPayload(
+              {
+                urls: [url],
+                isTransparent,
+              },
+              partialFormat
+            ),
           })
             .then((asset) => callbacks.onPartialAsset?.(asset, index))
             .catch((e) => console.error("partial asset save failed", e));
@@ -110,11 +121,12 @@ export async function executePlanStream(
             return;
           }
           const isTransparent = plan.background === "transparent";
-          const rawFormat =
-            (info as { output_format?: string }).output_format ??
-            plan.outputFormat;
-          const actualFormat: "png" | "jpeg" | undefined =
-            rawFormat === "png" || rawFormat === "jpeg" ? rawFormat : undefined;
+          // 流式 completed 阶段拿到 API 顶层 output_format，是权威值
+          const actualFormat = resolveFormat({
+            respFormat: (info as { output_format?: string }).output_format,
+            reqFormat: plan.outputFormat,
+            modelId: plan.modelId,
+          });
           createAsset({
             projectId,
             prompt: plan.prompt,
@@ -124,12 +136,14 @@ export async function executePlanStream(
             refCount: plan.images?.length ?? 0,
             costMs,
             isLayerDecomposition: isLayer,
-            payload: {
-              urls: partials.sort((a, b) => a.index - b.index).map((p) => p.url),
-              usage: info.usage,
-              ...(isTransparent ? { transparent: true } : {}),
-              ...(actualFormat ? { outputFormat: actualFormat } : {}),
-            },
+            payload: buildAssetPayload(
+              {
+                urls: partials.sort((a, b) => a.index - b.index).map((p) => p.url),
+                usage: info.usage,
+                isTransparent,
+              },
+              actualFormat
+            ),
           })
             .then((asset) =>
               resolve({
@@ -181,23 +195,39 @@ export async function executePlan(
   // P4：记录透明背景 + 实际输出格式，便于资产卡角标显示
   const isTransparent = plan.background === "transparent";
   // 从响应里取实际 output_format（5.0 Pro / Lite 顶层字段），fallback 到请求值
-  const rawFormat =
-    (resp as { output_format?: string }).output_format ?? plan.outputFormat;
-  const actualFormat: "png" | "jpeg" | undefined =
-    rawFormat === "png" || rawFormat === "jpeg" ? rawFormat : undefined;
+  const actualFormat = resolveFormat({
+    respFormat: (resp as { output_format?: string }).output_format,
+    reqFormat: plan.outputFormat,
+    modelId: plan.modelId,
+  });
   // P5：把每张图的 localPath 持久化（Rust 端已下载到本地缓存）
   const localPaths = resp.images
     .map((i) => i.localPath)
     .filter((p): p is string => !!p);
+  // 图层拆分场景：urls 留空（实际图存在 layers），localPath 与 layers 平行存到 layerLocalPaths
+  // 之前图层拆分场景的 `localPaths` 字段实际上从未被读（flatAssetImages 在图层拆分场景
+  // 只读 layer.localPath / layer.url，不读 payload.localPaths），改用 layerLocalPaths
+  // 是更语义化的写法，且与 AssetPayload 类型设计一致。
   const payload = isLayer
-    ? { urls: [], layers: resp.images, usage: resp.usage, localPaths }
-    : {
-        urls: resp.images.map((i) => i.url),
-        usage: resp.usage,
-        ...(isTransparent ? { transparent: true } : {}),
-        ...(actualFormat ? { outputFormat: actualFormat } : {}),
-        ...(localPaths.length > 0 ? { localPaths } : {}),
-      };
+    ? buildAssetPayload(
+        {
+          urls: [],
+          layers: resp.images,
+          usage: resp.usage,
+          isTransparent,
+          layerLocalPaths: localPaths,
+        },
+        actualFormat
+      )
+    : buildAssetPayload(
+        {
+          urls: resp.images.map((i) => i.url),
+          usage: resp.usage,
+          isTransparent,
+          localPaths,
+        },
+        actualFormat
+      );
   const asset = await createAsset({
     projectId,
     prompt: plan.prompt,

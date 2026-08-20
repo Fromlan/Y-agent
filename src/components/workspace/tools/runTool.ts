@@ -16,7 +16,9 @@ import {
   type GenerateImageParams,
 } from "@/lib/jimeng";
 import { createAsset } from "@/lib/assets";
-import { modelCapabilities, type Asset, type AssetPayload, type Usage } from "@/lib/types";
+import { buildAssetPayload, resolveFormat } from "@/lib/asset-payload";
+import { modelCapabilities, type Asset, type Usage } from "@/lib/types";
+import { ensureHasTransparentPixel } from "@/lib/image-alpha-patch";
 
 export interface RunToolParams {
   projectId: string;
@@ -77,7 +79,7 @@ async function runToolSync(
   onProgress?: (p: ToolProgress) => void
 ): Promise<Asset> {
   onProgress?.({ phase: "requesting", message: `调用 ${params.modelName}…` });
-  const resp = await generateImage(buildGenParams(params));
+  const resp = await generateImage(await buildGenParams(params));
 
   onProgress?.({ phase: "downloading", message: "下载到本地缓存…" });
   // 注意：Rust 端 jimeng_generate 已经 download_to_cache 了，这里只是 UI 反馈
@@ -86,6 +88,11 @@ async function runToolSync(
   const localPaths = resp.images
     .map((i) => i.localPath)
     .filter((p): p is string => !!p);
+  const actualFormat = resolveFormat({
+    respFormat: resp.output_format,
+    reqFormat: params.outputFormat,
+    modelId: params.modelId,
+  });
   const asset = await createAsset({
     projectId: params.projectId,
     prompt: params.prompt,
@@ -95,7 +102,17 @@ async function runToolSync(
     refCount: params.image?.length ?? 0,
     costMs: 0,
     isLayerDecomposition: !!params.layerDecomposition,
-    payload: buildPayload(params, resp.images.map((i) => i.url), resp.usage, localPaths),
+    payload: buildAssetPayload(
+      {
+        urls: resp.images.map((i) => i.url),
+        usage: resp.usage,
+        isTransparent: !!params.isTransparent,
+        localPaths,
+        parentAssetId: params.sourceAssetId,
+        bbox: params.bbox,
+      },
+      actualFormat
+    ),
   });
 
   onProgress?.({
@@ -124,8 +141,10 @@ async function runToolStream(
     totalCount,
   });
 
+  const genParams = await buildGenParams(params);
+
   return new Promise<Asset>((resolve, reject) => {
-    generateImageStream(buildGenParams(params), {
+    generateImageStream(genParams, {
       onPartial: ({ url, index, localPath }) => {
         partials.push({ url, index, localPath });
         onProgress?.({
@@ -148,6 +167,11 @@ async function runToolStream(
             .map((p) => p.localPath)
             .filter((p): p is string => !!p);
           const sorted = partials.sort((a, b) => a.index - b.index);
+          const actualFormat = resolveFormat({
+            respFormat: (info as { output_format?: string }).output_format,
+            reqFormat: params.outputFormat,
+            modelId: params.modelId,
+          });
           const asset = await createAsset({
             projectId: params.projectId,
             prompt: params.prompt,
@@ -157,11 +181,16 @@ async function runToolStream(
             refCount: params.image?.length ?? 0,
             costMs: 0,
             isLayerDecomposition: !!params.layerDecomposition,
-            payload: buildPayload(
-              params,
-              sorted.map((p) => p.url),
-              info.usage as Usage | undefined,
-              localPaths
+            payload: buildAssetPayload(
+              {
+                urls: sorted.map((p) => p.url),
+                usage: info.usage as Usage | undefined,
+                isTransparent: !!params.isTransparent,
+                localPaths,
+                parentAssetId: params.sourceAssetId,
+                bbox: params.bbox,
+              },
+              actualFormat
             ),
           });
           onProgress?.({
@@ -187,11 +216,22 @@ async function runToolStream(
 // 辅助
 // ============================================================================
 
-function buildGenParams(p: RunToolParams): GenerateImageParams {
+/**
+ * 把 RunToolParams 装成 API 用的 GenerateImageParams。
+ *
+ * 5.0 Pro 的 `background: transparent` 要求入参 PNG 必须有至少 1 个透明像素，
+ * Y-agent 走 `@/lib/image-alpha-patch.ensureHasTransparentPixel` 自动给入参图
+ * 左上角 1 像素补透明再发。原图字节不动，详见该模块注释。
+ */
+async function buildGenParams(p: RunToolParams): Promise<GenerateImageParams> {
+  let image = p.image;
+  if (p.background === "transparent" && image && image.length > 0) {
+    image = await Promise.all(image.map((u) => ensureHasTransparentPixel(u)));
+  }
   return {
     model: p.modelId,
     prompt: p.prompt,
-    image: p.image,
+    image,
     size: p.size,
     sequential: p.sequential,
     maxImages: p.maxImages,
@@ -203,19 +243,16 @@ function buildGenParams(p: RunToolParams): GenerateImageParams {
   };
 }
 
-function buildPayload(
-  p: RunToolParams,
-  urls: string[],
-  usage: Usage | undefined,
-  localPaths: string[]
-): AssetPayload {
-  return {
-    urls,
-    usage,
-    ...(p.isTransparent ? { transparent: true } : {}),
-    ...(p.outputFormat ? { outputFormat: p.outputFormat } : {}),
-    ...(localPaths.length > 0 ? { localPaths } : {}),
-    ...(p.sourceAssetId ? { parentAssetId: p.sourceAssetId } : {}),
-    ...(p.bbox ? { bbox: p.bbox } : {}),
-  };
+/**
+ * P4 兼容：取实际输出格式，优先 API 响应的 output_format，回退到请求值。
+ *
+ * 已经被 `@/lib/asset-payload` 的 `resolveFormat` 取代；本函数保留为 thin wrapper
+ * 以兼容 `runTool.test.ts` 中已有的回归测试。生产代码请用 `resolveFormat`，
+ * 它支持模型兜底（5.0 系列 = png）且作为唯一的权威实现。
+ */
+export function resolveActualFormat(
+  respFormat: string | undefined,
+  reqFormat: "png" | "jpeg" | undefined
+): "png" | "jpeg" | undefined {
+  return resolveFormat({ respFormat, reqFormat, modelId: "" });
 }
