@@ -11,57 +11,59 @@
 
 :root,
 [data-theme="dark"] {
-  --bg-base: #0a0a0c;
-  --bg-panel: #131318;
-  --bg-elev: #1a1a20;
-  --bg-hover: #22222a;
-  --bg-overlay: rgba(0, 0, 0, 0.6);
+  /* === Y-agent Brand · Dark === */
+  --bg-base: #0e0f13;
+  --bg-panel: #16181e;
+  --bg-elev: #1e2128;
+  --bg-hover: #262a33;
+  --bg-overlay: rgba(14, 15, 19, 0.85);
 
-  --border: #2a2a32;
-  --border-strong: #3a3a44;
+  --border: #262a33;
+  --border-strong: #3a3f4a;
 
-  --text-primary: #e8e8ec;
-  --text-secondary: #a0a0a8;
-  --text-muted: #6a6a72;
-  --text-inverse: #ffffff;
+  --text-primary: #f2ebdb;
+  --text-secondary: #b5bac2;
+  --text-muted: #8a8f99;
+  --text-inverse: #0e0f13;
 
-  --accent: #7c5cff;
-  --accent-hover: #9077ff;
-  --accent-dim: #3a2a8a;
+  --accent: #ff5c4d;
+  --accent-hover: #ff7568;
+  --accent-dim: #4a1e1a;
 
-  --status-success: #4ade80;
-  --status-warn: #facc15;
-  --status-danger: #f87171;
+  --status-success: #5bc2a8;
+  --status-warn: #f5a85b;
+  --status-danger: #e94b6a;
 
-  --scrollbar-thumb: #2a2a32;
-  --scrollbar-thumb-hover: #3a3a44;
+  --scrollbar-thumb: #262a33;
+  --scrollbar-thumb-hover: #3a3f4a;
 }
 
 [data-theme="light"] {
-  --bg-base: #fafafc;
+  /* === Y-agent Brand · Light === */
+  --bg-base: #f2ebdb;
   --bg-panel: #ffffff;
-  --bg-elev: #f1f1f5;
-  --bg-hover: #e6e6ec;
-  --bg-overlay: rgba(20, 20, 30, 0.45);
+  --bg-elev: #faf7f0;
+  --bg-hover: #f0ebdc;
+  --bg-overlay: rgba(242, 235, 219, 0.85);
 
-  --border: #d8d8e0;
-  --border-strong: #b8b8c4;
+  --border: #e0daca;
+  --border-strong: #c5bda8;
 
-  --text-primary: #1a1a22;
-  --text-secondary: #54545c;
-  --text-muted: #888894;
-  --text-inverse: #ffffff;
+  --text-primary: #0e0f13;
+  --text-secondary: #3a3f4a;
+  --text-muted: #8a8f99;
+  --text-inverse: #f2ebdb;
 
-  --accent: #5b3df0;
-  --accent-hover: #4a2ee0;
-  --accent-dim: #c8bcf5;
+  --accent: #ff5c4d;
+  --accent-hover: #e54738;
+  --accent-dim: #ffe2dd;
 
-  --status-success: #16a34a;
-  --status-warn: #d97706;
-  --status-danger: #dc2626;
+  --status-success: #2d8a6e;
+  --status-warn: #c77f2f;
+  --status-danger: #c73a55;
 
-  --scrollbar-thumb: #c8c8d0;
-  --scrollbar-thumb-hover: #a8a8b4;
+  --scrollbar-thumb: #c5bda8;
+  --scrollbar-thumb-hover: #a8a08e;
 }
 
 [data-theme="cyber"] {

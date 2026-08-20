@@ -21,14 +21,14 @@ export const THEMES: ThemeMeta[] = [
   {
     id: "dark",
     name: "暗夜",
-    description: "紫调默认主题，长时间盯图最护眼",
-    swatches: ["#0a0a0c", "#131318", "#1a1a20", "#7c5cff", "#9077ff", "#e8e8ec"],
+    description: "Y-agent 品牌默认主题：炭灰底 + 珊瑚红强调",
+    swatches: ["#0e0f13", "#16181e", "#1e2128", "#ff5c4d", "#ff7568", "#f2ebdb"],
   },
   {
     id: "light",
     name: "晨光",
-    description: "白底浅色主题，截图分享友好",
-    swatches: ["#fafafc", "#ffffff", "#f1f1f5", "#5b3df0", "#4a2ee0", "#1a1a22"],
+    description: "米白底 + 珊瑚红强调，截图分享友好",
+    swatches: ["#f2ebdb", "#ffffff", "#faf7f0", "#ff5c4d", "#e54738", "#0e0f13"],
   },
   {
     id: "cyber",
