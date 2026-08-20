@@ -182,3 +182,50 @@ git push origin :refs/tags/v0.2.0
 - ❌ PR 合并（只跑 ci.yml）
 - ❌ 推非 `v*` 格式的 tag（如 `0.2.0` 不带 v）
 - ✅ 推 `v*` 格式的 tag（`v0.2.0`、`v0.2.0-rc.1`）
+
+
+## 10. ⚠️ 推 workflow 文件的 GitHub scope 坑
+
+**症状**（v0.1.0 实测）：
+```
+! [remote rejected] main -> main (refusing to allow an OAuth App to create or update
+workflow `.github/workflows/ci.yml` without `workflow` scope)
+error: failed to push some refs to ...
+```
+
+**原因**：GitHub 2021+ 的安全机制。任何 **push 修改 `.github/workflows/*.yml`** 的操作，要求 token 必须有 `workflow` scope。
+
+**当前 token 状态**（`gh auth status` 输出）：
+- Token scopes: `admin:public_key`, `gist`, `read:org`, `repo` —— **缺 `workflow`**
+- `gh` / git credential-manager 用的都是同一个 OAuth token
+- SSH 推也撞（需要 SSH key 配到 GitHub 账号上）
+
+**解决**（按推荐度）：
+
+1. **去 GitHub 加 scope**（推荐，1 分钟）：
+   - 打开 https://github.com/settings/tokens
+   - 找到你 git/gh 用的 PAT，点 Edit
+   - 勾上 `workflow` scope，保存
+   - 重新 `git push origin main` 即可
+
+2. **`gh auth refresh` 重新走 OAuth**（要浏览器交互）：
+   ```powershell
+   gh auth refresh --scopes workflow --hostname github.com
+   ```
+   弹浏览器重新授权，同意后 token 自动更新。
+
+3. **用 web UI 改 workflow**（绕得开但不优雅）：
+   - GitHub 网页直接编辑 workflow 文件，提交时勾 "commit directly to main"
+   - 适合小改，push 还是会被你撞到
+
+**踩坑经验**：
+- IDE（VSCode / Cursor / GitHub Desktop）推仍可能撞同一坑 —— IDE 用 GitHub 认证走的是同一 OAuth
+- 拆 commit 不解决：单独 commit 改 workflow 也撞
+- tag push 本身**不**会撞（不修改文件）—— release.yml 跑时 checkout 包含 workflow 的 commit 也无问题
+- 所以发版两步是独立的：
+  - 1) 推 main（要先解决 scope）
+  - 2) 推 tag（不撞 scope，可后做）
+
+**不要做的事**：
+- ❌ 每次撞错就生成新 PAT（PAT 一多管理乱）
+- ❌ 把 workflow 移到别的目录绕过（GitHub 认 `.github/` 子目录的所有 yml）
