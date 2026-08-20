@@ -1,5 +1,4 @@
-﻿﻿# Y-agent API 集成笔记
-
+# Y-agent API 集成笔记
 > 即梦（豆包 Seedream）API + LLM Provider 集成的所有细节、坑、调优点。
 > 是踩了 N 次坑之后的实操记录，不是 API 官方文档的复制。
 
@@ -226,6 +225,23 @@ if b64.starts_with("data:") {
 
 并且会先 `B64.decode(bare)` 验证一遍（剥 padding），不合法直接报错。
 
+#### 5.0 模型默认输出 PNG
+
+Y-agent 业务规则：5.0 Pro / Lite 默认输出 PNG，4.5 / 4.0 不设（让 API 走默认 jpeg）。
+
+实现：前端 `src/lib/jimeng.ts::applyOutputFormatDefault(params)`，每次 `generateImage` / `generateImageStream` 入口自动应用。
+
+- 调用方显式传了 `outputFormat` → 不动
+- 5.0 Pro / Lite 且未传 → 强制 `outputFormat: "png"`
+- 4.5 / 4.0 未传 → 不设（保持 undefined）
+
+UI 配合：
+- PromptBar 输出格式下拉框默认项文案改为「PNG（Y-agent 默认）」
+- `ProjectDetail` 的 `useState<"" | "png" | "jpeg">("png")` 默认值也是 png
+
+理由：5.0 Pro / Lite 内部默认就是 PNG（4.5 / 4.0 没 PNG 选项），UI 显式默认 PNG 减少用户认知负担 —— "PNG"是更通用的无损格式，UI 图标/素材场景天然需要。
+
+
 ### 1.7 图层拆分（M2 重点，5.0 Pro 专属）
 
 ```typescript
@@ -401,6 +417,30 @@ Y-agent 集成：
 
 **Skill 模板**：无新增（P5 是基础设施层，P6 的 icon-pack-transparent 等模板会直接受益）
 
+
+#### P5+ 增强：入库自动兜底 + 主动 backfill
+
+P5 处理的是「新图下载 + 优先用 localPath」，但遗留一个问题：**P5 之前入的库没有 localPath**。如果用户历史项目里几千张图都靠外链 URL，24h 后会全失效。P5+ 解决这个：
+
+- **任何 `create_asset` 入库即后台兜底**：Rust 端 `create_asset` 改 async，DB 写完立刻 `spawn_local_path_backfill` 串行下缺图的 localPath，写完异步回 `payload.localPaths`。用户响应不等下载（先用 url 看图）
+- **主动 backfill**：`commands::backfill_local_assets(project_id?)` 扫「urls 有但 localPaths 缺」的资产，每条 `tokio::spawn` 并发下。返回 `BackfillReport { scanned, downloaded, failed, brokenMarked }`
+- **失败标 broken**：下载失败的资产标 `payload.broken = true`。前端目前不消费这个字段，**未来 UI 可以**给「图已过期」角标 + 提示重生成
+- **路径安全**：写回时 `canonicalize` 后必须在 `app_data_dir/assets/` 下（防越权，校验失败则该项记空字符串不入 payload）
+
+前端：
+- `src/lib/assets.ts::backfillLocalAssets(projectId?)` 暴露给前端（走 Tauri IPC）
+- `ProjectDetail` 切项目时 `useEffect([currentProject?.id])` 自动跑一次。下载成功/部分失败时 `reload({ silent: true })` 让 SafeImage 切到本地
+- 静默失败不打扰用户（最坏情况就是 24h 后图片过期，与改之前一样）
+
+两个 helper：
+- `extract_urls_for_backfill(payload)`：支持两种 payload —— 普通 `payload.urls[]`、图层拆分 `payload.layers[]`（按 zIndex 升序）
+- `extract_local_paths_for_backfill(payload)`：平行数组（urls 模式写 `localPaths`，图层模式写 `layerLocalPaths`），缺位填 None 让 backfill 知道要补哪里
+
+**与 P5 的关系**：
+- P5 = jimeng_generate 路径下载（同步生图 / 流式 partial）
+- P5+ = create_asset 路径兜底（任何入库都触发）+ 主动扫缺图
+- 两条链路互补：P5 处理新图，P5+ 修复老图
+
 ### 1.12 Skill 模板 + Agent 工具扩展（P6）
 
 ```typescript
@@ -450,6 +490,65 @@ SkillPicker UI（`SkillPicker.tsx`）按 group 分组渲染：
 - `inferSkillGroup(skill)` 按 `groupCount` + `modelHint` 自动推断
 
 **冒烟**：12 个 Skill 模板 + 3 个 Agent 工具（demo 模式跑通）
+
+### 1.13 工具工作台（Tools Tab）
+
+> ModeSwitch 加了第三个 tab「工具」：即梦 API 全部能力的快捷入口，每个工具用合适的模型预设参数，避开"翻参数面板"的成本。
+
+入口：`src/components/workspace/ModeSwitch.tsx` 第三个 tab `tools`（Wrench icon），切到后 `ProjectDetail` 渲染 `<ToolsTab>`，隐藏 PromptBar。
+
+5 个工具：
+
+| 工具 | 模型 | 关键参数 | 用途 |
+|---|---|---|---|
+| 批量组图 | 5.0 Lite / 4.5 / 4.0 | maxImages 1-N | 一次出 N 张同 prompt（挑选用） |
+| 联网出图 | 5.0 Lite | `tools=[web_search]` | 模型先搜互联网再画（天气/商品/新闻等实时信息） |
+| 背景去背 | 5.0 Pro | `background=transparent`, `outputFormat=png` | 把已有图导出为 PNG 透明背景（UI 图标/素材） |
+| 图层拆分 | 5.0 Pro | `layerDecomposition=true` | 把一张图拆为底图 + 多个可编辑图层 |
+| 局部编辑 | 5.0 Pro | `image` + `bbox` | 在图上拖框 + 改写 prompt 重画局部 |
+
+#### 共享组件
+
+- `src/components/workspace/tools/AssetPicker.tsx`：从资产库选一张图（弹窗）。回调用 `resolveImageUrl` 把路径转成 jimeng API 接受的格式（本地路径 → dataURL / 外链 URL 直传 / dataURL 直传）
+- `src/components/workspace/tools/runTool.ts`：统一执行 helper
+  - 模型支持 stream（5.0 Lite / 4.5 / 4.0）→ `runToolStream`，partial 立刻入主资产，completed 时合并
+  - 模型不支持 stream（5.0 Pro）→ `runToolSync`，阶段提示：requesting → downloading → persisting → done
+  - 任何阶段报错都走 `onProgress('error', ...)` 并 reject，UI 负责 catch + toast
+  - `ToolProgress { phase, message, partialCount?, totalCount? }` 进度回调
+
+#### 透明工具的 PNG 校验
+
+5.0 Pro 的 `background: transparent` **严格要求输入图是 PNG**（不是 JPEG）。`ToolsTab` 检测当前选中的资产：
+
+- 是 JPEG → 禁用提交按钮，黄色提示条告诉用户怎么解决（"去批量组图用输出格式 PNG 重出一张" / "用局部编辑把这张图转一道再回来选"）
+- `isAssetJpeg(asset)` 优先看 `payload.outputFormat`，回退看 URL 扩展名（兼容老数据 / 外部导入）
+
+`commands::explain_error` 也加了对应的中文提示：
+
+```
+"5.0 Pro 的「背景透明」要求输入图必须是 PNG 格式。请在「去背」工具里改用 PNG 来源的资产，或先用「局部编辑」把图重出为 PNG 格式。"
+```
+
+匹配关键字：`transparent background requires a png`（API 实际报错）。
+
+#### 局部编辑的 bbox
+
+UI：在图上拖鼠标画框，屏幕坐标自动换算成图像素（`naturalSize` 记录 `naturalWidth/Height`）。
+
+Prompt 格式（5.0 Pro 文档要求）：
+
+```
+{userPrompt} <bbox>x1 y1 x2 y2</bbox>
+```
+
+坐标是源图像素。提交后 `runTool` 把 `sourceAssetId` + `bbox` 写进新资产 payload（保留溯源链）。
+
+#### 与已有功能的关系
+
+- 局部编辑在 `AssetDetailDialog` 里早就有了（资产详情页"局部编辑"按钮）。ToolsTab 把这个能力独立出来 + 配合 AssetPicker 选图 → 形成"工作台"
+- 图层拆分：之前只能通过 Agent 调 `jimeng_decompose_layers` 工具，ToolsTab 给了直观的 UI 入口
+- 批量组图 / 联网出图：等价于 PromptBar 的"数量"+"联网"开关，但 UI 简化、不混其它能力位
+- 背景去背：等价于 PromptBar 的"输出格式=png"+"透明背景"，但要求"基于已有图"（PromptBar 是文生图场景）
 
 ---
 
