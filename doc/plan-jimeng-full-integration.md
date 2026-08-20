@@ -178,6 +178,13 @@
   - 还原到画布的小工具：按 `bounding_box.absolute` 自动排到底图坐标上（已由 `flatAssetImages` 排序提供）
 - 资产卡片 `AssetCard` 在 `isLayerDecomposition` 时显示一个"L"小角标，hover 看图层数
 
+**M3 增量：合成视图升级**
+- 新增 `src/components/workspace/LayerCompositeStage.tsx`：把可见图层按 zIndex 升序叠放，前景层按 `boundingBox.absolute` 定位到底图层画布上；底图之上用 8px 棋盘背景让 alpha 通道一眼可见。
+- 新增 `src/lib/layer-view.ts::pickVisibleLayers` 纯函数（带 6 个 Vitest 用例），处理 `solo` 优先于 `hidden` 的逻辑。
+- `AssetDetailDialog` 顶部加「合成 / 单图层」切换 pill（仅图层资产可见）；图层面板新增 Solo（`Focus` 图标，互斥）和"全部显示"按钮。
+- 单图层模式保留旧逻辑（缩略图条 + 键盘 ←/→）；合成模式下 ←/→ 禁用、缩略图条淡化。
+- **M3+ 补丁**：合成画布改用 `boundingBox.normalized`（0-1000 aspect-independent）作为主坐标系（5.0 Pro 官方"任意尺寸重建"方案），修复 API 报告 base size 不准（如 portrait 图返回 2048×2048）导致的 bbox 越界/错位。详情见 `doc/api-integration.md` §1.7.0。
+
 **导出（Rust 新 command）**
 - `export_layer_png(asset_id, layer_index, dest_path)` — 直接把 b64 的图层落盘（绕过 b64 解析后的下载链路）
 
@@ -379,6 +386,29 @@ P0 + P1 + P2 + P3 + P4 + P5 ──→ P6 (Skill + Agent 工具)
 
 **可并行**：P2 / P3 / P4 / P5 在 P0 完成后可由不同人同时做。
 **串行**：P6 必须等 P0~P5 全部完成（agent 工具要调用所有能力）。
+
+---
+
+### P7 · 对话生图能力优化：模型选择跟随 PromptBar（已完成，1 PR 1.5 天）
+
+**目标**：让对话模式下 LLM 调工具生图时，**模型选择遵循用户在 PromptBar 的设置**，而不是 LLM 自主决定；同时把对话生图也改成流式，UX 更顺。
+
+**改动**：
+- `agent-tools.ts`：`jimeng_generate_image` 的 `model` 字段保留但降级为"受控 hint"；`renderSystemPrompt` 接受 `userModelName` 参数，注入硬规则
+- `agent-router.ts`：`pickModel` 不再覆盖用户当前模型；新增 `RouteDecision.suggestedModelName` 用于 PlanCard 提示
+- `agent-event.ts`：`PendingPlan.modelId/modelName` 改 optional（避免和 PromptBar 双源），新增 `suggestedModelName`
+- `ProjectDetail.tsx`：
+  - `runLlmTurn` 改走 `executePlanStream`（流式 partial 入库）
+  - 加能力位预检（`useModelOpt.capabilities.groupGeneration` 与 `maxImages` 校验）
+  - `runRulePlan` 创建的 plan 不再存 `modelId`；`onConfirmPlan` 用当前 `model.id`（fallback 兼容老 chat）
+  - `renderSystemPrompt` 注入 `model.name`
+- `ChatMessageList.tsx`：PlanCard 加 `currentModelName` 显示 + `suggestedModelName` 提示 + generating 时按钮禁用；ToolCallCard 工具名中文化
+
+**为什么不在 P6 做**：P6 阶段模型只有 5.0 Lite / 5.0 Pro，schema 默认参数没那么刺眼。Skill 模板数量从 6 扩到 11 后，用户在对话里"画 4 张变体"和 PromptBar 选 Pro 的冲突就凸显了。
+
+**已知边界**：
+- 5.0 Pro 不支持流式 + 不支持组图：用户选 Pro + 要求 maxImages>1 → 自动降级 1 + toast 提示
+- 改 schema 可能让 LLM 在某些 prompt 上行为微调（之前它自己选 5.0 Pro 的，现在被强制用用户选的），但功能更可预测
 
 ---
 
