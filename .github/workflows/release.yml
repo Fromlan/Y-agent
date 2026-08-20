@@ -1,0 +1,66 @@
+name: Release
+
+# 推 tag (vX.Y.Z) 自动触发：跑 release build + 创建 GitHub Release + 上传安装包
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write  # 创建 release + 上传 asset 需要
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows 跑 NSIS + MSI（出 .exe + .msi 安装器）
+          - platform: windows-latest
+            args: ""
+          # 未来如需 macOS / Linux，加以下两行 + 在仓库 Settings → Actions → Runners 配 macOS self-hosted runner
+          # - platform: macos-latest
+          #   args: --target universal-apple-darwin
+          # - platform: ubuntu-22.04
+          #   args: ""
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend deps
+        run: pnpm install --frozen-lockfile
+
+      # tauri-action 自动：跑 tauri build、收集产物、创建 release、上传 asset
+      # tagName / releaseName / releaseBody 自动从 git tag 推断（v0.1.0 → 0.1.0）
+      # 不传 tagName 让它自动用当前 tag
+      - name: Build & publish (tauri-action)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # 强制只出 NSIS，避免本地 config 差异导致多/少产物
+          # 改回 "all" 时去掉这一行；想加 macOS dmg / Linux deb 时 platform 矩阵已就绪
+          args: --bundles nsis

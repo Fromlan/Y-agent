@@ -132,7 +132,7 @@ export default function ProjectsPage() {
                     </button>
                     <button
                       onClick={() => onDelete(p.id, p.name)}
-                      className="btn-icon p-1 hover:text-red-400"
+                      className="btn-icon p-1 hover:text-accent-danger"
                       title="删除"
                     >
                       <Trash2 className="w-3.5 h-3.5" />

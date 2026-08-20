@@ -2,6 +2,122 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+ * 主题变量
+ * - 默认（无 data-theme）= 暗夜（dark）
+ * - 切换通过 <html data-theme="xxx">
+ * - 颜色 token 在 tailwind.config.js 里以 var(--xxx) 暴露
+ * ============================================================ */
+
+:root,
+[data-theme="dark"] {
+  --bg-base: #0a0a0c;
+  --bg-panel: #131318;
+  --bg-elev: #1a1a20;
+  --bg-hover: #22222a;
+  --bg-overlay: rgba(0, 0, 0, 0.6);
+
+  --border: #2a2a32;
+  --border-strong: #3a3a44;
+
+  --text-primary: #e8e8ec;
+  --text-secondary: #a0a0a8;
+  --text-muted: #6a6a72;
+  --text-inverse: #ffffff;
+
+  --accent: #7c5cff;
+  --accent-hover: #9077ff;
+  --accent-dim: #3a2a8a;
+
+  --status-success: #4ade80;
+  --status-warn: #facc15;
+  --status-danger: #f87171;
+
+  --scrollbar-thumb: #2a2a32;
+  --scrollbar-thumb-hover: #3a3a44;
+}
+
+[data-theme="light"] {
+  --bg-base: #fafafc;
+  --bg-panel: #ffffff;
+  --bg-elev: #f1f1f5;
+  --bg-hover: #e6e6ec;
+  --bg-overlay: rgba(20, 20, 30, 0.45);
+
+  --border: #d8d8e0;
+  --border-strong: #b8b8c4;
+
+  --text-primary: #1a1a22;
+  --text-secondary: #54545c;
+  --text-muted: #888894;
+  --text-inverse: #ffffff;
+
+  --accent: #5b3df0;
+  --accent-hover: #4a2ee0;
+  --accent-dim: #c8bcf5;
+
+  --status-success: #16a34a;
+  --status-warn: #d97706;
+  --status-danger: #dc2626;
+
+  --scrollbar-thumb: #c8c8d0;
+  --scrollbar-thumb-hover: #a8a8b4;
+}
+
+[data-theme="cyber"] {
+  --bg-base: #050510;
+  --bg-panel: #0a0a18;
+  --bg-elev: #111126;
+  --bg-hover: #1a1a36;
+  --bg-overlay: rgba(0, 0, 0, 0.7);
+
+  --border: #1f1f44;
+  --border-strong: #2f2f5a;
+
+  --text-primary: #e8f0ff;
+  --text-secondary: #98a8c8;
+  --text-muted: #5a6488;
+  --text-inverse: #050510;
+
+  --accent: #00f0ff;
+  --accent-hover: #50f8ff;
+  --accent-dim: #005a66;
+
+  --status-success: #00ff9d;
+  --status-warn: #ffd400;
+  --status-danger: #ff2d6f;
+
+  --scrollbar-thumb: #1f1f44;
+  --scrollbar-thumb-hover: #2f2f5a;
+}
+
+[data-theme="forest"] {
+  --bg-base: #0e1410;
+  --bg-panel: #141c16;
+  --bg-elev: #1c2620;
+  --bg-hover: #253028;
+  --bg-overlay: rgba(0, 0, 0, 0.6);
+
+  --border: #2c3a32;
+  --border-strong: #3c4e44;
+
+  --text-primary: #e8efe8;
+  --text-secondary: #a0b0a4;
+  --text-muted: #6a7a6e;
+  --text-inverse: #ffffff;
+
+  --accent: #6cd28e;
+  --accent-hover: #8ee2a8;
+  --accent-dim: #2a5a3a;
+
+  --status-success: #6cd28e;
+  --status-warn: #e0b056;
+  --status-danger: #e07a7a;
+
+  --scrollbar-thumb: #2c3a32;
+  --scrollbar-thumb-hover: #3c4e44;
+}
+
 @layer base {
   html,
   body,
@@ -17,6 +133,9 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     user-select: none;
+    background-color: var(--bg-base);
+    color: var(--text-primary);
+    transition: background-color 180ms ease, color 180ms ease;
   }
 
   /* 允许表单可选择 */
@@ -34,11 +153,11 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: #2a2a32;
+    background: var(--scrollbar-thumb);
     border-radius: 4px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #3a3a44;
+    background: var(--scrollbar-thumb-hover);
   }
 }
 
@@ -50,7 +169,8 @@
       text-text-primary disabled:opacity-50 disabled:cursor-not-allowed;
   }
   .btn-primary {
-    @apply bg-accent hover:bg-accent-hover text-white border-transparent;
+    @apply bg-accent hover:bg-accent-hover border-transparent;
+    color: var(--text-inverse);
   }
   .btn-icon {
     @apply inline-flex items-center justify-center w-8 h-8 rounded-md

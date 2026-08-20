@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X, Eye, EyeOff, FlaskConical, Brain, Activity } from "lucide-react";
+import { X, Eye, EyeOff, FlaskConical, Brain, Activity, Palette } from "lucide-react";
 import { getApiKey, setApiKey, clearApiKey } from "@/lib/api-key";
 import { getPref, setPref } from "@/lib/prefs";
 import { useToast } from "@/components/shared/Toast";
@@ -10,6 +10,7 @@ import { confirmDialog } from "@/lib/dialog";
 import { APP_NAME, APP_VERSION, BUILD_TAG } from "@/lib/app-info";
 import { listProjects } from "@/lib/projects";
 import { listAssets } from "@/lib/assets";
+import ThemePicker from "@/components/settings/ThemePicker";
 import type { Asset, Project } from "@/lib/types";
 
 const PREF_DEFAULT_MODEL = "default_model";
@@ -182,7 +183,7 @@ export default function SettingsPanel({ open, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-bg-overlay"
       onClick={onClose}
     >
       <div
@@ -197,6 +198,18 @@ export default function SettingsPanel({ open, onClose }: Props) {
         </div>
 
         <div className="space-y-5">
+          {/* 外观主题 */}
+          <section>
+            <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <Palette className="w-3.5 h-3.5" />
+              外观主题
+            </h3>
+            <ThemePicker />
+            <p className="text-[10px] text-text-muted/70 mt-1.5">
+              即时切换，自动保存。下次启动仍生效。
+            </p>
+          </section>
+
           {/* 默认偏好 */}
           <section>
             <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">
@@ -244,7 +257,7 @@ export default function SettingsPanel({ open, onClose }: Props) {
               <label className="label flex items-center justify-between">
                 <span>即梦（豆包 Seedream）API Key</span>
                 {hasKey && (
-                  <span className="text-[10px] text-green-400">● 已配置</span>
+                  <span className="text-[10px] text-accent-success">● 已配置</span>
                 )}
               </label>
               <div className="relative mt-1.5">
@@ -327,7 +340,7 @@ export default function SettingsPanel({ open, onClose }: Props) {
               <Brain className="w-3.5 h-3.5" />
               Agent LLM（用于对话）
               {llmConfigured && (
-                <span className="text-[10px] text-green-400 ml-1">● 已配置</span>
+                <span className="text-[10px] text-accent-success ml-1">● 已配置</span>
               )}
             </h3>
             <div className="space-y-2">
@@ -390,7 +403,7 @@ export default function SettingsPanel({ open, onClose }: Props) {
             <button
               onClick={onClear}
               disabled={!hasKey}
-              className="text-xs text-text-muted hover:text-red-400 disabled:opacity-40"
+              className="text-xs text-text-muted hover:text-accent-danger disabled:opacity-40"
             >
               清除 Key
             </button>

@@ -202,7 +202,7 @@ export default function AssetDetailDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4 sm:p-8"
+      className="fixed inset-0 z-50 bg-bg-overlay flex items-center justify-center p-4 sm:p-8"
       onClick={onClose}
     >
       <div
@@ -570,7 +570,7 @@ export default function AssetDetailDialog({
                 className={`btn text-xs h-8 ${
                   confirmDel
                     ? "!bg-red-500/80 !text-white !border-red-500/80"
-                    : "hover:!text-red-400"
+                    : "hover:!text-accent-danger"
                 }`}
                 title="删除"
               >
@@ -862,7 +862,7 @@ function EditStage({
             height: `${(Math.abs(drawn.y2 - drawn.y1) / Math.max(naturalSize.h, 1)) * 100}%`,
           }}
         >
-          <span className="absolute -top-6 left-0 bg-accent text-white text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap">
+          <span className="absolute -top-6 left-0 bg-accent text-text-inverse text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap">
             bbox [{Math.min(drawn.x1, drawn.x2)}, {Math.min(drawn.y1, drawn.y2)}, {Math.max(drawn.x1, drawn.x2)}, {Math.max(drawn.y1, drawn.y2)}]
           </span>
         </div>

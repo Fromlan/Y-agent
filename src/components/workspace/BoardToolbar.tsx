@@ -215,7 +215,7 @@ export default function BoardToolbar({
           <button
             onClick={onBatchDelete}
             disabled={selectedIds.size === 0}
-            className="btn text-xs h-7 px-2.5 hover:!text-red-400"
+            className="btn text-xs h-7 px-2.5 hover:!text-accent-danger"
           >
             <Trash2 className="w-3.5 h-3.5" /> 批量删除
           </button>
@@ -249,7 +249,7 @@ function ViewBtn({
       title={title}
       className={`px-2 h-7 text-xs flex items-center transition-colors ${
         active
-          ? "bg-accent text-white"
+          ? "bg-accent text-text-inverse"
           : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"
       }`}
     >

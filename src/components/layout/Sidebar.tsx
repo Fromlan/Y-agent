@@ -34,7 +34,7 @@ export default function Sidebar({ route, onRoute, onOpenSettings }: Props) {
     <aside className="w-56 flex-shrink-0 flex flex-col border-r border-border bg-bg-panel">
       <div className="h-12 flex items-center px-4 border-b border-border">
         <div className="w-7 h-7 rounded-md bg-accent flex items-center justify-center mr-2">
-          <Sparkles className="w-4 h-4 text-white" />
+          <Sparkles className="w-4 h-4 text-text-inverse" />
         </div>
         <span className="font-semibold text-text-primary">Y-agent</span>
       </div>

@@ -81,7 +81,7 @@ export default function AgentMemoryPanel({ open, onClose, projectId }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-bg-overlay"
       onClick={onClose}
     >
       <div
@@ -146,7 +146,7 @@ export default function AgentMemoryPanel({ open, onClose, projectId }: Props) {
           <button
             onClick={onClear}
             disabled={saving}
-            className="text-xs text-text-muted hover:text-red-400 flex items-center gap-1 disabled:opacity-40"
+            className="text-xs text-text-muted hover:text-accent-danger flex items-center gap-1 disabled:opacity-40"
           >
             <Trash2 className="w-3.5 h-3.5" />
             清除记忆

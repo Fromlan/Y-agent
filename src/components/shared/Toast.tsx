@@ -66,11 +66,11 @@ function iconFor(level: Level) {
   const cls = "w-4 h-4 flex-shrink-0";
   switch (level) {
     case "success":
-      return <CheckCircle2 className={`${cls} text-green-400`} />;
+      return <CheckCircle2 className={`${cls} text-accent-success`} />;
     case "error":
-      return <XCircle className={`${cls} text-red-400`} />;
+      return <XCircle className={`${cls} text-accent-danger`} />;
     case "warn":
-      return <AlertCircle className={`${cls} text-yellow-400`} />;
+      return <AlertCircle className={`${cls} text-accent-warn`} />;
     case "info":
       return <Info className={`${cls} text-accent`} />;
   }

@@ -1,10 +1,26 @@
 <!doctype html>
-<html lang="zh-CN" class="dark">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Y-agent · 游戏美术 AI 工作台</title>
+    <script>
+      // 主题 inline 注入：在 CSS 应用前同步设置 data-theme，避免首屏闪烁（FOUC）
+      // 优先 localStorage 缓存（applyInitialTheme 写入），找不到就用默认（dark）
+      (function () {
+        try {
+          var id = localStorage.getItem("pref.theme");
+          // 与 THEMES 保持一致：dark / light / cyber / forest
+          if (id === "light" || id === "cyber" || id === "forest") {
+            document.documentElement.setAttribute("data-theme", id);
+          }
+          // dark 是默认值（:root），不设 data-theme 即可
+        } catch (e) {
+          /* localStorage 不可用就走默认 */
+        }
+      })();
+    </script>
   </head>
   <body class="bg-bg-base text-text-primary antialiased">
     <div id="root"></div>

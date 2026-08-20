@@ -97,7 +97,7 @@ export function PromptProvider({ children }: { children: ReactNode }) {
       {children}
       {state.open && (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-bg-overlay"
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) close(null);
           }}
@@ -125,7 +125,7 @@ export function PromptProvider({ children }: { children: ReactNode }) {
               }}
               className="input w-full"
             />
-            {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
+            {error && <p className="mt-2 text-xs text-accent-danger">{error}</p>}
             <div className="mt-4 flex justify-end gap-2">
               <button className="btn btn-secondary" onClick={() => close(null)}>
                 {state.cancelLabel}

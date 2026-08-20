@@ -7,8 +7,12 @@ import { PromptProvider } from "@/components/shared/PromptProvider";
 import { SessionProvider, useSession } from "@/lib/session";
 import { hasApiKey } from "@/lib/api-key";
 import { log } from "@/lib/logger";
+import { useTheme } from "@/lib/use-theme";
 
 function AppShell() {
+  // 挂载主题 hook：从 Rust KV 读取持久化值并同步到 <html>
+  // （在 SettingsPanel 之外也需要调用一次以触发副作用）
+  useTheme();
   const [route, setRoute] = useState<Route>("projects");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [needsApiKey, setNeedsApiKey] = useState(false);
