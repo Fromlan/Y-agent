@@ -1,4 +1,4 @@
-﻿name: CI
+name: CI
 
 on:
   push:
@@ -25,12 +25,23 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
-  # Rust 后端 cargo check（需要 MSVC 工具链，Windows runner 自带）
+  # Rust 后端 cargo check（需要 MSVC 工具链，Windows runner 自带）。
+  # tauri::generate_context!() 宏需要 ../dist 存在（frontendDist 配置），
+  # 所以这里先跑 pnpm install + pnpm build 生成产物再 cargo check。
   backend:
     name: Backend (cargo check)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
