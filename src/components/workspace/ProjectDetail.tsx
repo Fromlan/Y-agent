@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { ArrowLeft, Brain, KeyRound, Trash2 } from "lucide-react";
 import { useSession } from "@/lib/session";
-import { deleteAsset } from "@/lib/assets";
+import { deleteAsset, backfillLocalAssets } from "@/lib/assets";
 import { renameProject } from "@/lib/projects";
 import { explainError } from "@/lib/jimeng";
 import { hasApiKey } from "@/lib/api-key";
@@ -21,6 +21,7 @@ import PromptBar from "@/components/workspace/PromptBar";
 import AssetBoard from "@/components/workspace/AssetBoard";
 import ChatMessageList from "@/components/workspace/ChatMessageList";
 import ModeSwitch, { type InputMode } from "@/components/workspace/ModeSwitch";
+import ToolsTab from "@/components/workspace/ToolsTab";
 import AgentMemoryPanel from "@/components/workspace/AgentMemoryPanel";
 import { agentEvents, type ChatMessage, type AgentEvent, type ToolCallRecord } from "@/lib/agent-event";
 import { route } from "@/lib/agent-router";
@@ -35,7 +36,7 @@ interface Props {
   onOpenSettings: () => void;
 }
 
-type ViewTab = "chat" | "assets";
+type ViewTab = "chat" | "assets" | "tools";
 
 export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   const { currentProject, setCurrentProject } = useSession();
@@ -78,7 +79,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   // P0：新增能力位开关
   const [webSearch, setWebSearch] = useState(false);
   const [fastMode, setFastMode] = useState(false);
-  const [outputFormat, setOutputFormat] = useState<"" | "png" | "jpeg">("");
+  const [outputFormat, setOutputFormat] = useState<"" | "png" | "jpeg">("png");
   const [transparent, setTransparent] = useState(false);
 
   // 输入模式：生图（M1 直调）/ 对话（Agent 路由）
@@ -93,6 +94,39 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     hasApiKey().then(setHasKey).catch(() => setHasKey(false));
   }, [currentProject, generating]);
 
+  // P5+：切项目时自动 backfill 一次，把历史"url 有但 localPath 缺"的资产补下本地。
+  // 后端并发下完后写回 DB；这里等 backfill 完再 reload，让 UI 拿到新 localPath。
+  // - 下载成功：reload 让 SafeImage 切到本地路径
+  // - 部分失败：后端会把这些资产标 payload.broken=true；reload 后 UI 可据此显示"已过期"
+  useEffect(() => {
+    if (!currentProject) return;
+    let cancelled = false;
+    backfillLocalAssets(currentProject.id)
+      .then((r) => {
+        if (cancelled) return;
+        if (r.downloaded > 0 || r.brokenMarked > 0) {
+          reload({ silent: true });
+          if (r.brokenMarked > 0) {
+            const remaining = r.failed + r.brokenMarked;
+            toast.warn(
+              `已自动备份 ${r.downloaded} 张图到本地，${remaining} 张图链接已失效（建议重新生成）`
+            );
+          } else if (r.downloaded > 0) {
+            toast.info(`已自动备份 ${r.downloaded} 张历史图到本地`);
+          }
+        }
+      })
+      .catch((e) => {
+        // 静默失败，不打扰用户（最坏情况就是图片 24h 后过期，与改之前一样）
+        console.error("backfill failed:", e);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentProject?.id]);
+
+
   // 模式与 tab 同步：
   // - 切换项目 → 用当前 inputMode 决定初始 tab
   // - 切换 inputMode → 同步 tab（生图 → 资产，对话 → 对话）
@@ -105,7 +139,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     if (isProjectSwitch) {
       lastSyncedProjectIdRef.current = currentProject.id;
     }
-    setTab(inputMode === "generate" ? "assets" : "chat");
+    setTab(inputMode === "tools" ? "tools" : inputMode === "generate" ? "assets" : "chat");
   }, [currentProject, inputMode]);
 
   if (!currentProject) {
@@ -797,6 +831,17 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
             onConfirmPlan={onConfirmPlan}
             onCancelPlan={onCancelPlan}
           />
+        ) : tab === "tools" ? (
+          <ToolsTab
+            projectId={currentProject.id}
+            assets={assets}
+            hasKey={hasKey}
+            onOpenSettings={onOpenSettings}
+            onAssetCreated={() => {
+              // 工具生成完后 reload，让 AssetBoard 拿到新资产
+              reload({ silent: true });
+            }}
+          />
         ) : (
           <div className="flex-1 overflow-y-auto">
             <div className="p-4">
@@ -879,6 +924,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
             </span>
           )}
         </div>
+        {inputMode !== "tools" && (
         <PromptBar
           prompt={prompt}
           setPrompt={setPrompt}
@@ -903,6 +949,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
           generating={generating}
           onSubmit={onSubmit}
         />
+        )}
       </div>
 
       <AgentMemoryPanel
