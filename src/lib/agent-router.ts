@@ -29,6 +29,8 @@ export interface RouteDecision {
   /** Skill 模板推荐的尺寸/组图数量，供规则降级计划使用 */
   size?: string;
   groupCount?: number;
+  /** P7：当 Skill 推荐模型 ≠ 用户当前模型时，填入推荐模型名（仅展示提示，不影响执行） */
+  suggestedModelName?: string;
 }
 
 // 关键词词典：6 类 Skill 的中英触发词
@@ -85,6 +87,7 @@ export function route(
     if (skill) {
       const model = pickModel(skill, currentModel);
       const rendered = renderSkill(skill, rest || "未指定角色", styleHints);
+      const suggested = skillModelSuggestion(skill, currentModel);
       return {
         skillName: skill.name,
         skill,
@@ -95,6 +98,7 @@ export function route(
         remainingInput: rest,
         size: skill.size,
         groupCount: skill.groupCount,
+        ...(suggested ? { suggestedModelName: suggested } : {}),
       };
     }
     // /xxx 没匹配到 Skill：当作 fallback（仍然剥掉前缀，避免污染 prompt）
@@ -115,6 +119,7 @@ export function route(
       if (skill) {
         const model = pickModel(skill, currentModel);
         const rendered = renderSkill(skill, text, styleHints);
+        const suggested = skillModelSuggestion(skill, currentModel);
         return {
           skillName: skill.name,
           skill,
@@ -124,6 +129,7 @@ export function route(
           reasoning: `检测到关键词「${keywords.find((k) => lower.includes(k.toLowerCase()))}」→ 命中 Skill「${skill.name}」`,
           size: skill.size,
           groupCount: skill.groupCount,
+          ...(suggested ? { suggestedModelName: suggested } : {}),
         };
       }
     }
@@ -141,13 +147,26 @@ export function route(
   };
 }
 
-/** 根据 Skill 推荐选模型；若用户当前模型支持，仍尊重用户选择 */
+/** P7：根据 Skill 推荐选模型，以用户当前模型为最高优先级
+ *  - 用户当前模型 = 权威，不再被 Skill 推荐覆盖
+ *  - 若 Skill 有不同推荐，会通过 `skillModelSuggestion` 单独提供给 UI 展示
+ *  - 若用户当前模型与推荐一致，直接返回
+ *  - 若 Skill 无 modelHint，保持用户当前模型
+ */
 function pickModel(skill: Skill, current: ModelOption): ModelOption {
   if (!skill.modelHint) return current;
   const hit = MODEL_OPTIONS.find((m) => m.id === skill.modelHint);
   if (!hit) return current;
-  // 若用户当前模型不是 Lite/Pro 之类可选项，保持推荐
-  // 若用户当前模型与推荐一致，直接返回
   if (current.id === hit.id) return current;
-  return hit;
+  // P7：用户选择优先
+  return current;
+}
+
+/** P7：当 Skill 有推荐模型但与用户当前不一致时，返回 Skill 推荐的模型名（仅用于 UI 展示） */
+function skillModelSuggestion(skill: Skill, current: ModelOption): string | undefined {
+  if (!skill.modelHint) return undefined;
+  const hit = MODEL_OPTIONS.find((m) => m.id === skill.modelHint);
+  if (!hit) return undefined;
+  if (current.id === hit.id) return undefined;
+  return hit.name;
 }

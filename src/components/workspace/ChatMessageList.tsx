@@ -15,6 +15,8 @@ interface Props {
   onConfirmPlan?: (msgId: string) => void;
   /** 规则降级模式：用户点了"取消" */
   onCancelPlan?: (msgId: string) => void;
+  /** P7：当前 PromptBar 选定的模型（用于 PlanCard 展示"将使用 X 模型"） */
+  currentModelName?: string;
 }
 
 /**
@@ -23,7 +25,7 @@ interface Props {
  * - Agent 消息左对齐，含折叠日志（命中 Skill / 调用模型 / 耗时）
  * - Agent 消息生成的资产缩略图（点击可放大，复用 AssetCard 暂 v0.1 简化为 img）
  */
-export default function ChatMessageList({ messages, generating, onConfirmPlan, onCancelPlan }: Props) {
+export default function ChatMessageList({ messages, generating, onConfirmPlan, onCancelPlan, currentModelName }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -53,6 +55,8 @@ export default function ChatMessageList({ messages, generating, onConfirmPlan, o
           message={m}
           onConfirmPlan={onConfirmPlan ? () => onConfirmPlan(m.id) : undefined}
           onCancelPlan={onCancelPlan ? () => onCancelPlan(m.id) : undefined}
+          currentModelName={currentModelName}
+          busy={!!generating}
         />
       ))}
       {generating && (
@@ -70,10 +74,14 @@ function MessageItem({
   message,
   onConfirmPlan,
   onCancelPlan,
+  currentModelName,
+  busy,
 }: {
   message: ChatMessage;
   onConfirmPlan?: () => void;
   onCancelPlan?: () => void;
+  currentModelName?: string;
+  busy?: boolean;
 }) {
   if (message.role === "user") {
     return (
@@ -163,6 +171,8 @@ function MessageItem({
                 plan={message.pendingPlan}
                 onConfirm={onConfirmPlan}
                 onCancel={onCancelPlan}
+                currentModelName={currentModelName}
+                busy={busy}
               />
             )}
             {message.assets && message.assets.length > 0 && (
@@ -183,18 +193,27 @@ function PlanCard({
   plan,
   onConfirm,
   onCancel,
+  currentModelName,
+  busy,
 }: {
   plan: NonNullable<ChatMessage["pendingPlan"]>;
   onConfirm: () => void;
   onCancel?: () => void;
+  currentModelName?: string;
+  busy?: boolean;
 }) {
+  // P7：plan.modelName 已废弃（plan 不再存模型），统一用 PromptBar 当前 model。
+  // 兼容老 chat：plan.modelName 仍可读。
+  const displayModel = currentModelName ?? plan.modelName ?? "默认模型";
   return (
     <div className="mt-2 panel p-3 space-y-2 border-accent/40">
       <div className="text-xs text-text-muted">📋 待执行计划</div>
       <div className="grid grid-cols-3 gap-2 text-xs">
         <div>
           <div className="text-text-muted">模型</div>
-          <div className="text-text-primary font-medium truncate">{plan.modelName}</div>
+          <div className="text-text-primary font-medium truncate" title={displayModel}>
+            {displayModel}
+          </div>
         </div>
         <div>
           <div className="text-text-muted">尺寸</div>
@@ -205,6 +224,11 @@ function PlanCard({
           <div className="text-text-primary font-medium">{plan.prompt.length} 字</div>
         </div>
       </div>
+      {plan.suggestedModelName && (
+        <div className="text-[11px] text-text-secondary bg-bg-elev border border-border rounded px-2 py-1.5">
+          💡 Skill 推荐「{plan.suggestedModelName}」更合适（你当前选的是「{displayModel}」）。如需切换请先在 PromptBar 改模型。
+        </div>
+      )}
       <details className="text-xs">
         <summary className="cursor-pointer text-text-secondary hover:text-text-primary">
           查看完整 prompt
@@ -216,15 +240,18 @@ function PlanCard({
       <div className="flex items-center gap-2 pt-1">
         <button
           onClick={onConfirm}
-          className="btn btn-primary flex items-center gap-1.5"
+          // P7：PlanCard 按钮在 generating 时禁用（避免用户重复点击导致并发）
+          disabled={!!busy}
+          className="btn btn-primary flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Check className="w-3.5 h-3.5" />
-          开始生成
+          {busy ? "生成中…" : "开始生成"}
         </button>
         {onCancel && (
           <button
             onClick={onCancel}
-            className="btn text-text-muted hover:text-accent-danger flex items-center gap-1.5"
+            disabled={!!busy}
+            className="btn text-text-muted hover:text-accent-danger flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <X className="w-3.5 h-3.5" />
             取消
@@ -351,11 +378,29 @@ function triggerLabel(t: "explicit" | "keyword" | "fallback") {
 // P6：流式输出 + 工具调用展示
 // ============================================================================
 
+/** P7：工具名中文化（技术名保留在 ToolCallCard 详情里） */
+function prettyToolName(name: string): string {
+  switch (name) {
+    case "jimeng.generate_image":
+      return "生图";
+    case "jimeng.generate_image.partial_failed":
+      return "生图（单张失败）";
+    case "jimeng.decompose_layers":
+      return "图层拆分";
+    case "jimeng.local_edit":
+      return "局部编辑";
+    default:
+      return name;
+  }
+}
+
 /** 工具调用卡片（内联在 chat 流里） */
 function ToolCallCard({ tc }: { tc: ToolCallRecord }) {
   const [open, setOpen] = useState(false);
   const isRunning = tc.status === "running";
   const isFailed = tc.status === "failed";
+  // P7：工具名中文化（保留原 toolName 在 details 里给开发/排查用）
+  const displayName = prettyToolName(tc.toolName);
   return (
     <div
       className={`border rounded-md text-xs overflow-hidden transition-colors ${
@@ -376,8 +421,8 @@ function ToolCallCard({ tc }: { tc: ToolCallRecord }) {
           <ChevronRight className="w-3 h-3 text-text-muted flex-shrink-0" />
         )}
         <Zap className={`w-3 h-3 flex-shrink-0 ${isRunning ? "text-accent animate-pulse" : "text-accent"}`} />
-        <span className="font-mono text-text-primary truncate flex-1 min-w-0">
-          {tc.toolName}
+        <span className="text-text-primary truncate flex-1 min-w-0 font-medium">
+          {displayName}
         </span>
         {isRunning && (
           <span className="text-text-muted text-[10px] flex items-center gap-1">

@@ -3,6 +3,7 @@ import { route } from "@/lib/agent-router";
 import { MODEL_OPTIONS } from "@/lib/types";
 
 const defaultModel = MODEL_OPTIONS[0]; // Seedream 5.0 Lite（默认）
+const proModel = MODEL_OPTIONS.find((m) => m.id === "doubao-seedream-5-0-pro-260628")!;
 
 describe("route — fallback 路径", () => {
   it("空输入走 fallback", () => {
@@ -62,5 +63,30 @@ describe("route — explicit 路径", () => {
     const r = route("/notexists 战士", defaultModel, []);
     expect(r.triggerType).toBe("fallback");
     expect(r.remainingInput).toBe("战士");
+  });
+});
+
+describe("route — P7：用户选择优先（不再被 Skill 覆盖）", () => {
+  // P7 起：用户在 PromptBar 选 5.0 Pro，路由 Skill character-turnaround
+  // （其 modelHint 是 5.0 Lite）时，应保持 5.0 Pro；用 suggestedModelName 提示差异。
+  it("用户在 5.0 Pro 调 5.0 Lite skill → model 保持 Pro，suggestedModelName = Lite", () => {
+    const r = route("/character-turnaround 战士", proModel, []);
+    expect(r.triggerType).toBe("explicit");
+    expect(r.skill?.id).toBe("character-turnaround");
+    expect(r.model.id).toBe(proModel.id);
+    expect(r.suggestedModelName).toBe("Seedream 5.0 Lite（默认）");
+  });
+
+  it("用户在 5.0 Lite 调 5.0 Lite skill → model 保持 Lite，无 suggestedModelName", () => {
+    const r = route("/character-turnaround 战士", defaultModel, []);
+    expect(r.model.id).toBe(defaultModel.id);
+    expect(r.suggestedModelName).toBeUndefined();
+  });
+
+  it("fallback 路径不产生 suggestedModelName", () => {
+    const r = route("随便画点啥", proModel, []);
+    expect(r.triggerType).toBe("fallback");
+    expect(r.model.id).toBe(proModel.id);
+    expect(r.suggestedModelName).toBeUndefined();
   });
 });

@@ -13,7 +13,7 @@ export const AGENT_TOOLS: ToolDefinition[] = [
     function: {
       name: "jimeng_generate_image",
       description:
-        "调用即梦（豆包 Seedream）API 生成游戏美术图片。支持：文生图、图生图（ref_required=true 时必传 image）、单图/组图（max_images 1-4，仅 Lite 系列支持组图）、透明背景（background=transparent，仅 5.0 Pro + PNG）、极速 prompt 优化（fast_mode，仅 5.0 Pro / 4.0）、web_search 工具调用（仅 5.0 Lite）。模型 id 可选: doubao-seedream-5-0-lite-260128（默认，多数账号已开通）、doubao-seedream-4-5-251128、doubao-seedream-4-0-250828、doubao-seedream-5-0-pro-260628（需手动开通，支持图层拆分、交互编辑、透明背景）。",
+        "调用即梦（豆包 Seedream）API 生成游戏美术图片。P7 起：模型选择由用户在 PromptBar 选定的模型决定，工具调用里**通常不要传 model 字段**。只有当用户消息里**明确要求**切换模型（「用 4.5 重新画」/「换成 Pro 做图层拆分」）时才传。能力位参数：图生图（ref_required=true 时必传 image）、单图/组图（max_images 1-4，仅 Lite 系列支持组图）、透明背景（background=transparent，仅 5.0 Pro + PNG）、极速 prompt 优化（fast_mode，仅 5.0 Pro / 4.0）、web_search 工具调用（仅 5.0 Lite）。",
       parameters: {
         type: "object",
         properties: {
@@ -24,7 +24,8 @@ export const AGENT_TOOLS: ToolDefinition[] = [
           },
           model: {
             type: "string",
-            description: "模型 id。默认 doubao-seedream-5-0-lite-260128。",
+            description:
+              "P7 受控字段：通常**不要传**。只有在用户消息明确要求「用 X 模型」时才传。可选：doubao-seedream-5-0-lite-260128（多数账号默认开通）、doubao-seedream-4-5-251128、doubao-seedream-4-0-250828、doubao-seedream-5-0-pro-260628（需手动开通，支持图层拆分、交互编辑、透明背景）。",
             enum: [
               "doubao-seedream-5-0-lite-260128",
               "doubao-seedream-4-5-251128",
@@ -156,16 +157,23 @@ export const AGENT_TOOLS: ToolDefinition[] = [
  * 渲染 system prompt
  * - 注入游戏美术师角色 + 可用 Skill 列表 + 项目级风格偏好
  * - 让 LLM 主动反问而不是瞎猜
+ * - P7：把"用户在 PromptBar 选定的模型"作为强偏好，避免 LLM 私自切换
  */
 export function renderSystemPrompt(opts: {
   styleHints?: string[];
   recentModels?: string[];
+  userModelName?: string;
 }): string {
   const styleLine = opts.styleHints && opts.styleHints.length > 0
     ? `\n\n项目画风偏好（自动学到，用户没明确改的话可以参考）：${opts.styleHints.join("、")}`
     : "";
   const modelsLine = opts.recentModels && opts.recentModels.length > 0
     ? `\n\n用户最近用过的模型：${opts.recentModels.join(", ")}`
+    : "";
+  // P7：注入用户 PromptBar 选定的模型作为强偏好。LLM 默认必须用这个，
+  // 除非用户消息里明确要求切换。如果没传 userModelName（防御性）就降级为旧版"默认 5.0 Lite"。
+  const userModelLine = opts.userModelName
+    ? `\n\n## P7 模型选择硬规则\n\n用户在 PromptBar 选定的模型是「${opts.userModelName}」，是本次会话的默认生图模型。\n\n- **调 jimeng_generate_image 时不要传 model 字段**，由前端用 PromptBar 选定的模型执行。\n- **只有用户消息里明确写"换成 X 模型"/"用 Pro 重新画"**时，才传 model 字段。\n- 不要主动判断升级到 5.0 Pro——用户没要求就别换。`
     : "";
 
   return `你是 Y-agent，一个游戏美术师 AI 助手，正在帮独立游戏美术师完成一张美术资产。
@@ -226,16 +234,15 @@ export function renderSystemPrompt(opts: {
 | web_search 工具 | ✓ | ✗ | ✗ |
 | PNG 输出 | ✓ | ✓ | ✗（仅 jpeg） |
 
-**判断原则**：
-- 用户要"几张"→ 5.0 Lite
-- 用户要"图拆开"或"局部改"→ 5.0 Pro（需手动开通）
-- 用户要"透明背景图标"→ 5.0 Pro
-- 默认用 5.0 Lite，特殊需求再升级
+**判断原则**（仅用于决定要不要拒绝生图 / 主动反问能力位）：
+- 用户要"几张"但当前模型不支持组图 → 主动反问"要切到 5.0 Lite 吗？"
+- 用户要"图拆开"或"局部改"或"透明背景"但当前模型是 Lite/4.5/4.0 → 主动反问"要切到 5.0 Pro 吗？"
+- 能力位满足时**直接调工具**，不要在 system prompt 阶段就拒绝
 
 ## 约束
 
 - 工具调用不要超过 5 轮。
 - 不要生成违规内容。
 - 用中文回复。
-${styleLine}${modelsLine}`;
+${userModelLine}${styleLine}${modelsLine}`;
 }
