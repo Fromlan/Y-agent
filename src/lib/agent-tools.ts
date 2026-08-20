@@ -2,6 +2,7 @@
  * Agent 可用工具的定义（OpenAI function calling 格式）
  * v0.1：只暴露 jimeng.generate_image 一个工具
  * v0.2：加 jimeng.decompose_layers、web.search 等
+ * v0.3（P6）：扩展 jimeng_generate_image schema + 新增 jimeng_local_edit / jimeng_decompose_layers
  */
 
 import type { ToolDefinition } from "@/lib/llm";
@@ -12,7 +13,7 @@ export const AGENT_TOOLS: ToolDefinition[] = [
     function: {
       name: "jimeng_generate_image",
       description:
-        "调用即梦（豆包 Seedream）API 生成游戏美术图片。模型 id 可选: doubao-seedream-5-0-lite-260128 (默认，多数账号已开通，支持组图)、doubao-seedream-4-5-251128、doubao-seedream-4-0-250828、doubao-seedream-5-0-pro-260628 (需手动开通，支持图层拆分和交互编辑)。size 可选: 1k, 2k, 3k, 4k, 1.5k。",
+        "调用即梦（豆包 Seedream）API 生成游戏美术图片。支持：文生图、图生图（ref_required=true 时必传 image）、单图/组图（max_images 1-4，仅 Lite 系列支持组图）、透明背景（background=transparent，仅 5.0 Pro + PNG）、极速 prompt 优化（fast_mode，仅 5.0 Pro / 4.0）、web_search 工具调用（仅 5.0 Lite）。模型 id 可选: doubao-seedream-5-0-lite-260128（默认，多数账号已开通）、doubao-seedream-4-5-251128、doubao-seedream-4-0-250828、doubao-seedream-5-0-pro-260628（需手动开通，支持图层拆分、交互编辑、透明背景）。",
       parameters: {
         type: "object",
         properties: {
@@ -39,16 +40,113 @@ export const AGENT_TOOLS: ToolDefinition[] = [
           ref_required: {
             type: "boolean",
             description:
-              "用户消息是否附带了参考图（图片附件）。如有，需告诉用户传图给 Agent，或让用户重发。",
+              "用户消息是否附带了参考图（图片附件）。如有 image 字段需一起传。",
+          },
+          image: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "参考图的 URL / data URL 列表。必传时（ref_required=true）不能为空。5.0 Lite 最多 4 张。",
           },
           max_images: {
             type: "number",
-            description: "生成几张图。1-4。组图只能用 Lite 系列。",
+            description:
+              "生成几张图。1-4。组图（>1）只能用 5.0 Lite，5.0 Pro 不支持。",
             minimum: 1,
             maximum: 4,
           },
+          output_format: {
+            type: "string",
+            description:
+              "输出文件格式。jpeg 通用，png 用于透明背景或需要 alpha 通道场景。4.5/4.0 仅 jpeg。",
+            enum: ["png", "jpeg"],
+          },
+          background: {
+            type: "string",
+            description:
+              "背景模式。transparent=输出 PNG 透明背景（仅 5.0 Pro + PNG）。用于 UI 图标 / 抠图场景。",
+            enum: ["transparent", "opaque"],
+          },
+          fast_mode: {
+            type: "boolean",
+            description:
+              "极速 prompt 优化。仅 5.0 Pro / 4.0 支持。开启后 API 内部把 prompt 改写到极致简洁，生成更快但更不可控。",
+          },
+          web_search: {
+            type: "boolean",
+            description:
+              "启用 web_search 工具（仅 5.0 Lite）。模型可主动搜索网络来增强 prompt 准确性（如画真实地点 / 品牌）。",
+          },
         },
         required: ["prompt"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "jimeng_decompose_layers",
+      description:
+        "把一张图拆分为 1 张底图 + 多个独立图层（5.0 Pro 专属，layer_decomposition API）。结果会按图层结构入库，每层可独立显示 / 下载 / 二次编辑。适合：把角色图 / 设计稿 / 海报拆成可拖拽的图层。",
+      parameters: {
+        type: "object",
+        properties: {
+          image: {
+            type: "string",
+            description: "要拆分的源图 URL / data URL（必传）",
+          },
+          prompt: {
+            type: "string",
+            description:
+              "告诉模型想拆什么（如\"只拆人物和前景文字\"）。可选，缺省自动拆。",
+          },
+          model: {
+            type: "string",
+            description:
+              "固定 doubao-seedream-5-0-pro-260628（仅 5.0 Pro 支持图层拆分）",
+            enum: ["doubao-seedream-5-0-pro-260628"],
+            default: "doubao-seedream-5-0-pro-260628",
+          },
+        },
+        required: ["image"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "jimeng_local_edit",
+      description:
+        "在已有图上做局部编辑（5.0 Pro 专属，bbox 标注）。两种调用方式：(1) 给 bbox 坐标（图像素），prompt 描述改什么；(2) 自由 prompt 不指定 bbox（模型自动判断改哪里）。结果会作为新资产入库，保留原图。",
+      parameters: {
+        type: "object",
+        properties: {
+          image: {
+            type: "string",
+            description: "源图 URL / data URL（必传）",
+          },
+          edit_prompt: {
+            type: "string",
+            description: "修改指令（中文）。例：\"把头发改成红色\"、\"在框内加一束花\"。",
+          },
+          bbox: {
+            type: "object",
+            description: "可选：局部编辑的 bbox 范围（图像素坐标）",
+            properties: {
+              x1: { type: "number" },
+              y1: { type: "number" },
+              x2: { type: "number" },
+              y2: { type: "number" },
+            },
+          },
+          model: {
+            type: "string",
+            description: "固定 doubao-seedream-5-0-pro-260628",
+            enum: ["doubao-seedream-5-0-pro-260628"],
+            default: "doubao-seedream-5-0-pro-260628",
+          },
+        },
+        required: ["image", "edit_prompt"],
       },
     },
   },
@@ -77,7 +175,11 @@ export function renderSystemPrompt(opts: {
 1. **先理解，再行动**。如果用户的需求模糊（没指定画风、构图、比例等），**主动反问 1-2 个关键问题**，不要瞎猜。
    - 关键问题包括：什么画风？（厚涂/赛璐璐/写实/像素...）、什么比例？（1:1, 16:9, 2:3...）、光线/时段？（正午/黄昏/夜景）、主体是什么？
 
-2. **信息够了就调工具**。调用 \`jimeng_generate_image\` 工具生成图。
+2. **信息够了就调工具**。可用工具：
+   - \`jimeng_generate_image\`（主生图，支持文/图生图、组图、透明背景、极速模式、web_search）
+   - \`jimeng_decompose_layers\`（图层拆分，5.0 Pro 专属）
+   - \`jimeng_local_edit\`（局部编辑，5.0 Pro 专属）
+
    - **prompt 必须用中文**，详细描述主体 + 画风 + 构图 + 配色 + 光照。
    - 用户说"魔法少女" → 你写："二次元厚涂，魔法少女角色，长发粉色双马尾，蓝色魔法杖..."。
    - prompt 不要简单复述用户原话，要 **Agent 化扩展**。
@@ -86,16 +188,49 @@ export function renderSystemPrompt(opts: {
 
 4. **避免浪费**。同一用户请求不要重复调工具。先确认用户要什么。
 
-## 6 个预置 Skill 模板（可参考的 prompt 模式）
+## 11 个预置 Skill 模板（按类别分组）
 
+**基础生图**（单图）
 - \`character-turnaround\`（角色三视图）：正面/侧面/背面同一角色、同一比例、同一画风
 - \`expression-grid\`（九宫格表情）：8 基础表情 + 中性
 - \`character-sheet\`（角色设定卡）：全身 + 半身 + 表情 + 道具
 - \`scene-mood\`（场景气氛图）：远/中/近景 + 时段
-- \`ui-icons\`（UI 图标）：6-9 个统一风格图标
 - \`kv-poster\`（KV 海报）：主视觉 + 副标题位
 
+**组图**（max_images > 1，仅 5.0 Lite）
+- \`scene-mood-light-variants\`（场景光影变体）：早/午/晚/夜 4 个时段
+- \`character-consistency-set\`（角色一致性套图）：4 张不同动作 / 表情
+- \`product-shot-pack\`（商品图组合）：6 张电商级主图 + 角度 + 场景
+- \`ui-icons\`（UI 图标）：6-9 个统一风格图标
+
+**5.0 Pro 专属**
+- \`layer-separation\`（图层拆分）：把单图拆成底图 + 多图层
+- \`local-edit-bbox\`（局部编辑）：bbox 标注，框内重新出图
+- \`icon-pack-transparent\`（图标包透明）：UI 图标 + 透明背景
+- \`infographic-poster\`（信息图海报）：密集排版 + 标题 + 卡片
+
 如果你识别到用户想做这几类，直接调工具，prompt 按对应 Skill 风格扩展。
+
+## 模型能力矩阵（按需选择）
+
+| 能力 | 5.0 Lite | 5.0 Pro | 4.5 / 4.0 |
+|---|---|---|---|
+| 文生图 | ✓ | ✓ | ✓ |
+| 图生图 | ✓（最多 4 张） | ✓ | ✓ |
+| 组图（>1 张） | ✓ | ✗ | ✗ |
+| 流式输出 | ✓ | ✗ | ✓ |
+| 透明背景 | ✗ | ✓ | ✗ |
+| 图层拆分 | ✗ | ✓ | ✗ |
+| 局部编辑（bbox） | ✗ | ✓ | ✗ |
+| 极速 fast_mode | ✗ | ✓ | ✓ |
+| web_search 工具 | ✓ | ✗ | ✗ |
+| PNG 输出 | ✓ | ✓ | ✗（仅 jpeg） |
+
+**判断原则**：
+- 用户要"几张"→ 5.0 Lite
+- 用户要"图拆开"或"局部改"→ 5.0 Pro（需手动开通）
+- 用户要"透明背景图标"→ 5.0 Pro
+- 默认用 5.0 Lite，特殊需求再升级
 
 ## 约束
 
