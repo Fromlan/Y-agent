@@ -2,7 +2,7 @@
 name: UI 图标
 description: 一组统一风格的 UI 图标（按钮 / HUD 元素）
 triggers: [图标, UI, icon, /图标, /UI]
-model_hint: doubao-seedream-5-0-lite-260128
+model_hint: doubao-seedream-5-0-pro-260628
 size: 1k
 ref_required: false
 group_count: 1
@@ -17,8 +17,10 @@ group_count: 1
   - 设置 / 背包 / 任务
   - 货币（金币 / 钻石 / 体力）
   - 方向键 / 暂停 / 返回
-- 背景透明或浅灰网格，便于裁切
+- 背景透明，便于直接合成到 UI（5.0 Pro + background=transparent + PNG）
 - 图标内容：{{user_input}}
 - 风格关键词（等距 / 扁平 / 写实 / 像素 / 描边线稿）由补充描述决定
 
 输出要求：图标尺寸一致，可直接打包成 UI 资源使用。
+
+> P4 升级：固定走 5.0 Pro 以支持 `background=transparent`（输出 PNG 透明背景）。
