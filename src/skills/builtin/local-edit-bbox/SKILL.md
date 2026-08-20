@@ -1,0 +1,64 @@
+---
+name: 局部编辑（bbox）
+description: 在已有图上画框，针对框内区域让 5.0 Pro 重新出图（5.0 Pro 专属交互编辑）
+triggers: [局部编辑, 改图, 改一块, 框内改, 交互编辑, /局部编辑, /改图, /框内改]
+model_hint: doubao-seedream-5-0-pro-260628
+size: 2k
+ref_required: true
+group_count: 1
+---
+
+把用户指定的源图作为参考输入，按画出的矩形框（bbox）只对框内区域做替换或重绘。
+
+## 适用场景
+
+- 想给角色图加一束花 / 换个发型，但不想整张图重画
+- 想替换海报里的某个文字 / 主体 / 元素
+- 局部细节调整（眼睛颜色、配饰、表情）
+
+## 调用方式
+
+### 1. 资产详情页的"局部编辑"按钮（推荐）
+
+1. 在资产列表点开任一 5.0 Pro 生成的图
+2. 底部点「局部编辑」→ 在图上拖鼠标画一个矩形框
+3. 在底部输入修改指令（例：把框内换成一只橘猫）
+4. 点提交 → 新图入库（自动保留原图，可在资产里找到源图）
+
+### 2. Agent 工具调用 `jimeng_local_edit`
+
+```
+tool: jimeng_local_edit
+args: {
+  image: "<原图 url>",
+  bbox: { x1: 100, y1: 200, x2: 500, y2: 600 },  // 图像素坐标
+  prompt: "在框内加一束向日葵",
+  size: "2k"  // 可选，默认 2k
+}
+```
+
+工具会调用 5.0 Pro，把 prompt 拼成 `<prompt> <bbox>x1 y1 x2 y2</bbox>`，源图作为 `image` 引用。
+
+## 关键约束
+
+- **仅 5.0 Pro 支持**（`doubao-seedream-5-0-pro-260628`），其它模型不支持 bbox 标注
+- **坐标是源图像素**，不是屏幕像素（屏幕画框时已自动换算）
+- bbox 范围：`x1 < x2`, `y1 < y2`，且都在图内（画框时被裁剪到图边）
+- 框外区域基本保持不变（5.0 Pro 尽力保持），但不是像素级保持——可能略有变化
+- 源图 url 必须是可公网访问的 https（5.0 Pro 后端会 fetch）
+- 单次只能画 1 个框（5.0 Pro 限制）
+
+## 调试 / 错误码
+
+- `401 invalid api key` → 检查设置里 API key 是否正确
+- `400 bbox out of range` → bbox 超出图像尺寸，重画小一点
+- `400 image fetch failed` → 源图 url 失效（24h 过期），需要重新上传或重生成
+- `model_not_support` → 切到 5.0 Pro
+- 完整错误码表见 `doc/api-integration.md`
+
+## 注意
+
+- 局部编辑结果会作为**新资产**入库，**不覆盖**原图
+- 新资产的 `payload.parentAssetId` 记录了源图 id（暂未在 UI 显示，可查 SQLite）
+- bbox 信息也写入 `payload.bbox`，便于将来追溯
+- 想批量局部编辑：连续开多个资产、画框、提交
