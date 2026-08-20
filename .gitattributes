@@ -1,0 +1,22 @@
+# Y-agent 行尾策略
+# - 文本源码：保持 LF（Unix），避免 Windows autocrlf 反复覆盖
+# - Tauri / Cargo 工具链要求 LF
+# - 二进制图片：保持二进制不进 diff
+
+* text=auto eol=lf
+
+# Windows 批处理脚本需要 CRLF 才能正常执行
+*.cmd text eol=crlf
+*.bat  text eol=crlf
+
+# PowerShell 脚本走 LF（PowerShell 5.1 也认 LF）
+*.ps1  text eol=lf
+
+# 二进制资源
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.ico  binary
+*.icns binary
+*.gif  binary
+*.webp binary
