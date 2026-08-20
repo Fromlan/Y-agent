@@ -22,6 +22,20 @@ fn validate_params(params: &GenerateImageParams) -> Result<(), String> {
                 "InvalidParameter: 该模型仅支持 jpeg 输出（output_format=png 不可用）".into(),
             );
         }
+        if let Some(bg) = &params.background {
+            if bg == "transparent" && fmt == "jpeg" {
+                return Err(
+                    "InvalidParameter: 透明背景必须用 PNG 输出（output_format=jpeg 与 background=transparent 互斥）".into(),
+                );
+            }
+        }
+    }
+    if let Some(bg) = &params.background {
+        if bg == "transparent" && !is_5_0_pro {
+            return Err(
+                "InvalidParameter: 透明背景（background=transparent）仅 5.0 Pro 支持".into(),
+            );
+        }
     }
     if let Some(opts) = &params.optimize_prompt_options {
         if let Some(mode) = &opts.mode {

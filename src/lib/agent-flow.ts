@@ -78,6 +78,7 @@ export async function executePlanStream(
         onPartial: ({ index, url }) => {
           partials.push({ index, url });
           // partial 成功即入库（让用户早点看到图）
+          const isTransparent = plan.background === "transparent";
           createAsset({
             projectId,
             prompt: plan.prompt,
@@ -87,7 +88,11 @@ export async function executePlanStream(
             refCount: plan.images?.length ?? 0,
             costMs: 0, // 流式 partial 阶段还没法算最终耗时
             isLayerDecomposition: !!plan.layerDecomposition,
-            payload: { urls: [url] },
+            payload: {
+              urls: [url],
+              ...(isTransparent ? { transparent: true } : {}),
+              ...(plan.outputFormat ? { outputFormat: plan.outputFormat } : {}),
+            },
           })
             .then((asset) => callbacks.onPartialAsset?.(asset, index))
             .catch((e) => console.error("partial asset save failed", e));
@@ -104,6 +109,12 @@ export async function executePlanStream(
             reject(new Error("流式生图未产出任何图"));
             return;
           }
+          const isTransparent = plan.background === "transparent";
+          const rawFormat =
+            (info as { output_format?: string }).output_format ??
+            plan.outputFormat;
+          const actualFormat: "png" | "jpeg" | undefined =
+            rawFormat === "png" || rawFormat === "jpeg" ? rawFormat : undefined;
           createAsset({
             projectId,
             prompt: plan.prompt,
@@ -116,6 +127,8 @@ export async function executePlanStream(
             payload: {
               urls: partials.sort((a, b) => a.index - b.index).map((p) => p.url),
               usage: info.usage,
+              ...(isTransparent ? { transparent: true } : {}),
+              ...(actualFormat ? { outputFormat: actualFormat } : {}),
             },
           })
             .then((asset) =>
@@ -165,9 +178,21 @@ export async function executePlan(
   });
   const costMs = Date.now() - t0;
   const isLayer = !!plan.layerDecomposition;
+  // P4：记录透明背景 + 实际输出格式，便于资产卡角标显示
+  const isTransparent = plan.background === "transparent";
+  // 从响应里取实际 output_format（5.0 Pro / Lite 顶层字段），fallback 到请求值
+  const rawFormat =
+    (resp as { output_format?: string }).output_format ?? plan.outputFormat;
+  const actualFormat: "png" | "jpeg" | undefined =
+    rawFormat === "png" || rawFormat === "jpeg" ? rawFormat : undefined;
   const payload = isLayer
     ? { urls: [], layers: resp.images, usage: resp.usage }
-    : { urls: resp.images.map((i) => i.url), usage: resp.usage };
+    : {
+        urls: resp.images.map((i) => i.url),
+        usage: resp.usage,
+        ...(isTransparent ? { transparent: true } : {}),
+        ...(actualFormat ? { outputFormat: actualFormat } : {}),
+      };
   const asset = await createAsset({
     projectId,
     prompt: plan.prompt,

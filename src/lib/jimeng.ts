@@ -35,6 +35,8 @@ export interface GenerateImageResponse {
   usage?: Usage;
   /** API 顶层 error（整个请求都失败时） */
   error?: ImageError;
+  /** P4：实际输出格式（png|jpeg），仅 5.0 Pro / Lite 返回 */
+  output_format?: "png" | "jpeg";
 }
 
 export async function generateImage(params: GenerateImageParams): Promise<GenerateImageResponse> {

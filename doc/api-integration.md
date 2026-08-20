@@ -309,6 +309,41 @@ Y-agent 集成：
 
 **Skill 模板**：`src/skills/builtin/local-edit-bbox/SKILL.md`（用户描述"局部编辑/改图/框内改"时自动触发）
 
+### 1.10 透明背景（P4，5.0 Pro 专属）
+
+```typescript
+// 前端：PromptBar 透明背景 checkbox（仅 caps.background=true 时显示）
+// 勾选时：background="transparent" + outputFormat="png"（自动联动）
+// 取消 JPEG：透明背景强制关掉
+
+// Y-agent 入库时把 transparent 写进 payload
+payload: {
+  urls: [...],
+  transparent: true,            // 5.0 Pro + transparent 时为 true
+  outputFormat: "png" | "jpeg", // API 实际返回的格式
+}
+```
+
+Rust 端护栏（`jimeng::validate_params`）：
+- `background: "transparent" + model != 5.0 Pro` → `InvalidParameter: 透明背景（background=transparent）仅 5.0 Pro 支持`
+- `background: "transparent" + output_format: "jpeg"` → `InvalidParameter: 透明背景必须用 PNG 输出（output_format=jpeg 与 background=transparent 互斥）`
+
+Y-agent 集成：
+- PromptBar 加 checkbox（`Droplet` 图标），模型切换时自动显隐（`caps.background`）
+- jpeg → transparent 强制关；transparent → 强制切到 png
+- AssetCard 左上角「透明」绿色徽章（`payload.transparent`）
+- AssetDetailDialog 元数据「格式」字段显示 `PNG（透明）` / `JPEG`
+- 图标合集场景：自动套 `icon-pack-transparent` Skill 模板
+
+**错误码**：
+- `400 invalid parameter` → transparent + jpeg 互斥（前端已防）
+- `model not support` → 切到 5.0 Pro
+- 其它错误码同普通生图
+
+**Skill 模板**：
+- `src/skills/builtin/icon-pack-transparent/SKILL.md`（图标合集 + 透明背景）
+- `src/skills/builtin/ui-icons/SKILL.md`（已升级到 5.0 Pro + transparent）
+
 ---
 
 ## Part 2. LLM API（OpenAI 兼容协议）

@@ -222,7 +222,12 @@ export default function PromptBar({
                 <ImageIcon className="w-3.5 h-3.5" />
                 <select
                   value={outputFormat}
-                  onChange={(e) => setOutputFormat(e.target.value as "png" | "jpeg" | "")}
+                  onChange={(e) => {
+                    const v = e.target.value as "png" | "jpeg" | "";
+                    setOutputFormat(v);
+                    // P4：切到 jpeg 时若 transparent 开了，强制关掉
+                    if (v === "jpeg" && transparent) setTransparent(false);
+                  }}
                   className="text-xs bg-bg-elev border border-border rounded px-1.5 py-0.5
                     text-text-primary focus:outline-none focus:border-accent"
                 >
@@ -237,8 +242,14 @@ export default function PromptBar({
             )}
             {caps.background && (
               <label
-                className="text-xs text-text-secondary flex items-center gap-1.5 cursor-pointer"
-                title="输出 PNG 透明背景（仅 5.0 Pro 图生图场景）"
+                className={`text-xs text-text-secondary flex items-center gap-1.5 cursor-pointer ${
+                  outputFormat === "jpeg" ? "opacity-40" : ""
+                }`}
+                title={
+                  outputFormat === "jpeg"
+                    ? "透明背景需要 PNG 输出，请先把格式切到 PNG"
+                    : "输出 PNG 透明背景（仅 5.0 Pro 图生图场景）"
+                }
               >
                 <input
                   type="checkbox"
@@ -250,6 +261,7 @@ export default function PromptBar({
                     }
                   }}
                   className="accent-accent"
+                  disabled={outputFormat === "jpeg"}
                 />
                 <Droplet className="w-3.5 h-3.5" />
                 透明背景

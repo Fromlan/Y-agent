@@ -223,6 +223,10 @@ export interface AssetPayload {
   parentAssetId?: string;
   /** P3：局部编辑时画的 bbox（图像素坐标，x1 y1 x2 y2） */
   bbox?: { x1: number; y1: number; x2: number; y2: number };
+  /** P4：透明背景标志（PNG + transparent），用于 AssetCard 角标 */
+  transparent?: boolean;
+  /** P4：实际输出格式（png|jpeg），便于资产详情页显示 */
+  outputFormat?: "png" | "jpeg";
 }
 
 export interface Asset {

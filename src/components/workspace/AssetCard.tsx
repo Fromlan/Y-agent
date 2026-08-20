@@ -6,6 +6,7 @@ import {
   Trash2,
   Check,
   ImageIcon,
+  Droplet,
 } from "lucide-react";
 import type { Asset } from "@/lib/types";
 import { assetMainImage } from "@/lib/types";
@@ -144,6 +145,12 @@ export default function AssetCard({
               <Layers className="w-3 h-3" /> 图层
             </div>
           )}
+          {asset.payload.transparent && (
+            <div className="absolute top-2 left-2 bg-emerald-500/85 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"
+              title="PNG 透明背景">
+              <Droplet className="w-3 h-3" /> 透明
+            </div>
+          )}
           {asset.refCount > 0 && (
             <div className="absolute bottom-2 left-2 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded">
               参考 ×{asset.refCount}
@@ -222,6 +229,12 @@ export default function AssetCard({
         {asset.isLayerDecomposition && (
           <div className="absolute top-2 right-2 bg-black/70 text-accent text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1">
             <Layers className="w-3 h-3" /> 图层
+          </div>
+        )}
+        {asset.payload.transparent && (
+          <div className="absolute top-2 left-2 bg-emerald-500/85 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"
+            title="PNG 透明背景">
+            <Droplet className="w-3 h-3" /> 透明
           </div>
         )}
         {asset.refCount > 0 && (

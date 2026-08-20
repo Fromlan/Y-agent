@@ -503,6 +503,10 @@ pub fn explain_error(raw: String) -> String {
         "该模型（4.5/4.0）仅支持 jpeg 输出。去掉「PNG」开关，或改用 5.0 Pro / 5.0 Lite。"
     } else if raw.contains("fast 仅 5.0 Pro / 4.0 支持") {
         "fast 极速模式仅 5.0 Pro / 4.0 支持。当前模型不支持，关掉「极速模式」开关再试。"
+    } else if raw.contains("background=transparent 仅 5.0 Pro 支持") {
+        "透明背景仅 5.0 Pro 支持。当前模型不支持，关掉「透明背景」开关再试。"
+    } else if raw.contains("output_format=jpeg 与 background=transparent 互斥") {
+        "透明背景必须用 PNG 输出。把「输出格式」切到 PNG，或关掉「透明背景」开关。"
     } else if lower.contains("internalserviceerror") {
         "服务端内部错误（通常 5xx）。重试一次，或等几分钟后回来。"
     } else if lower.contains("invalidparameter") {

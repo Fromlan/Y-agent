@@ -416,6 +416,16 @@ export default function AssetDetailDialog({
                     label="图片数"
                     value={`${asset.payload.urls?.length || asset.payload.layers?.length || 1} 张`}
                   />
+                  <MetaItem
+                    icon={ImageIcon}
+                    label="格式"
+                    value={
+                      asset.payload.outputFormat
+                        ? asset.payload.outputFormat.toUpperCase() +
+                          (asset.payload.transparent ? "（透明）" : "")
+                        : "—"
+                    }
+                  />
                 </div>
               </section>
 
