@@ -32,6 +32,10 @@ node_modules
 # ===== Backup directories =====
 *.bak/
 
+# ===== One-off scratch / debug scripts =====
+scratch-*.cjs
+msg-scratchpad.txt
+
 # ===== TypeScript incremental build artifacts =====
 *.tsbuildinfo
 vite.config.js
