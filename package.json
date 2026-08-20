@@ -1,7 +1,7 @@
 {
   "name": "y-agent",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Y-agent - 游戏美术 AI 工作台",
   "scripts": {
