@@ -229,3 +229,33 @@ error: failed to push some refs to ...
 **不要做的事**：
 - ❌ 每次撞错就生成新 PAT（PAT 一多管理乱）
 - ❌ 把 workflow 移到别的目录绕过（GitHub 认 `.github/` 子目录的所有 yml）
+
+
+## 11. ⚠️ tauri-action 必须传 `tagName`，否则跳过 upload
+
+**症状**（v0.1.0 第二次踩坑）：CI 跑完 9m48s 状态 `success`，但 GitHub release page 不存在，`.exe` 没上传。
+Workflow 日志最后一行：
+```
+No releaseId or tagName provided, skipping all uploads...
+```
+
+**原因**：`tauri-apps/tauri-action@v0` 跑完 `tauri build` 后，看 `tagName`（或 `releaseId`）参数决定是否上传产物到 release。
+- 不传 → 跳过 upload（不报错，CI 仍 success）
+- 传 → 用 ref/tag 创建 release + 上传 .exe + latest.json
+
+**修复**：`release.yml` 的 tauri-action step 必须传：
+```yaml
+- uses: tauri-apps/tauri-action@v0
+  with:
+    tagName: ${{ github.ref_name }}        # 关键：从 ref 推断当前 tag
+    releaseName: "Y-agent ${{ github.ref_name }}"
+    releaseBody: "..."
+    args: --bundles nsis
+```
+
+**调试信号**：
+- CI 跑很快（< 1 min）→ 大概率是 cache hit，**没真的 build**，看 step "Build & publish" 是否真有 `Finished 1 bundle` 字样
+- CI 跑 ~10 min success，但 `gh release view vX.Y.Z` 说 "not found" → tagName 缺
+- 修 workflow → 重新打 tag → 重新 push（CI 不重跑旧的 run）
+
+**为什么不把 `tagName` 当默认？**：`tauri-action` 还要支持 `releaseId`（手动管理 release）、`includeUpdaterJson`、draft 模式等场景，所以 `tagName` 故意不默认。
