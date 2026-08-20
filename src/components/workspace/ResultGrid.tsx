@@ -1,6 +1,8 @@
 import { Download, Copy } from "lucide-react";
 import type { GeneratedImage } from "@/lib/types";
+import { imageInput } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
+import SafeImage from "@/components/shared/SafeImage";
 
 interface Props {
   images: GeneratedImage[];
@@ -49,8 +51,8 @@ export default function ResultGrid({ images, meta }: Props) {
       >
         {images.map((img, i) => (
           <div key={i} className="relative group">
-            <img
-              src={img.url}
+            <SafeImage
+              src={imageInput(img)}
               alt={img.name ?? `生成结果 ${i + 1}`}
               className="w-full rounded border border-border"
             />

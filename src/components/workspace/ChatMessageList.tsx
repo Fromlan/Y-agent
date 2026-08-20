@@ -6,6 +6,7 @@ import { assetMainImage } from "@/lib/types";
 import { Sparkles, ChevronDown, ChevronRight, Clock, Zap, Check, X } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import SafeImage from "@/components/shared/SafeImage";
 
 interface Props {
   messages: ChatMessage[];
@@ -81,7 +82,7 @@ function MessageItem({
           {message.attachments && message.attachments.length > 0 && (
             <div className="flex flex-wrap gap-1 justify-end mb-1">
               {message.attachments.map((a, i) => (
-                <img
+                <SafeImage
                   key={i}
                   src={a}
                   alt=""
@@ -212,7 +213,8 @@ function PlanCard({
 }
 
 function mainUrl(asset: Asset): string {
-  return assetMainImage(asset) ?? "";
+  // P5：localPath 优先（P5 后的资产）；缺失时回退 url
+  return asset.payload.localPaths?.[0] ?? assetMainImage(asset) ?? "";
 }
 
 function AssetThumb({ asset }: { asset: Asset }) {
@@ -225,14 +227,14 @@ function AssetThumb({ asset }: { asset: Asset }) {
         onClick={() => setOpen(true)}
         className="aspect-square rounded overflow-hidden border border-border hover:border-accent transition-colors"
       >
-        <img src={url} alt="" className="w-full h-full object-cover" />
+        <SafeImage src={url} alt="" className="w-full h-full object-cover" />
       </button>
       {open && (
         <div
           className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-8"
           onClick={() => setOpen(false)}
         >
-          <img src={url} alt="" className="max-w-full max-h-full" />
+          <SafeImage src={url} alt="" className="max-w-full max-h-full" />
         </div>
       )}
     </>
