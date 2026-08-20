@@ -185,13 +185,18 @@ export async function executePlan(
     (resp as { output_format?: string }).output_format ?? plan.outputFormat;
   const actualFormat: "png" | "jpeg" | undefined =
     rawFormat === "png" || rawFormat === "jpeg" ? rawFormat : undefined;
+  // P5：把每张图的 localPath 持久化（Rust 端已下载到本地缓存）
+  const localPaths = resp.images
+    .map((i) => i.localPath)
+    .filter((p): p is string => !!p);
   const payload = isLayer
-    ? { urls: [], layers: resp.images, usage: resp.usage }
+    ? { urls: [], layers: resp.images, usage: resp.usage, localPaths }
     : {
         urls: resp.images.map((i) => i.url),
         usage: resp.usage,
         ...(isTransparent ? { transparent: true } : {}),
         ...(actualFormat ? { outputFormat: actualFormat } : {}),
+        ...(localPaths.length > 0 ? { localPaths } : {}),
       };
   const asset = await createAsset({
     projectId,

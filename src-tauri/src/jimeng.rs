@@ -1,8 +1,66 @@
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 const ENDPOINT: &str = "https://ark.cn-beijing.volces.com/api/v3/images/generations";
+
+/// P5：把一个远程图片 URL 下载到 `cache_dir/<asset_id>/<n>.png`。
+/// 成功返回绝对路径，失败返回 None（前端回退用 URL）。
+///
+/// - 仅下载 http/https URL（data: / b64 跳过）
+/// - 用 reqwest::Client 复用 session
+/// - 30 秒超时，避免坏链接卡住批量生图
+/// - 父目录若不存在会自动创建
+pub async fn download_to_cache(
+    client: &reqwest::Client,
+    url: &str,
+    cache_dir: &Path,
+    asset_id: &str,
+    index: usize,
+) -> Option<PathBuf> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return None;
+    }
+    let dir = cache_dir.join(asset_id);
+    if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+        log::warn!("create cache dir failed: {e}");
+        return None;
+    }
+    // 简单后缀：取 url 末尾扩展名；缺省 png
+    let ext = url
+        .rsplit('?')
+        .next()
+        .and_then(|s| s.rsplit('.').next())
+        .filter(|s| s.len() <= 5 && s.chars().all(|c| c.is_ascii_alphanumeric()))
+        .unwrap_or("png");
+    let dst = dir.join(format!("{index}.{ext}"));
+
+    let resp = client.get(url).timeout(std::time::Duration::from_secs(30)).send().await;
+    match resp {
+        Ok(r) if r.status().is_success() => match r.bytes().await {
+            Ok(bytes) => {
+                if let Err(e) = tokio::fs::write(&dst, &bytes).await {
+                    log::warn!("write cache file failed: {e}");
+                    return None;
+                }
+                Some(dst)
+            }
+            Err(e) => {
+                log::warn!("read response bytes failed: {e}");
+                None
+            }
+        },
+        Ok(r) => {
+            log::warn!("download {} -> status {}", url, r.status());
+            None
+        }
+        Err(e) => {
+            log::warn!("download {} failed: {e}", url);
+            None
+        }
+    }
+}
 
 /// 5.0 Pro 不支持的参数组合：调用前在 Rust 端做护栏，避免回 400 时还要走 explain_error。
 fn validate_params(params: &GenerateImageParams) -> Result<(), String> {
@@ -228,6 +286,10 @@ pub struct GeneratedImage {
     /// 单图错误（组图场景下某张失败时填）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<ApiError>,
+    /// P5：本地缓存绝对路径（24h 兜底用）。下载失败时为 None，回退用 url。
+    /// 前端通过 `read_image_data_url` 命令读取。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_path: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -282,6 +344,7 @@ pub async fn generate(
                     output_format: None,
                     bounding_box: None,
                     error: None,
+                    local_path: None,
                 })
                 .collect(),
             is_demo: true,
@@ -358,6 +421,7 @@ pub async fn generate(
             output_format: img.output_format,
             bounding_box: img.bounding_box,
             error: per_image_error,
+            local_path: None, // 非流式返回后由 commands 层下载回填
         });
     }
     if out.is_empty() {
@@ -391,12 +455,16 @@ pub enum StreamEvent {
         index: i32,
         url: String,
         size: Option<String>,
+        /// P5：下载到本地的绝对路径（24h 兜底），下载失败时 None
+        local_path: Option<String>,
     },
     /// 单图成功：base64（response_format=b64_json 或 partial_image 事件）
     PartialImageB64 {
         request_id: String,
         index: i32,
         b64: String,
+        /// P5：把 b64 写成本地 png 后的绝对路径，下载失败时 None
+        local_path: Option<String>,
     },
     /// 单图失败（组图场景下某张失败）
     PartialFailed {
@@ -576,12 +644,14 @@ fn process_sse_event<F>(
                     index: parsed.partial_image_index.unwrap_or(0),
                     url,
                     size: parsed.size,
+                    local_path: None, // 由 commands 包装层异步下载后回填
                 });
             } else if let Some(b64) = parsed.b64_json {
                 on_event(StreamEvent::PartialImageB64 {
                     request_id: request_id.to_string(),
                     index: parsed.partial_image_index.unwrap_or(0),
                     b64,
+                    local_path: None,
                 });
             } else {
                 log::warn!("partial_succeeded but no url/b64");
@@ -594,6 +664,7 @@ fn process_sse_event<F>(
                     request_id: request_id.to_string(),
                     index: parsed.partial_image_index.unwrap_or(0),
                     b64,
+                    local_path: None,
                 });
             }
         }
@@ -654,6 +725,7 @@ where
             index: i,
             url: url.clone(),
             size: Some("1024x1024".into()),
+            local_path: None,
         });
     }
     on_event(StreamEvent::Completed {

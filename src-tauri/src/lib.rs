@@ -45,6 +45,7 @@ pub fn run() {
             commands::get_pref,
             commands::set_pref,
             commands::explain_error,
+            commands::read_image_data_url,
             commands::agent_context_get,
             commands::agent_context_update,
             commands::agent_llm_get,

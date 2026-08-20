@@ -344,6 +344,63 @@ Y-agent 集成：
 - `src/skills/builtin/icon-pack-transparent/SKILL.md`（图标合集 + 透明背景）
 - `src/skills/builtin/ui-icons/SKILL.md`（已升级到 5.0 Pro + transparent）
 
+### 1.11 24h URL 失效兜底 + 用量统计（P5）
+
+```rust
+// Rust：jimeng_generate 返回后，遍历 images[i]，调 download_to_cache 异步下载
+//   app_data_dir/assets/<batch_id>/<n>.{png|jpg}
+//   成功 → 写 img.local_path = Some(absolute path)
+//   失败 → 保持 None（前端回退用 url）
+// 流式：每个 partial 同样下载，事件 payload 加 local_path
+```
+
+```typescript
+// 前端：SafeImage 组件自动用 imageInput(img) 优先取 localPath
+// 通过 invoke("read_image_data_url", { path }) 转成 data: URL
+// 同一路径缓存 data URL，避免重复 IPC
+
+// 入库：asset-flow 把 localPaths 写进 payload（普通生图与图层拆分都覆盖）
+// 资产卡 / 资产详情：优先用 localPath，缺失回退 url
+// AssetCard 右下角"本地"徽章
+// SettingsPanel 今日用量：聚合近 24h 内所有项目的 asset.payload.usage
+```
+
+Rust 端：
+- `jimeng::download_to_cache(client, url, cache_dir, asset_id, index) -> Option<PathBuf>`
+  - 30s 超时，仅下载 http(s) URL
+  - 自动推断扩展名（默认 png）
+  - 父目录自动创建
+- `commands::read_image_data_url(path) -> String`
+  - 路径必须在 `app_data_dir/assets/` 下（防越权）
+  - 按扩展名推断 mime
+  - 同步返回 base64 data URL（图片通常 < 5MB，IPC 够用）
+- `commands::jimeng_generate` 拿 batch_id = uuid，下载所有图
+- `commands::jimeng_generate_stream` 每个 partial 异步下载，再 emit 一条带 localPath 的事件
+
+前端：
+- `src/lib/image-resolver.ts`
+  - `resolveImageUrl(input)` async，按 schema 走不同分支
+  - `resolveImageUrlSync(input)` 从内存缓存拿
+  - `prefetchImageUrl(input)` 静默预解析
+  - dataUrlCache: Map 缓存
+- `src/components/shared/SafeImage.tsx`
+  - 替代 `<img>`：先同步拿缓存值，effect 里再异步解析替换
+  - 卸载时 `cancelled = true` 防止 stale update
+- `imageInput(img) => img.localPath ?? img.url` helper
+
+Y-agent 集成：
+- AssetCard / AssetDetailDialog / ResultGrid 全部用 SafeImage
+- 图层拆分的 layer 也走 `imageInput(layer)` 优先 localPath
+- 局部编辑（EditStage）源图、局部编辑结果都走同一路径
+- SettingsPanel 打开时聚合所有项目的 asset.createdAt 近 24h 资产，累加 usage
+
+**不破坏既有**：
+- 旧资产没有 `localPaths` 字段：直接回退用 url，不报错
+- `local_path` 字段缺失 / 缓存文件被删：`resolveImageUrl` catch 后回退到原值
+- 图层拆分时 `layer_local_paths` 暂未单独持久化（layer 对象的 localPath 是 Rust 端 GeneratedImage 自身携带，随 payload.layers 一起存）
+
+**Skill 模板**：无新增（P5 是基础设施层，P6 的 icon-pack-transparent 等模板会直接受益）
+
 ---
 
 ## Part 2. LLM API（OpenAI 兼容协议）

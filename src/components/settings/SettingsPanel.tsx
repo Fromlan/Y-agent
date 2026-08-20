@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X, Eye, EyeOff, FlaskConical, Brain } from "lucide-react";
+import { X, Eye, EyeOff, FlaskConical, Brain, Activity } from "lucide-react";
 import { getApiKey, setApiKey, clearApiKey } from "@/lib/api-key";
 import { getPref, setPref } from "@/lib/prefs";
 import { useToast } from "@/components/shared/Toast";
@@ -8,6 +8,9 @@ import { loadLlmConfig, saveLlmConfig, presetConfig } from "@/lib/llm-config";
 import { LLM_PRESETS, type LLMConfig } from "@/lib/llm";
 import { confirmDialog } from "@/lib/dialog";
 import { APP_NAME, APP_VERSION, BUILD_TAG } from "@/lib/app-info";
+import { listProjects } from "@/lib/projects";
+import { listAssets } from "@/lib/assets";
+import type { Asset, Project } from "@/lib/types";
 
 const PREF_DEFAULT_MODEL = "default_model";
 const PREF_DEFAULT_SIZE = "default_size";
@@ -30,6 +33,13 @@ export default function SettingsPanel({ open, onClose }: Props) {
   const [llmEndpoint, setLlmEndpoint] = useState(LLM_PRESETS.deepseek.endpoint);
   const [llmModel, setLlmModel] = useState(LLM_PRESETS.deepseek.model); // v4-flash（2026 默认）
   const [llmConfigured, setLlmConfigured] = useState(false);
+  // P5：今日用量（最近 24h 内的 usage 聚合）
+  const [usage24h, setUsage24h] = useState<{
+    generated: number;
+    outputTokens: number;
+    totalTokens: number;
+    assets: number;
+  } | null>(null);
   const toast = useToast();
 
   useEffect(() => {
@@ -40,6 +50,41 @@ export default function SettingsPanel({ open, onClose }: Props) {
           setHasKey(!!k);
         })
         .catch(console.error);
+      // P5：聚合近 24h 用量（按 asset.createdAt 过滤）
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      Promise.all([listProjects(), Promise.resolve([] as Project[])])
+        .then(async ([projects]) => {
+          const allAssets: Asset[] = (
+            await Promise.all(
+              projects.map((p) =>
+                listAssets(p.id)
+                  .then((arr) => arr)
+                  .catch(() => [] as Asset[])
+              )
+            )
+          ).flat();
+          const recent = allAssets.filter((a) => a.createdAt >= cutoff);
+          let generated = 0;
+          let outputTokens = 0;
+          let totalTokens = 0;
+          for (const a of recent) {
+            const u = a.payload.usage;
+            if (!u) continue;
+            generated += u.generatedImages ?? 0;
+            outputTokens += u.outputTokens ?? 0;
+            totalTokens += u.totalTokens ?? 0;
+          }
+          setUsage24h({
+            generated,
+            outputTokens,
+            totalTokens,
+            assets: recent.length,
+          });
+        })
+        .catch((e) => {
+          console.warn("usage24h load failed:", e);
+          setUsage24h(null);
+        });
       getPref(PREF_DEFAULT_MODEL).then((v) => {
         if (v) {
           const m = MODEL_OPTIONS.find((o) => o.id === v);
@@ -235,6 +280,48 @@ export default function SettingsPanel({ open, onClose }: Props) {
           </section>
 
           {/* Agent LLM（v0.2 新增） */}
+          <section>
+            <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <Activity className="w-3.5 h-3.5" />
+              今日用量（最近 24h）
+            </h3>
+            {usage24h ? (
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="bg-bg-elev border border-border rounded-md p-2">
+                  <div className="text-text-muted text-[10px] mb-0.5">生成图</div>
+                  <div className="text-text-primary text-base font-semibold tabular-nums">
+                    {usage24h.generated}
+                    <span className="text-text-muted text-[10px] ml-1">张</span>
+                  </div>
+                </div>
+                <div className="bg-bg-elev border border-border rounded-md p-2">
+                  <div className="text-text-muted text-[10px] mb-0.5">任务</div>
+                  <div className="text-text-primary text-base font-semibold tabular-nums">
+                    {usage24h.assets}
+                    <span className="text-text-muted text-[10px] ml-1">次</span>
+                  </div>
+                </div>
+                <div className="bg-bg-elev border border-border rounded-md p-2 col-span-2">
+                  <div className="text-text-muted text-[10px] mb-0.5">Token 消耗</div>
+                  <div className="text-text-primary tabular-nums">
+                    <span className="font-semibold">{usage24h.totalTokens.toLocaleString()}</span>
+                    <span className="text-text-muted text-[10px] ml-1">总计</span>
+                    {usage24h.outputTokens > 0 && (
+                      <span className="text-text-muted text-[10px] ml-2">
+                        (输出 {usage24h.outputTokens.toLocaleString()})
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-text-muted">加载中…</p>
+            )}
+            <p className="text-[10px] text-text-muted/70 mt-1.5">
+              实际计费以火山方舟控制台账单为准（demo 模式不计入）
+            </p>
+          </section>
+
           <section>
             <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2 flex items-center gap-1.5">
               <Brain className="w-3.5 h-3.5" />

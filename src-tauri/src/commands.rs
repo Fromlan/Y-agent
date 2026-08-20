@@ -1,10 +1,11 @@
 use crate::jimeng::{self, GenerateImageParams, GeneratedImage};
 use crate::state::AppState;
+use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 const KEY_KV: &str = "jimeng_api_key";
 
@@ -94,6 +95,7 @@ pub struct JsGenerateResponse {
 pub async fn jimeng_generate(
     params: JsGenerateParams,
     state: State<'_, Mutex<AppState>>,
+    app: AppHandle,
 ) -> Result<JsGenerateResponse, String> {
     let (api_key, p) = {
         let s = state.lock().map_err(map_err)?;
@@ -128,8 +130,28 @@ pub async fn jimeng_generate(
     };
 
     let result = jimeng::generate(&api_key, p).await.map_err(map_err)?;
+
+    // P5：把外链 URL 全部下载到本地 cache（24h 失效兜底）
+    // 用 batch_id 把这次生成的所有图放到同一目录
+    let batch_id = uuid::Uuid::new_v4().to_string();
+    let cache_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(map_err)?
+        .join("assets");
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("reqwest client build failed: {e}"))?;
+    let mut images = result.images;
+    for (i, img) in images.iter_mut().enumerate() {
+        if let Some(p) = jimeng::download_to_cache(&client, &img.url, &cache_dir, &batch_id, i).await {
+            img.local_path = Some(p.to_string_lossy().to_string());
+        }
+    }
+
     Ok(JsGenerateResponse {
-        images: result.images,
+        images,
         is_demo: result.is_demo,
         usage: result.usage,
         error: result.error.map(|e| jimeng::ApiError {
@@ -191,15 +213,95 @@ pub async fn jimeng_generate_stream(
     let request_id = uuid::Uuid::new_v4().to_string();
     let app_for_emit = app.clone();
     let rid_for_task = request_id.clone();
+    // P5：本地缓存目录（按 request_id 隔离）
+    let cache_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(map_err)?
+        .join("assets");
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("reqwest client build failed: {e}"))?;
     // 后台 task：跑流式循环，每收到一个事件就 emit 到前端
+    let rid_for_abort = rid_for_task.clone();
     tokio::spawn(async move {
         let app_inside = app_for_emit.clone();
+        let cache_dir_inner = cache_dir.clone();
+        let client_inner = client.clone();
+        // P5：本地化用的 rid（独立 clone，避免 closure 互相打架）
+        let rid_for_localize = rid_for_task.clone();
         let result = jimeng::generate_stream(
             &api_key,
             p,
-            rid_for_task.clone(),
+            rid_for_task,
             move |event| {
+                // P5：对 PartialImage/PartialImageB64 异步下载到本地，再回填 local_path
+                let app_for_dl = app_inside.clone();
+                let cache_for_dl = cache_dir_inner.clone();
+                let client_for_dl = client_inner.clone();
+                let rid_for_dl = rid_for_localize.clone();
+                // 必须在 spawn 前取出 event 里需要的字段（因为 event 后面要 move）
+                let download_target: Option<(String, i32, String)> = match &event {
+                    jimeng::StreamEvent::PartialImage { url, index, .. } => {
+                        Some((rid_for_dl.clone(), *index, url.clone()))
+                    }
+                    _ => None,
+                };
+                let b64_target: Option<(String, i32, String)> = match &event {
+                    jimeng::StreamEvent::PartialImageB64 { b64, index, .. } => {
+                        Some((rid_for_dl.clone(), *index, b64.clone()))
+                    }
+                    _ => None,
+                };
                 let _ = app_inside.emit("jimeng://stream", &event);
+
+                if let Some((rid, idx, url)) = download_target {
+                    tokio::spawn(async move {
+                        if let Some(p) = jimeng::download_to_cache(
+                            &client_for_dl,
+                            &url,
+                            &cache_for_dl,
+                            &rid,
+                            idx as usize,
+                        )
+                        .await
+                        {
+                            let _ = app_for_dl.emit(
+                                "jimeng://stream",
+                                &jimeng::StreamEvent::PartialImage {
+                                    request_id: rid,
+                                    index: idx,
+                                    url,
+                                    size: None,
+                                    local_path: Some(p.to_string_lossy().to_string()),
+                                },
+                            );
+                        }
+                    });
+                } else if let Some((rid, idx, b64)) = b64_target {
+                    tokio::spawn(async move {
+                        let dir = cache_for_dl.join(&rid);
+                        let _ = tokio::fs::create_dir_all(&dir).await;
+                        let dst = dir.join(format!("{idx}.png"));
+                        match B64.decode(b64.as_bytes()) {
+                            Ok(bytes) => {
+                                if tokio::fs::write(&dst, &bytes).await.is_ok() {
+                                    let _ = app_for_dl.emit(
+                                        "jimeng://stream",
+                                        &jimeng::StreamEvent::PartialImageB64 {
+                                            request_id: rid,
+                                            index: idx,
+                                            b64,
+                                            local_path: Some(dst.to_string_lossy().to_string()),
+                                        },
+                                    );
+                                }
+                            }
+                            Err(e) => log::warn!("decode b64 failed: {e}"),
+                        }
+                    });
+                }
             },
         )
         .await;
@@ -208,7 +310,7 @@ pub async fn jimeng_generate_stream(
             let _ = app_for_emit.emit(
                 "jimeng://stream",
                 &jimeng::StreamEvent::Aborted {
-                    request_id: rid_for_task.clone(),
+                    request_id: rid_for_abort,
                     reason: e.to_string(),
                 },
             );
@@ -489,6 +591,50 @@ pub fn set_pref(
 ) -> Result<(), String> {
     let s = state.lock().map_err(map_err)?;
     s.storage.put_kv(&key, &value).map_err(map_err)
+}
+
+// ---------- P5: 24h URL 失效兜底（本地缓存读取） ----------
+
+/// 把本地缓存的绝对路径读成 base64 data URL，供前端 `<img src="data:...">` 用。
+/// - 限制：只允许读 `app_data_dir/assets/` 下的文件（防越权）
+/// - 同步命令（图片通常 < 5MB，5MB base64 = 6.7MB 字符串，IPC 够用）
+#[tauri::command]
+pub fn read_image_data_url(path: String, app: AppHandle) -> Result<String, String> {
+    let p = std::path::PathBuf::from(&path);
+    // 路径必须在 app_data_dir/assets 下
+    let assets_root = app
+        .path()
+        .app_data_dir()
+        .map_err(map_err)?
+        .join("assets");
+    let canonical_assets = assets_root
+        .canonicalize()
+        .unwrap_or_else(|_| assets_root.clone());
+    let canonical_path = p
+        .canonicalize()
+        .map_err(|e| format!("canonicalize failed: {e}"))?;
+    if !canonical_path.starts_with(&canonical_assets) {
+        return Err(format!(
+            "path not allowed: {} (must be under {})",
+            canonical_path.display(),
+            canonical_assets.display()
+        ));
+    }
+    let bytes = std::fs::read(&canonical_path).map_err(map_err)?;
+    // 按扩展名推断 mime
+    let ext = canonical_path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("png")
+        .to_lowercase();
+    let mime = match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "svg" => "image/svg+xml",
+        _ => "image/png",
+    };
+    Ok(format!("data:{};base64,{}", mime, B64.encode(&bytes)))
 }
 
 // 给前端构建完整错误消息（参考 doc/api-integration-notes.md 错误码表）

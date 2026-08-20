@@ -210,6 +210,8 @@ export interface GeneratedImage {
   boundingBox?: BoundingBox;
   /** 单图错误（组图场景下某张失败时填） */
   error?: ImageError;
+  /** P5：本地缓存绝对路径。优先用这个，缺失时回退 url */
+  localPath?: string;
 }
 
 export interface AssetPayload {
@@ -227,6 +229,10 @@ export interface AssetPayload {
   transparent?: boolean;
   /** P4：实际输出格式（png|jpeg），便于资产详情页显示 */
   outputFormat?: "png" | "jpeg";
+  /** P5：本地缓存绝对路径列表（与 urls 平行）。优先用这个，缺失时回退 url。 */
+  localPaths?: string[];
+  /** P5：图层拆分的图层本地路径（与 layers 平行） */
+  layerLocalPaths?: string[];
 }
 
 export interface Asset {
@@ -257,14 +263,29 @@ export function flatAssetImages(asset: Asset): GeneratedImage[] {
   if (asset.isLayerDecomposition && asset.payload.layers?.length) {
     return [...asset.payload.layers].sort((a, b) => layerZIndex(a) - layerZIndex(b));
   }
-  return (asset.payload.urls ?? []).map((u) => ({ url: u }));
+  // P5：把 localPaths 拼到每个 GeneratedImage 上
+  const urls = asset.payload.urls ?? [];
+  const localPaths = asset.payload.localPaths ?? [];
+  return urls.map((u, i) => ({
+    url: u,
+    ...(localPaths[i] ? { localPath: localPaths[i] } : {}),
+  }));
 }
 
-/** 取资产的主图：图层拆分取底图（zIndex=0），否则取 urls[0] */
+/** 取资产的主图：图层拆分取底图（zIndex=0），否则取 urls[0]
+ *  返回的可能是外链 URL（http://）或本地绝对路径（Windows 路径）。
+ *  上层应通过 `@/lib/image-resolver` 的 `resolveImageUrl` 异步转成可用的 data URL。
+ *  P5：优先 localPath，没有时回退 url。 */
 export function assetMainImage(asset: Asset): string | null {
   if (asset.isLayerDecomposition && asset.payload.layers?.length) {
     const base = [...asset.payload.layers].find((l) => layerZIndex(l) === 0);
-    return base?.url ?? asset.payload.layers[0].url;
+    return base?.localPath ?? base?.url ?? asset.payload.layers[0].url;
   }
-  return asset.payload.urls?.[0] ?? null;
+  const local = asset.payload.localPaths?.[0];
+  return local ?? asset.payload.urls?.[0] ?? null;
+}
+
+/** 同步版：从 GeneratedImage 拿"输入路径"（localPath 优先，回退 url） */
+export function imageInput(img: GeneratedImage): string {
+  return img.localPath ?? img.url;
 }

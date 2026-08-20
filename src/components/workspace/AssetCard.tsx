@@ -7,10 +7,12 @@ import {
   Check,
   ImageIcon,
   Droplet,
+  HardDrive,
 } from "lucide-react";
 import type { Asset } from "@/lib/types";
 import { assetMainImage } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
+import SafeImage from "@/components/shared/SafeImage";
 
 export type ViewMode = "masonry" | "grid" | "compact";
 
@@ -91,7 +93,7 @@ export default function AssetCard({
       >
         <div className="aspect-square bg-bg-elev rounded overflow-hidden border border-border">
           {main ? (
-            <img
+            <SafeImage
               src={main}
               alt={asset.prompt}
               className="w-full h-full object-cover"
@@ -130,7 +132,7 @@ export default function AssetCard({
       >
         <div className="relative aspect-square bg-bg-elev overflow-hidden">
           {main ? (
-            <img
+            <SafeImage
               src={main}
               alt={asset.prompt}
               className="w-full h-full object-cover"
@@ -149,6 +151,12 @@ export default function AssetCard({
             <div className="absolute top-2 left-2 bg-emerald-500/85 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"
               title="PNG 透明背景">
               <Droplet className="w-3 h-3" /> 透明
+            </div>
+          )}
+          {asset.payload.localPaths?.[0] && (
+            <div className="absolute bottom-2 right-2 bg-blue-500/85 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"
+              title="已下载到本地，URL 失效后仍可查看">
+              <HardDrive className="w-3 h-3" /> 本地
             </div>
           )}
           {asset.refCount > 0 && (
@@ -215,7 +223,7 @@ export default function AssetCard({
     >
       <div className="relative h-48 bg-bg-elev overflow-hidden">
         {main ? (
-          <img
+          <SafeImage
             src={main}
             alt={asset.prompt}
             className="w-full h-full object-cover block"

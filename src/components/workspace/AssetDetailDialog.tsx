@@ -24,9 +24,10 @@ import {
   Send,
 } from "lucide-react";
 import type { Asset, GeneratedImage } from "@/lib/types";
-import { assetMainImage, flatAssetImages } from "@/lib/types";
+import { assetMainImage, flatAssetImages, imageInput } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
 import { generateImage as jimengGenerate, explainError } from "@/lib/jimeng";
+import SafeImage from "@/components/shared/SafeImage";
 import { createAsset } from "@/lib/assets";
 
 interface Props {
@@ -68,7 +69,8 @@ export default function AssetDetailDialog({
   // 5.0 Pro 局部编辑：把用户画的 bbox 拼成 <bbox>x1 y1 x2 y2</bbox>，源图作 image 输入
   const doLocalEdit = useCallback(
     async (srcImg: GeneratedImage) => {
-      if (!srcImg.url) return;
+      const srcInput = imageInput(srcImg);
+      if (!srcInput) return;
       const bbox = editBboxRef.current;
       if (!bbox) {
         toast.warn("请先在图上画一个矩形框");
@@ -87,7 +89,7 @@ export default function AssetDetailDialog({
         const resp = await jimengGenerate({
           model: "doubao-seedream-5-0-pro-260628",
           prompt: builtPrompt,
-          image: [srcImg.url],
+          image: [srcInput],
           size: asset.size || "2k",
         });
         const newAsset = await createAsset({
@@ -239,9 +241,9 @@ export default function AssetDetailDialog({
           {/* 左侧：统一尺寸预览区 */}
           <div className="flex-1 min-w-0 bg-bg-base flex flex-col">
             <div className="flex-1 flex items-center justify-center p-4 min-h-0">
-              {editMode && cur?.url ? (
+              {editMode && cur && (cur.localPath || cur.url) ? (
                 <EditStage
-                  imageUrl={cur.url}
+                  imageUrl={imageInput(cur)}
                   onBboxChange={(b) => {
                     editBboxRef.current = b;
                   }}
@@ -306,8 +308,8 @@ export default function AssetDetailDialog({
                         }
                       >
                         {img.url ? (
-                          <img
-                            src={img.url}
+                          <SafeImage
+                            src={imageInput(img)}
                             alt=""
                             className="w-full h-full object-cover"
                           />
@@ -450,8 +452,8 @@ export default function AssetDetailDialog({
                             ${isHidden ? "border-border bg-bg-base opacity-60" : "border-border bg-bg-elev hover:border-border-strong"}
                           `}
                         >
-                          <img
-                            src={img.url}
+                          <SafeImage
+                            src={imageInput(img)}
                             alt=""
                             className="w-12 h-12 object-cover rounded flex-shrink-0 cursor-pointer"
                             onClick={() => !isHidden && setIdx(i)}
@@ -596,7 +598,8 @@ function PreviewStage({
   image: GeneratedImage | undefined;
   fallbackUrl: string | null;
 }) {
-  const url = image?.url ?? fallbackUrl;
+  // P5：优先用 localPath（已下载到本地，URL 失效后仍可看）
+  const url = image ? imageInput(image) : fallbackUrl;
   const [errored, setErrored] = useState(false);
   const [scale, setScale] = useState(1);
   const [tx, setTx] = useState(0);
@@ -671,7 +674,7 @@ function PreviewStage({
         onDoubleClick={reset}
         title="滚轮缩放 · 双击重置 · 拖拽平移"
       >
-        <img
+        <SafeImage
           src={url}
           alt={image?.name ?? ""}
           onError={() => setErrored(true)}
