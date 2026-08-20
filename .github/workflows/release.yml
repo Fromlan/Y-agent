@@ -63,7 +63,8 @@ jobs:
           # 从 ref 推断当前 tag（refs/tags/v0.1.0 → v0.1.0）
           tagName: ${{ github.ref_name }}
           releaseName: "Y-agent ${{ github.ref_name }}"
-          releaseBody: "自动 release · 由 release.yml 触发 · 见仓库 CHANGELOG / commits"
+          # releaseBody 故意不设：tauri-action 会 fallback 到 tag message
+          # 打 tag 时 git tag -a vX.Y.Z -F release-notes.md 给完整 message 即可
           # 强制只出 NSIS，避免本地 config 差异导致多/少产物
           # 改回 "all" 时去掉这一行；想加 macOS dmg / Linux deb 时 platform 矩阵已就绪
           args: --bundles nsis
