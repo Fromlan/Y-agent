@@ -42,6 +42,7 @@ pub fn run() {
             commands::create_asset,
             commands::list_assets,
             commands::delete_asset,
+            commands::backfill_local_assets,
             commands::get_pref,
             commands::set_pref,
             commands::explain_error,

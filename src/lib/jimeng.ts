@@ -40,26 +40,45 @@ export interface GenerateImageResponse {
 }
 
 export async function generateImage(params: GenerateImageParams): Promise<GenerateImageResponse> {
-  return await invoke<GenerateImageResponse>("jimeng_generate", { params });
+  return await invoke<GenerateImageResponse>("jimeng_generate", {
+    params: applyOutputFormatDefault(params),
+  });
 }
 
 // ============================================================================
 // P1：流式生图
 // ============================================================================
 
-/** 流事件类型（与 Rust 端 StreamEvent 对齐） */
+/** 流事件类型（与 Rust 端 StreamEvent 对齐）
+ * P5: partial_image / partial_image_b64 可能带 `localPath`（24h 兜底用）。
+ * Rust 端先 emit 一次 localPath 为空的事件让前端立刻入库；下载完成后再 emit 一次带 localPath。
+ * 前端应以后续事件里的 localPath 为准，更新已入库资产的 payload.localPaths。
+ */
 export type StreamEvent =
-  | { type: "partial_image"; request_id: string; index: number; url: string; size?: string }
-  | { type: "partial_image_b64"; request_id: string; index: number; b64: string }
+  | {
+      type: "partial_image";
+      request_id: string;
+      index: number;
+      url: string;
+      size?: string;
+      localPath?: string;
+    }
+  | {
+      type: "partial_image_b64";
+      request_id: string;
+      index: number;
+      b64: string;
+      localPath?: string;
+    }
   | { type: "partial_failed"; request_id: string; index?: number; code?: string; message?: string }
   | { type: "completed"; request_id: string; usage?: Usage }
   | { type: "aborted"; request_id: string; reason: string };
 
 export interface StreamHandlers {
   /** 单图完成（URL 直链） */
-  onPartial?: (img: { index: number; url: string; size?: string }) => void;
+  onPartial?: (img: { index: number; url: string; size?: string; localPath?: string }) => void;
   /** 单图完成（base64，自动补 data:image/png;base64, 前缀） */
-  onPartialB64?: (img: { index: number; url: string }) => void;
+  onPartialB64?: (img: { index: number; url: string; localPath?: string }) => void;
   /** 单图失败 */
   onPartialFailed?: (info: { index?: number; code?: string; message?: string }) => void;
   /** 全部完成 */
@@ -77,7 +96,9 @@ export async function generateImageStream(
   params: GenerateImageParams,
   handlers: StreamHandlers = {}
 ): Promise<string> {
-  const requestId = await invoke<string>("jimeng_generate_stream", { params });
+  const requestId = await invoke<string>("jimeng_generate_stream", {
+    params: applyOutputFormatDefault(params),
+  });
 
   // 监听本次 request_id 的事件（用事件 payload 里的 request_id 过滤，避免与其它并发请求串台）
   const unlisten: UnlistenFn = await listen<StreamEvent>("jimeng://stream", (e) => {
@@ -85,13 +106,18 @@ export async function generateImageStream(
     if (ev.request_id !== requestId) return;
     switch (ev.type) {
       case "partial_image":
-        handlers.onPartial?.({ index: ev.index, url: ev.url, size: ev.size });
+        handlers.onPartial?.({
+          index: ev.index,
+          url: ev.url,
+          size: ev.size,
+          localPath: ev.localPath,
+        });
         break;
       case "partial_image_b64": {
         // 兼容 data:image/... 前缀与裸 base64
         const b64 = ev.b64;
         const url = b64.startsWith("data:") ? b64 : `data:image/png;base64,${b64}`;
-        handlers.onPartialB64?.({ index: ev.index, url });
+        handlers.onPartialB64?.({ index: ev.index, url, localPath: ev.localPath });
         break;
       }
       case "partial_failed":
@@ -133,4 +159,27 @@ export async function generateImageStream(
 /** 把后端原始错误信息转成更友好的提示 */
 export async function explainError(raw: string): Promise<string> {
   return await invoke<string>("explain_error", { raw });
+}
+
+/**
+ * 给 outputFormat 设默认值：Y-agent 业务规则 — 5.0 Pro / Lite 默认 PNG，4.5 / 4.0 不设（API 默认 jpeg）。
+ * - 调用方显式传了 png/jpeg → 不动
+ * - 调用方传 undefined：
+ *   - 5.0 Pro / Lite → 设 "png"
+ *   - 4.5 / 4.0 → 不设（保持 undefined，让 API 走默认 jpeg）
+ *   - 其它/未知 → 不设
+ */
+function applyOutputFormatDefault(
+  params: GenerateImageParams
+): GenerateImageParams {
+  if (params.outputFormat) return params;
+  const id = params.model;
+  const is5x =
+    id.startsWith("doubao-seedream-5-0-pro") ||
+    id.startsWith("doubao-seedream-5-0-lite") ||
+    id.startsWith("doubao-seedream-5-0-260128");
+  if (is5x) {
+    return { ...params, outputFormat: "png" };
+  }
+  return params;
 }

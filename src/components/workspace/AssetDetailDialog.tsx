@@ -107,6 +107,11 @@ export default function AssetDetailDialog({
             // P3：保留溯源信息（编辑历史）
             parentAssetId: asset.id,
             bbox,
+            // P5：把 Rust 端下好的本地路径一起持久化（24h 兜底）。
+            // 后端 create_asset 也会兜底：万一这里漏了或下载失败，会自动重拉。
+            localPaths: resp.images
+              .map((i) => i.localPath)
+              .filter((p): p is string => !!p),
           },
         });
         onAssetCreated?.(newAsset);
