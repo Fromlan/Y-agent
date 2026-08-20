@@ -259,3 +259,64 @@ No releaseId or tagName provided, skipping all uploads...
 - 修 workflow → 重新打 tag → 重新 push（CI 不重跑旧的 run）
 
 **为什么不把 `tagName` 当默认？**：`tauri-action` 还要支持 `releaseId`（手动管理 release）、`includeUpdaterJson`、draft 模式等场景，所以 `tagName` 故意不默认。
+
+
+## 12. ⚠️ releaseBody 来源：tag message，不是占位
+
+**症状**（v0.1.0 第三次踩坑）：release 创建成功，资产正确，但 release body 只有一句占位文字，没有 changelog：
+```
+自动 release · 由 release.yml 触发 · 见仓库 CHANGELOG / commits
+```
+
+**根因**：之前在 `release.yml` 写了占位 `releaseBody`：
+```yaml
+releaseBody: "自动 release · 由 release.yml 触发 · 见仓库 CHANGELOG / commits"
+```
+tauri-action 用这个值**覆盖**了原本精心写的 tag message。
+
+**tauri-action 优先级**（从高到低）：
+1. `releaseBody` 参数（最优先）
+2. tag message（fallback）
+3. 空
+
+**正确做法**：**不设** `releaseBody`，让 tauri-action 用 tag message。打 tag 时用 `-F file` 给完整 markdown：
+```powershell
+git tag -a v0.2.0 -F release-notes.md
+git push origin v0.2.0
+```
+
+`release.yml` 配置（已修）：
+```yaml
+- uses: tauri-apps/tauri-action@v0
+  with:
+    tagName: ${{ github.ref_name }}
+    releaseName: "Y-agent ${{ github.ref_name }}"
+    # releaseBody 故意不设：tauri-action fallback 到 tag message
+    args: --bundles nsis
+```
+
+**tag message 模板**（`release-notes.md`）：
+```markdown
+Y-agent v0.2.0
+
+## 新增
+- ...
+
+## 修复
+- ...
+
+## 下载
+- Windows: `Y-agent_0.2.0_x64-setup.exe`
+- SHA256: ...
+```
+
+**补救**：发版后发现 release body 是占位，**用 `gh release edit` 立刻补**：
+```powershell
+gh release edit v0.1.0 --notes-file release-notes.md
+```
+不需要重跑 CI。
+
+**不要做的**：
+- ❌ 在 `releaseBody` 写占位文字（会覆盖 tag message）
+- ❌ 不用 `-F file` 写 tag message（`-m "..."` 短消息不适合当 release body）
+- ❌ 依赖 `generateReleaseNotes: true`（对 squash-merge 单 commit 项目效果一般）
