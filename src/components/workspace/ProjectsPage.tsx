@@ -76,12 +76,7 @@ export default function ProjectsPage() {
     <div className="flex-1 overflow-y-auto p-6">
       <div className="max-w-5xl mx-auto">
         <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-xl font-semibold">项目库</h1>
-            <p className="text-xs text-text-muted mt-1">
-              每个项目组织一类游戏的美术资产（角色、场景、UI 等）
-            </p>
-          </div>
+          <h1 className="text-xl font-semibold">项目库</h1>
           <button onClick={onCreate} className="btn btn-primary">
             <FolderPlus className="w-4 h-4" />
             新建项目
@@ -93,51 +88,60 @@ export default function ProjectsPage() {
         ) : items.length === 0 ? (
           <div className="panel p-8 text-center">
             <FolderOpen className="w-10 h-10 mx-auto text-text-muted mb-3" />
-            <p className="text-text-secondary">还没有项目</p>
-            <p className="text-text-muted text-xs mt-1">
-              点右上角"新建项目"开始你的第一个项目
-            </p>
+            <p className="text-text-secondary mb-4">还没有项目</p>
+            <button onClick={onCreate} className="btn btn-primary">
+              <FolderPlus className="w-4 h-4" />
+              新建项目
+            </button>
           </div>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
             {items.map((p) => (
               <div
                 key={p.id}
-                className="panel p-4 hover:border-border-strong transition-colors group"
+                role="button"
+                tabIndex={0}
+                onClick={() => onEnter(p)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onEnter(p);
+                  }
+                }}
+                className="panel p-4 hover:border-accent/40 hover:bg-bg-hover/40
+                  transition-colors group cursor-pointer relative"
               >
-                <button
-                  onClick={() => onEnter(p)}
-                  className="block w-full text-left"
-                  title="双击进入项目"
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium truncate">{p.name}</div>
+                    <div className="text-xs text-text-muted mt-1">
+                      {p.assetCount} 个资产 · {formatTime(p.updatedAt)}
+                    </div>
+                  </div>
+                  <ArrowRight
+                    className="w-4 h-4 text-text-muted opacity-0 group-hover:opacity-100
+                      transition-opacity flex-shrink-0 mt-0.5"
+                  />
+                </div>
+                {/* 底部操作按钮：stopPropagation 避免触发卡片进入 */}
+                <div
+                  className="mt-3 flex items-center justify-end gap-1"
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  <div className="font-medium truncate">{p.name}</div>
-                  <div className="text-xs text-text-muted mt-1">
-                    {p.assetCount} 个资产 · {formatTime(p.updatedAt)}
-                  </div>
-                </button>
-                <div className="mt-3 flex items-center justify-between">
                   <button
-                    onClick={() => onEnter(p)}
-                    className="text-xs text-accent hover:underline flex items-center gap-1"
+                    onClick={() => onRename(p.id, p.name)}
+                    className="btn-icon p-1"
+                    title="重命名"
                   >
-                    进入 <ArrowRight className="w-3 h-3" />
+                    <Pencil className="w-3.5 h-3.5" />
                   </button>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => onRename(p.id, p.name)}
-                      className="btn-icon p-1"
-                      title="重命名"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => onDelete(p.id, p.name)}
-                      className="btn-icon p-1 hover:text-accent-danger"
-                      title="删除"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => onDelete(p.id, p.name)}
+                    className="btn-icon p-1 hover:text-accent-danger"
+                    title="删除"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
             ))}

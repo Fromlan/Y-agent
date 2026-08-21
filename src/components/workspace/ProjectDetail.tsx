@@ -869,27 +869,24 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
             {currentProject.name}
           </button>
           <div className="text-[11px] text-text-muted">
-            {assets.length} 个资产 · 创建于{" "}
-            {new Date(currentProject.createdAt).toLocaleDateString("zh-CN")}
+            {assets.length} 个资产
           </div>
-        </div>
-        <div className="inline-flex rounded-md border border-border bg-bg-base p-0.5 text-xs">
-          {/* 顶部"对话/资产" tab 已移除：底部输入模式 ModeSwitch 是唯一入口，
-              切 inputMode 时 useEffect 会自动同步 tab。避免两套控件打架。 */}
         </div>
         <button
           onClick={() => setMemoryOpen(true)}
-          className="btn-icon"
-          title="Agent 记忆"
+          className="btn text-xs h-7 px-2.5"
+          title="Agent 记忆（学到的画风偏好）"
         >
-          <Brain className="w-4 h-4" />
+          <Brain className="w-3.5 h-3.5" />
+          记忆
         </button>
         <button
           onClick={onClearHistory}
-          className="btn-icon"
+          className="btn text-xs h-7 px-2.5"
           title="清空对话历史"
         >
-          <Trash2 className="w-4 h-4" />
+          <Trash2 className="w-3.5 h-3.5" />
+          清空对话
         </button>
       </div>
 
@@ -983,19 +980,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
           </div>
         )}
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-[10px] text-text-muted uppercase tracking-wider">输入模式</span>
           <ModeSwitch mode={inputMode} onChange={setInputMode} disabled={generating} />
-          {hasKey && (
-            <span className="text-[10px] text-text-muted ml-auto flex items-center gap-1">
-              <KeyRound className="w-3 h-3 text-accent-success" />
-              Key 已配置
-            </span>
-          )}
-          {inputMode === "chat" && agentCtx && agentCtx.styleHints.length > 0 && (
-            <span className="text-[11px] text-text-muted">
-              · 画风偏好：{agentCtx.styleHints.join("、")}
-            </span>
-          )}
         </div>
         {inputMode !== "tools" && (
         <PromptBar

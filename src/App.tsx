@@ -5,7 +5,6 @@ import SettingsPanel from "@/components/settings/SettingsPanel";
 import { ToastProvider, useToast } from "@/components/shared/Toast";
 import { PromptProvider } from "@/components/shared/PromptProvider";
 import { SessionProvider, useSession } from "@/lib/session";
-import { hasApiKey } from "@/lib/api-key";
 import { log } from "@/lib/logger";
 import { useTheme } from "@/lib/use-theme";
 
@@ -15,18 +14,8 @@ function AppShell() {
   useTheme();
   const [route, setRoute] = useState<Route>("projects");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [needsApiKey, setNeedsApiKey] = useState(false);
   const { currentProject, setCurrentProject } = useSession();
   const toast = useToast();
-
-  useEffect(() => {
-    hasApiKey()
-      .then((ok) => setNeedsApiKey(!ok))
-      .catch((e) => {
-        log.error("app", "hasApiKey check failed:", e);
-        toast.error("检查 API Key 失败");
-      });
-  }, [toast]);
 
   /**
    * 全局未捕获错误兜底。
@@ -37,7 +26,7 @@ function AppShell() {
     const onRejection = (e: PromiseRejectionEvent) => {
       log.error("app", "unhandled promise rejection:", e.reason);
       const msg = e.reason instanceof Error ? e.reason.message : String(e.reason);
-      toast.error(`未知错误：${msg.slice(0, 200)}`);
+      toast.error(`出错：${msg.slice(0, 80)}`);
     };
     const onError = (e: ErrorEvent) => {
       log.error("app", "uncaught error:", e.error ?? e.message);
@@ -78,35 +67,15 @@ function AppShell() {
         onOpenSettings={() => setSettingsOpen(true)}
       />
       <main className="flex-1 flex flex-col overflow-hidden">
-        {needsApiKey ? (
-          <div className="flex-1 flex items-center justify-center p-8">
-            <div className="panel max-w-md w-full p-6 text-center">
-              <h2 className="text-lg font-semibold mb-2">需要配置即梦 API Key</h2>
-              <p className="text-text-secondary text-sm mb-4">
-                首次启动需要设置即梦（豆包 Seedream）API Key。Key 仅保存在本地，不会上传。
-              </p>
-              <button
-                className="btn btn-primary w-full"
-                onClick={() => setSettingsOpen(true)}
-              >
-                打开设置
-              </button>
-            </div>
-          </div>
-        ) : (
-          <Workspace
-            route={route}
-            onBackFromProject={handleBackFromProject}
-            onOpenSettings={() => setSettingsOpen(true)}
-          />
-        )}
+        <Workspace
+          route={route}
+          onBackFromProject={handleBackFromProject}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
       </main>
       <SettingsPanel
         open={settingsOpen}
-        onClose={() => {
-          setSettingsOpen(false);
-          hasApiKey().then((ok) => setNeedsApiKey(!ok));
-        }}
+        onClose={() => setSettingsOpen(false)}
       />
     </div>
   );
