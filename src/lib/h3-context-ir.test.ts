@@ -30,6 +30,7 @@ import {
   type H3OptimizeResult,
   type OptimizeParams,
 } from "@/lib/h3-context-ir";
+import type { ContentItem } from "@/lib/video";
 
 beforeEach(() => {
   invokeCalls.length = 0;
@@ -187,6 +188,42 @@ describe("optimizeVideoPrompt", () => {
     await optimizeVideoPrompt(params, "测试");
     const args = invokeCalls[0].args as { params: OptimizeParams };
     expect(args.params.ratio).toBeUndefined();
+  });
+
+  /**
+   * P9 回归契约（手动测试发现）:
+   * 之前 ProjectDetail.onSubmitVideo 把 videoContent（不含 text）当 h3 content 传，
+   * Rust 端 validate_submit_params 报 reason='invalid_param'，增强失败。
+   * 调用方必须在 content 里放 text 项。下面这个测试模拟 Rust 端的拒绝行为，
+   * 把契约固化下来防止再回退。
+   */
+  it("契约: content 缺 text 时, Rust 端返 reason='invalid_param'", async () => {
+    mockInvokeImpl = async (_name, args) => {
+      // 模拟 Rust 端校验:content 没 text → 返 invalid_param + 原 prompt
+      const a = args as { params: { content: ContentItem[] }; originalPrompt: string };
+      const hasText = a.params.content.some(
+        (c) => c.type === "text" && c.text.trim().length > 0
+      );
+      if (!hasText) {
+        return { prompt: a.originalPrompt, isOptimized: false, reason: "invalid_param" };
+      }
+      return { prompt: "enhanced", isOptimized: true, reason: "ok" };
+    };
+
+    // 调用方误传:只有 image,没 text → 应拿到 invalid_param 兜底
+    const r = await optimizeVideoPrompt(
+      {
+        model: "MiniMax-H3",
+        content: [
+          { type: "image_url", image_url: { url: "data:," }, role: "first_frame" },
+        ],
+        duration: 5,
+      },
+      "原 prompt"
+    );
+    expect(r.isOptimized).toBe(false);
+    expect(r.reason).toBe("invalid_param");
+    expect(r.prompt).toBe("原 prompt");
   });
 });
 

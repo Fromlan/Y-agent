@@ -650,4 +650,59 @@ mod tests {
         };
         assert!(validate_submit_params(&req).is_ok());
     }
+
+    /// P9 回归:content 缺 text 必须校验失败(与 video_generation 一致)。
+    /// 之前 P9 实现里前端误把 videoContent(不含 text)当 h3 content 传,Rust 端会拒。
+    #[test]
+    fn validate_missing_text_in_content_fails() {
+        // 只有 image,没 text
+        let req = H3ContextIRReq {
+            model: "MiniMax-H3".into(),
+            content: vec![ContentItem::ImageUrl {
+                image_url: crate::video::ImageUrlRef {
+                    url: "data:image/png;base64,xxx".into(),
+                },
+                role: Some("first_frame".into()),
+            }],
+            duration: 5,
+            ratio: Some("16:9".into()),
+        };
+        let err = validate_submit_params(&req).unwrap_err();
+        assert!(
+            err.contains("text") || err.contains("prompt"),
+            "expected error to mention text/prompt, got: {err}"
+        );
+    }
+
+    /// P9 回归:text 全空白也算缺(用 trim().is_empty())。
+    #[test]
+    fn validate_blank_text_fails() {
+        let req = H3ContextIRReq {
+            model: "MiniMax-H3".into(),
+            content: vec![ContentItem::Text { text: "   ".into() }],
+            duration: 5,
+            ratio: Some("16:9".into()),
+        };
+        assert!(validate_submit_params(&req).is_err());
+    }
+
+    /// P9 回归:i2va 场景 text + first_frame 同时存在应通过。
+    #[test]
+    fn validate_i2va_with_text_passes() {
+        let req = H3ContextIRReq {
+            model: "MiniMax-H3".into(),
+            content: vec![
+                ContentItem::Text { text: "push in slowly".into() },
+                ContentItem::ImageUrl {
+                    image_url: crate::video::ImageUrlRef {
+                        url: "data:image/png;base64,xxx".into(),
+                    },
+                    role: Some("first_frame".into()),
+                },
+            ],
+            duration: 5,
+            ratio: Some("adaptive".into()),
+        };
+        assert!(validate_submit_params(&req).is_ok());
+    }
 }

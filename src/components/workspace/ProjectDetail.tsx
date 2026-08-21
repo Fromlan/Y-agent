@@ -954,8 +954,9 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
       if (optimizePrompt) {
         toast.info("正在优化提示词…");
         try {
-          // H3 端只关心非 text 内容（图片/视频/音频）+ 整体参数
-          const h3Content = baseContent;
+          // H3 content 必须含 text 项（Rust 端 validate_submit_params 校验）。
+          // 复用 preCheck.fixed.content:已经过场景 / ratio 护栏修正、text 拼好。
+          const h3Content = preCheck.fixed.content;
           const opt = await optimizeVideoPrompt(
             {
               model: "MiniMax-H3",
