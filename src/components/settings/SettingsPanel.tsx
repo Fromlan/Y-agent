@@ -51,6 +51,14 @@ export default function SettingsPanel({ open, onClose }: Props) {
   } | null>(null);
   const toast = useToast();
 
+  // 默认模型切换后，若默认尺寸不在新模型的能力矩阵里，自动切到第一个可用档位
+  useEffect(() => {
+    const presets = modelCapabilities(defaultModel.id).sizePresets;
+    if (presets.length > 0 && !presets.includes(defaultSize)) {
+      setDefaultSize(presets[0]);
+    }
+  }, [defaultModel.id, defaultSize]);
+
   useEffect(() => {
     if (open) {
       getApiKey()

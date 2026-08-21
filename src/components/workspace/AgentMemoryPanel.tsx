@@ -12,6 +12,8 @@ interface Props {
   open: boolean;
   onClose: () => void;
   projectId: string;
+  /** 保存/清除后同步到父组件的 in-memory context，避免本次会话继续用旧记忆 */
+  onContextChange?: (ctx: AgentContext) => void;
 }
 
 /**
@@ -20,7 +22,7 @@ interface Props {
  * - 显示最近用过的模型
  * - v0.1 仅支持 styleHints 编辑（手动改 + 一键清除）
  */
-export default function AgentMemoryPanel({ open, onClose, projectId }: Props) {
+export default function AgentMemoryPanel({ open, onClose, projectId, onContextChange }: Props) {
   const [ctx, setCtx] = useState<AgentContext | null>(null);
   const [styleHintsText, setStyleHintsText] = useState("");
   const [saving, setSaving] = useState(false);
@@ -51,6 +53,7 @@ export default function AgentMemoryPanel({ open, onClose, projectId }: Props) {
       };
       await saveAgentContext(projectId, next);
       setCtx(next);
+      onContextChange?.(next);
       toast.success("已保存");
     } catch (e: any) {
       toast.error(`保存失败：${e?.message ?? e}`);
@@ -71,6 +74,7 @@ export default function AgentMemoryPanel({ open, onClose, projectId }: Props) {
       await saveAgentContext(projectId, empty);
       setCtx(empty);
       setStyleHintsText("");
+      onContextChange?.(empty);
       toast.success("已清除");
     } catch (e: any) {
       toast.error(`清除失败：${e?.message ?? e}`);

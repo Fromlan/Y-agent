@@ -38,7 +38,9 @@ export default function ModelSelect({ value, onChange }: Props) {
   );
   const [editing, setEditing] = useState(false);
 
-  const isCustom = value.id === "CUSTOM" || value.id.startsWith("ep-") || value.id.startsWith("custom-");
+  // 自定义模型 ID 不局限于 ep-/custom- 前缀；只要不是内置模型，都应显示自定义编辑框
+  const isCustom =
+    value.id === "CUSTOM" || !MODEL_OPTIONS.some((m) => m.id === value.id);
 
   return (
     <div className="flex items-center gap-1.5">

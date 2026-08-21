@@ -151,7 +151,8 @@ async function runToolStream(
 ): Promise<Asset> {
   const t0 = Date.now();
   const totalCount = params.maxImages ?? 1;
-  const partials: { url: string; index: number; localPath?: string }[] = [];
+  // 按 index 去重：同一张图会先收到无 localPath 事件、再收到有 localPath 事件
+  const partials = new Map<number, { url: string; localPath?: string }>();
 
   onProgress?.({
     phase: "requesting",
@@ -164,11 +165,16 @@ async function runToolStream(
   return new Promise<Asset>((resolve, reject) => {
     generateImageStream(genParams, {
       onPartial: ({ url, index, localPath }) => {
-        partials.push({ url, index, localPath });
+        const existing = partials.get(index);
+        if (existing) {
+          if (localPath) existing.localPath = localPath;
+        } else {
+          partials.set(index, { url, localPath });
+        }
         onProgress?.({
           phase: "downloading",
-          message: `已生成 ${partials.length} / ${totalCount} 张`,
-          partialCount: partials.length,
+          message: `已生成 ${partials.size} / ${totalCount} 张`,
+          partialCount: partials.size,
           totalCount,
         });
       },
@@ -181,7 +187,9 @@ async function runToolStream(
       onCompleted: async (info) => {
         try {
           onProgress?.({ phase: "persisting", message: "写入资产库…" });
-          const sorted = partials.sort((a, b) => a.index - b.index);
+          const sorted = Array.from(partials.entries())
+            .sort((a, b) => a[0] - b[0])
+            .map(([, p]) => p);
           // localPaths 必须与 sorted urls 同序，不能按 partial 到达顺序算。
           const localPaths = sorted.map((p) => p.localPath ?? "");
           const actualFormat = resolveFormat({
@@ -213,8 +221,8 @@ async function runToolStream(
           });
           onProgress?.({
             phase: "done",
-            message: `已生成 ${partials.length} / ${totalCount} 张`,
-            partialCount: partials.length,
+            message: `已生成 ${partials.size} / ${totalCount} 张`,
+            partialCount: partials.size,
             totalCount,
           });
           resolve(asset);

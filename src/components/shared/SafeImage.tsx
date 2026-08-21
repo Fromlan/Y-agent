@@ -51,7 +51,7 @@ export default function SafeImage({
     let cancelled = false;
     resolveImageUrl(src)
       .then((u) => {
-        if (cancelled || !u) setResolved(u);
+        if (!cancelled && u) setResolved(u);
       })
       .catch(() => {});
     return () => {

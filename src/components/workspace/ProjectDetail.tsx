@@ -464,9 +464,13 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
             const useModel = String(args.model ?? model.id);
             const useSize = String(args.size ?? size);
             const refRequired = !!args.ref_required;
-            let maxImages = Math.max(1, Math.min(4, Number(args.max_images) || 1));
             lastModel = useModel;
             const useModelOpt = MODEL_OPTIONS.find((m) => m.id === useModel) ?? model;
+            // 用模型能力矩阵而不是写死 4：Lite/4.x 可到 15，Pro 不支持组图。
+            let maxImages = Math.max(
+              1,
+              Math.min(useModelOpt.capabilities.maxGroupImages, Number(args.max_images) || 1)
+            );
             // P7：能力位预检——若当前模型不支持 maxImages>1 igroupGeneration，主动降级到 1
             // 并给用户一个 toast 提示；不静默篡改 LLM 决策
             if (maxImages > 1 && !useModelOpt.capabilities.groupGeneration) {
@@ -1026,6 +1030,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
         open={memoryOpen}
         onClose={() => setMemoryOpen(false)}
         projectId={currentProject.id}
+        onContextChange={setAgentCtx}
       />
     </div>
   );

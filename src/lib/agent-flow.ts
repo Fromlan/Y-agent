@@ -57,7 +57,11 @@ export async function executePlanStream(
     return executePlan(plan, projectId);
   }
 
-  const partials: { url: string; index: number }[] = [];
+  // 用 Map 按 index 去重：Rust 端会对同一张图先发“localPath 为空”的事件，
+  // 下载完成后再发一次带 localPath 的事件。若直接 push 数组会导致重复入库/重复 url。
+  const partials = new Map<number, { url: string; localPath?: string }>();
+  // 记录每个 partial 对应的已入库 Asset，单图完成时可直接复用，避免“partial + 主资产”两条重复记录。
+  const partialAssets = new Map<number, Promise<Asset>>();
   const failedIndices: number[] = [];
 
   return await new Promise<PlanResult>((resolve, reject) => {
@@ -76,8 +80,14 @@ export async function executePlanStream(
         layerDecomposition: plan.layerDecomposition,
       },
       {
-        onPartial: ({ index, url, outputFormat }) => {
-          partials.push({ index, url });
+        onPartial: ({ index, url, localPath, outputFormat }) => {
+          const existing = partials.get(index);
+          if (existing) {
+            // 同一张图的第二次事件只补 localPath，不重复创建资产
+            if (localPath) existing.localPath = localPath;
+            return;
+          }
+          partials.set(index, { url, localPath });
           // partial 成功即入库（让用户早点看到图）
           const isTransparent = plan.background === "transparent";
           // Rust 端从入参推算 outputFormat 后透传过来（5.0 系列 = Some，4.5/4.0 = None）。
@@ -88,7 +98,7 @@ export async function executePlanStream(
             reqFormat: plan.outputFormat,
             modelId: plan.modelId,
           });
-          createAsset({
+          const assetPromise = createAsset({
             projectId,
             prompt: plan.prompt,
             model: plan.modelId,
@@ -104,7 +114,9 @@ export async function executePlanStream(
               },
               partialFormat
             ),
-          })
+          });
+          partialAssets.set(index, assetPromise);
+          assetPromise
             .then((asset) => callbacks.onPartialAsset?.(asset, index))
             .catch((e) => console.error("partial asset save failed", e));
         },
@@ -114,12 +126,30 @@ export async function executePlanStream(
         },
         onCompleted: (info) => {
           const costMs = Date.now() - t0;
-          const isLayer = !!plan.layerDecomposition;
-          // 主资产：单图就 partials[0]，组图就 urls 全量（其它 partial 已经独立入库了）
-          if (partials.length === 0) {
+          const sortedEntries = Array.from(partials.entries()).sort(
+            (a, b) => a[0] - b[0]
+          );
+          if (sortedEntries.length === 0) {
             reject(new Error("流式生图未产出任何图"));
             return;
           }
+          // 单图流式：partial 资产已经入库，直接复用它作为结果，
+          // 不再创建第二条“主资产”，避免资产库和 chat 里同一张图出现两次。
+          if (sortedEntries.length === 1) {
+            const onlyIndex = sortedEntries[0][0];
+            const onlyAssetPromise = partialAssets.get(onlyIndex);
+            if (!onlyAssetPromise) {
+              reject(new Error("流式生图未产出任何图"));
+              return;
+            }
+            onlyAssetPromise
+              .then((asset) => resolve({ asset, costMs, isDemo: false }))
+              .catch((e) => reject(e));
+            return;
+          }
+
+          const isLayer = !!plan.layerDecomposition;
+          const sortedPartials = sortedEntries.map(([, p]) => p);
           const isTransparent = plan.background === "transparent";
           // 流式 completed 阶段拿到 API 顶层 output_format，是权威值
           const actualFormat = resolveFormat({
@@ -138,7 +168,8 @@ export async function executePlanStream(
             isLayerDecomposition: isLayer,
             payload: buildAssetPayload(
               {
-                urls: partials.sort((a, b) => a.index - b.index).map((p) => p.url),
+                urls: sortedPartials.map((p) => p.url),
+                localPaths: sortedPartials.map((p) => p.localPath ?? ""),
                 usage: info.usage,
                 isTransparent,
               },
@@ -158,9 +189,9 @@ export async function executePlanStream(
           // 流中断：把已经入库的 partials 留下，告诉上层流断了
           // 用一个特殊 error message 让前端能识别
           const err = new Error(
-            `流式生图中断：${reason}（已完成 ${partials.length} 张，失败 ${failedIndices.length} 张）`
+            `流式生图中断：${reason}（已完成 ${partials.size} 张，失败 ${failedIndices.length} 张）`
           );
-          (err as Error & { partials?: number }).partials = partials.length;
+          (err as Error & { partials?: number }).partials = partials.size;
           reject(err);
         },
       }

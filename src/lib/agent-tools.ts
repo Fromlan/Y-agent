@@ -13,7 +13,7 @@ export const AGENT_TOOLS: ToolDefinition[] = [
     function: {
       name: "jimeng_generate_image",
       description:
-        "调用即梦（豆包 Seedream）API 生成游戏美术图片。P7 起：模型选择由用户在 PromptBar 选定的模型决定，工具调用里**通常不要传 model 字段**。只有当用户消息里**明确要求**切换模型（「用 4.5 重新画」/「换成 Pro 做图层拆分」）时才传。能力位参数：图生图（ref_required=true 时必传 image）、单图/组图（max_images 1-4，仅 Lite 系列支持组图）、透明背景（background=transparent，仅 5.0 Pro + PNG）、极速 prompt 优化（fast_mode，仅 5.0 Pro / 4.0）、web_search 工具调用（仅 5.0 Lite）。",
+        "调用即梦（豆包 Seedream）API 生成游戏美术图片。P7 起：模型选择由用户在 PromptBar 选定的模型决定，工具调用里**通常不要传 model 字段**。只有当用户消息里**明确要求**切换模型（「用 4.5 重新画」/「换成 Pro 做图层拆分」）时才传。能力位参数：图生图（ref_required=true 时必传 image）、单图/组图（max_images 1-15，具体上限以模型能力为准；仅 Lite/4.x 支持组图）、透明背景（background=transparent，仅 5.0 Pro + PNG）、极速 prompt 优化（fast_mode，仅 5.0 Pro / 4.0）、web_search 工具调用（仅 5.0 Lite）。",
       parameters: {
         type: "object",
         properties: {
@@ -52,9 +52,9 @@ export const AGENT_TOOLS: ToolDefinition[] = [
           max_images: {
             type: "number",
             description:
-              "生成几张图。1-4。组图（>1）只能用 5.0 Lite，5.0 Pro 不支持。",
+              "生成几张图。1-15（按模型能力上限；Lite/4.x 支持组图，5.0 Pro 不支持）。",
             minimum: 1,
-            maximum: 4,
+            maximum: 15,
           },
           output_format: {
             type: "string",
@@ -196,7 +196,7 @@ export function renderSystemPrompt(opts: {
 
 4. **避免浪费**。同一用户请求不要重复调工具。先确认用户要什么。
 
-## 11 个预置 Skill 模板（按类别分组）
+## 13 个预置 Skill 模板（按类别分组）
 
 **基础生图**（单图）
 - \`character-turnaround\`（角色三视图）：正面/侧面/背面同一角色、同一比例、同一画风
@@ -209,12 +209,12 @@ export function renderSystemPrompt(opts: {
 - \`scene-mood-light-variants\`（场景光影变体）：早/午/晚/夜 4 个时段
 - \`character-consistency-set\`（角色一致性套图）：4 张不同动作 / 表情
 - \`product-shot-pack\`（商品图组合）：6 张电商级主图 + 角度 + 场景
-- \`ui-icons\`（UI 图标）：6-9 个统一风格图标
 
 **5.0 Pro 专属**
+- \`ui-icons\`（UI 图标）：6-9 个统一风格图标
+- \`icon-pack-transparent\`（图标包透明）：UI 图标 + 透明背景
 - \`layer-separation\`（图层拆分）：把单图拆成底图 + 多图层
 - \`local-edit-bbox\`（局部编辑）：bbox 标注，框内重新出图
-- \`icon-pack-transparent\`（图标包透明）：UI 图标 + 透明背景
 - \`infographic-poster\`（信息图海报）：密集排版 + 标题 + 卡片
 
 如果你识别到用户想做这几类，直接调工具，prompt 按对应 Skill 风格扩展。
@@ -225,7 +225,7 @@ export function renderSystemPrompt(opts: {
 |---|---|---|---|
 | 文生图 | ✓ | ✓ | ✓ |
 | 图生图 | ✓（最多 4 张） | ✓ | ✓ |
-| 组图（>1 张） | ✓ | ✗ | ✗ |
+| 组图（>1 张） | ✓ | ✗ | ✓ |
 | 流式输出 | ✓ | ✗ | ✓ |
 | 透明背景 | ✗ | ✓ | ✗ |
 | 图层拆分 | ✗ | ✓ | ✗ |

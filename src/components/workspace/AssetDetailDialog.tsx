@@ -35,8 +35,9 @@ import { buildAssetPayload, resolveFormat } from "@/lib/asset-payload";
 import { resolveImageUrl } from "@/lib/image-resolver";
 import SafeImage from "@/components/shared/SafeImage";
 import { createAsset } from "@/lib/assets";
-import { pickVisibleLayers, getBboxHealth, layerRectNormalized } from "@/lib/layer-view";
+import { pickVisibleLayers, getBboxHealth } from "@/lib/layer-view";
 import LayerCompositeStage from "@/components/workspace/LayerCompositeStage";
+import LayerThumb from "@/components/workspace/LayerThumb";
 
 /**
  * 从 GeneratedImage 推断下载扩展名
@@ -656,11 +657,12 @@ export default function AssetDetailDialog({
                       const bbNorm = img.boundingBox?.normalized;
                       const bbAbs = img.boundingBox?.absolute;
                       const isSelected = selectedLayerIdx === i;
+                      const hasDetailText = !!(img.description || bbNorm || bbAbs);
                       return (
                         <div
                           key={i}
                           onClick={() => onLayerRowClick(i)}
-                          className={`flex items-start gap-2 p-2 rounded border transition-colors cursor-pointer
+                          className={`flex items-start gap-2 p-1.5 rounded border transition-colors cursor-pointer
                             ${isSelected ? "border-l-2 border-l-accent border-border-strong" : ""}
                             ${isHidden
                               ? "border-border bg-bg-base opacity-60"
@@ -669,11 +671,12 @@ export default function AssetDetailDialog({
                               : "border-border bg-bg-elev hover:border-border-strong"}
                           `}
                         >
-                          <div className="flex flex-col gap-1 flex-shrink-0">
-                            <SafeImage
-                              src={imageInput(img)}
-                              alt=""
-                              className="w-12 h-12 object-cover rounded"
+                          {/* P0+：单复合缩略图（底图作背景 + 当前图层 bbox 描边）。
+                              把原 48x48 主图 + 32x32 bbox mini 合并为单个 48x48 容器，
+                              行高从 ~100px 降到 ~60px。 */}
+                          {baseLayer && (
+                            <div
+                              className="flex-shrink-0"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 if (isHidden) return;
@@ -683,11 +686,16 @@ export default function AssetDetailDialog({
                                 }
                                 setIdx(i);
                               }}
-                            />
-                            {/* P0+：bbox 位置 mini 缩略图(底图比例 + 当前图层 bbox 描边)。
-                                缺 bbox 时仍渲染（fallback 铺满 + 虚线表示位置信息缺失）。 */}
-                            <LayerBboxMini baseLayer={baseLayer} layer={img} />
-                          </div>
+                            >
+                              <LayerThumb
+                                baseLayer={baseLayer}
+                                layer={img}
+                                size={48}
+                                highlight={isSelected}
+                                hidden={isHidden}
+                              />
+                            </div>
+                          )}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5 text-xs">
                               {isBase ? (
@@ -703,18 +711,39 @@ export default function AssetDetailDialog({
                                 {img.name ?? `图层 ${i + 1}`}
                               </span>
                             </div>
-                            {img.description && (
-                              <p className="text-[10px] text-text-muted mt-0.5 line-clamp-2">
-                                {img.description}
-                              </p>
-                            )}
-                            {(bbNorm || bbAbs) && (
-                              <p className="text-[10px] text-text-muted/70 mt-0.5 font-mono flex items-center gap-1">
-                                <Frame className="w-2.5 h-2.5" />
-                                {bbNorm
-                                  ? `[${bbNorm.join(", ")}] (0-1000)`
-                                  : `[${bbAbs!.join(", ")}] (px)`}
-                              </p>
+                            {/* 详情(description / bbox 坐标)折叠：5+ 层时默认收起,
+                                选中行或 hover 时展开。tooltip 也在 LayerThumb 上保留。 */}
+                            {hasDetailText && (
+                              <details
+                                className="mt-0.5 group"
+                                open={isSelected}
+                              >
+                                <summary
+                                  className="text-[10px] text-text-muted/70 cursor-pointer
+                                    hover:text-text-secondary list-none
+                                    [&::-webkit-details-marker]:hidden
+                                    before:content-['▸'] before:mr-1 before:inline-block
+                                    group-open:before:content-['▾']
+                                    select-none"
+                                >
+                                  详情
+                                </summary>
+                                <div className="mt-0.5 space-y-0.5 pl-3">
+                                  {img.description && (
+                                    <p className="text-[10px] text-text-muted line-clamp-2">
+                                      {img.description}
+                                    </p>
+                                  )}
+                                  {(bbNorm || bbAbs) && (
+                                    <p className="text-[10px] text-text-muted/70 font-mono flex items-center gap-1">
+                                      <Frame className="w-2.5 h-2.5" />
+                                      {bbNorm
+                                        ? `[${bbNorm.join(", ")}] (0-1000)`
+                                        : `[${bbAbs!.join(", ")}] (px)`}
+                                    </p>
+                                  )}
+                                </div>
+                              </details>
                             )}
                           </div>
                           <div
@@ -832,59 +861,6 @@ export default function AssetDetailDialog({
           </aside>
         </div>
       </div>
-    </div>
-  );
-}
-
-/**
- * 详情面板行内单图层 bbox 位置缩略图。
- * - 32x32px：底图作背景 + 当前图层 bbox 描边
- * - 缺 bbox 时退化为底图全铺
- * - 底图层（zIndex=0）bbox 等于全画布 → 整张描边
- *
- * 关键实现细节：用 `inset 0 0 0 1.5px` 的 `box-shadow` 而不是 `border`。
- * 原因：`border` 渲染在 div 外面（默认 box-sizing），bbox 占满 32x32 时
- * border 外沿被容器 `overflow-hidden` 裁掉，只剩右下角一截 L 形
- * 1-2px 残片，看起来像"小框在角落"。inset shadow 渲染在 div 内部，
- * 不会被裁，bbox 真实大小和位置都看得见。
- */
-function LayerBboxMini({
-  baseLayer,
-  layer,
-}: {
-  baseLayer: GeneratedImage | undefined;
-  layer: GeneratedImage;
-}) {
-  const baseUrl = baseLayer ? imageInput(baseLayer) : null;
-  const n = layerRectNormalized(layer);
-  return (
-    <div
-      className="relative w-8 h-8 rounded overflow-hidden border border-border
-        bg-bg-base flex-shrink-0"
-      title={`bbox [${(layer.boundingBox?.normalized ?? []).join(", ")}] (0-1000)`}
-    >
-      {baseUrl ? (
-        <SafeImage
-          src={baseUrl}
-          alt=""
-          className="block absolute inset-0 w-full h-full object-cover"
-          loading="lazy"
-        />
-      ) : (
-        <div className="absolute inset-0 bg-bg-elev" />
-      )}
-      {/* bbox 描边：accent 色,inset 1.5px(向内),不被裁 */}
-      <div
-        className="absolute pointer-events-none"
-        style={{
-          left: `${n.left * 100}%`,
-          top: `${n.top * 100}%`,
-          width: `${n.width * 100}%`,
-          height: `${n.height * 100}%`,
-          boxShadow:
-            "inset 0 0 0 1.5px rgb(124, 92, 255), inset 0 0 0 2px rgba(0, 0, 0, 0.4)",
-        }}
-      />
     </div>
   );
 }

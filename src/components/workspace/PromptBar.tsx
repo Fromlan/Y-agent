@@ -6,7 +6,7 @@ import ModelSelect from "@/components/workspace/ModelSelect";
 import { pickImageAsDataUrl } from "@/lib/image-file";
 import SkillPicker from "@/components/workspace/SkillPicker";
 import type { Skill } from "@/lib/skill";
-import { useState } from "react";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 
 interface Props {
   prompt: string;
@@ -18,7 +18,7 @@ interface Props {
   size: string;
   setSize: (s: string) => void;
   groupCount: number;
-  setGroupCount: (n: number) => void;
+  setGroupCount: Dispatch<SetStateAction<number>>;
   layerDecomp: boolean;
   setLayerDecomp: (b: boolean) => void;
   // P0 新增：能力位开关
@@ -27,7 +27,7 @@ interface Props {
   fastMode: boolean;
   setFastMode: (b: boolean) => void;
   outputFormat: "png" | "jpeg" | "";
-  setOutputFormat: (f: "png" | "jpeg" | "") => void;
+  setOutputFormat: Dispatch<SetStateAction<"png" | "jpeg" | "">>;
   transparent: boolean;
   setTransparent: (b: boolean) => void;
   generating: boolean;
@@ -66,6 +66,18 @@ export default function PromptBar({
 
   // 能力位驱动：模型换了之后，不支持的开关要重置
   const caps = modelCapabilities(model.id);
+
+  useEffect(() => {
+    setGroupCount((prev) => Math.max(1, Math.min(caps.maxGroupImages, prev)));
+    if (!caps.webSearch) setWebSearch(false);
+    if (!caps.fastMode) setFastMode(false);
+    if (!caps.background) setTransparent(false);
+    if (!caps.layerDecomposition) setLayerDecomp(false);
+    setOutputFormat((prev) =>
+      prev === "" || caps.outputFormats.includes(prev) ? prev : ""
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model.id]);
 
   const onPickRef = async () => {
     try {

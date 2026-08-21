@@ -263,7 +263,23 @@ function layerZIndex(img: GeneratedImage): number {
 
 export function flatAssetImages(asset: Asset): GeneratedImage[] {
   if (asset.isLayerDecomposition && asset.payload.layers?.length) {
-    return [...asset.payload.layers].sort((a, b) => layerZIndex(a) - layerZIndex(b));
+    const rawLayers = asset.payload.layers;
+    const layerLocalPaths = asset.payload.layerLocalPaths ?? [];
+    // layerLocalPaths 与 payload.layers 原始顺序平行；排序时同步移动 localPath，
+    // 避免按 zIndex 排序后路径错位。
+    return rawLayers
+      .map((layer, i) => ({
+        layer,
+        localPath: layerLocalPaths[i],
+      }))
+      .sort((a, b) => layerZIndex(a.layer) - layerZIndex(b.layer))
+      .map(({ layer, localPath }) =>
+        layer.localPath
+          ? layer
+          : localPath
+          ? { ...layer, localPath }
+          : layer
+      );
   }
   // P5：把 localPaths 拼到每个 GeneratedImage 上
   const urls = asset.payload.urls ?? [];
@@ -280,8 +296,12 @@ export function flatAssetImages(asset: Asset): GeneratedImage[] {
  *  P5：优先 localPath，没有时回退 url。 */
 export function assetMainImage(asset: Asset): string | null {
   if (asset.isLayerDecomposition && asset.payload.layers?.length) {
-    const base = [...asset.payload.layers].find((l) => layerZIndex(l) === 0);
-    return base?.localPath ?? base?.url ?? asset.payload.layers[0].url;
+    const rawLayers = asset.payload.layers;
+    const layerLocalPaths = asset.payload.layerLocalPaths ?? [];
+    let baseIdx = rawLayers.findIndex((l) => layerZIndex(l) === 0);
+    if (baseIdx === -1) baseIdx = 0;
+    const base = rawLayers[baseIdx];
+    return layerLocalPaths[baseIdx] ?? base?.localPath ?? base?.url ?? rawLayers[0]?.url ?? null;
   }
   const local = asset.payload.localPaths?.[0];
   return local ?? asset.payload.urls?.[0] ?? null;

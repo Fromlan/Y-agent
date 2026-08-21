@@ -12,80 +12,113 @@ import {
   Loader2,
 } from "lucide-react";
 import type { Asset } from "@/lib/types";
-import { assetMainImage, imageInput } from "@/lib/types";
+import { assetMainImage, flatAssetImages, imageInput } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
 import SafeImage from "@/components/shared/SafeImage";
-import { layerRectNormalized } from "@/lib/layer-view";
+import { layerRectNormalized, isNormalizedBboxValid } from "@/lib/layer-view";
 
 export type ViewMode = "masonry" | "grid" | "compact";
 
 /**
- * 图层拆分资产的 mini 合成缩略图。
- * - 56x56 像素
- * - 底图作背景 + 每个图层按 bbox 比例定位
- * - 仅当图层资产 + 至少有 1 个图层有 bbox 时才显示
- * - lazy 加载：仅资产卡可见时渲染图层图
+ * 图层拆分资产的合成缩略图。
+ * - 底图作为背景铺满
+ * - 每个有合法 bbox 的非底图层按 normalized 位置叠放，object-contain 保持比例
+ * - 缺 bbox 的图层无法定位，暂时不渲染
+ * 通过 className 控制尺寸：主卡用 absolute inset-0 铺满，mini 用 w-12 h-12。
  */
-function LayerThumbnailMini({ asset }: { asset: Asset }) {
-  const layers = asset.payload.layers ?? [];
+function LayerCompositeThumb({
+  asset,
+  className = "",
+}: {
+  asset: Asset;
+  className?: string;
+}) {
+  const layers = flatAssetImages(asset);
   if (layers.length === 0) return null;
   const baseLayer =
     layers.find((l) => (l.zIndex ?? 0) === 0) ?? layers[0];
-  const baseUrl = baseLayer.localPath ?? baseLayer.url;
-  // 取前 3 个有 bbox 的图层（太多在小图里挤成一片反而看不清）
-  const displayLayers = layers
-    .filter((l) => (l.zIndex ?? 0) !== 0)
-    .filter((l) => l.boundingBox?.normalized?.length === 4)
-    .slice(0, 3);
+  if (!baseLayer) return null;
+  const nonBaseLayers = layers.filter((l) => (l.zIndex ?? 0) !== 0);
 
   return (
-    <div
-      className="relative w-14 h-14 rounded overflow-hidden border border-accent/40
-        bg-bg-base shadow-sm pointer-events-none"
-      title={`图层资产 · ${layers.length} 层${
-        displayLayers.length < layers.length - 1 ? "（缩略仅显示前 3 层）" : ""
-      }`}
-    >
-      {/* 底图缩略图 */}
-      {baseUrl ? (
+    <div className={`relative overflow-hidden bg-bg-base ${className}`}>
+      {/* 透明棋盘背景：底图若有 alpha 也能看出来 */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          backgroundImage:
+            "linear-gradient(45deg, rgba(255,255,255,0.06) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.06) 75%), linear-gradient(45deg, rgba(255,255,255,0.06) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.06) 75%)",
+          backgroundSize: "8px 8px",
+          backgroundPosition: "0 0, 4px 4px",
+        }}
+      />
+      {/* 底图 */}
+      {imageInput(baseLayer) && (
         <SafeImage
           src={imageInput(baseLayer)}
           alt=""
-          className="block absolute inset-0 w-full h-full object-cover"
+          className="absolute inset-0 w-full h-full object-cover"
           loading="lazy"
         />
-      ) : (
-        <div className="absolute inset-0 bg-bg-elev" />
       )}
-      {/* 其它图层 bbox 色块（半透明 + 边框，bbox 一眼可见） */}
-      {displayLayers.map((layer, i) => {
+      {/* 非底图层按 bbox 合成 */}
+      {nonBaseLayers.map((layer, i) => {
+        if (!isNormalizedBboxValid(layer.boundingBox?.normalized)) return null;
         const n = layerRectNormalized(layer);
-        const colors = [
-          "border-rose-400/80 bg-rose-400/25",
-          "border-amber-400/80 bg-amber-400/25",
-          "border-emerald-400/80 bg-emerald-400/25",
-        ];
         return (
           <div
             key={i}
-            className={`absolute border ${colors[i % colors.length]}`}
+            className="absolute pointer-events-none"
             style={{
               left: `${n.left * 100}%`,
               top: `${n.top * 100}%`,
               width: `${n.width * 100}%`,
               height: `${n.height * 100}%`,
             }}
-          />
+          >
+            <SafeImage
+              src={imageInput(layer)}
+              alt=""
+              className="block w-full h-full object-contain"
+              loading="lazy"
+              draggable={false}
+            />
+          </div>
         );
       })}
-      {/* 角标：图层数 + bbox 状态（缺 bbox 时显示警告） */}
+    </div>
+  );
+}
+
+/**
+ * 图层拆分资产的 mini 合成缩略图（48x48）。
+ * 在 LayerCompositeThumb 基础上叠加图层数 / 缺位置信息角标。
+ */
+function LayerThumbnailMini({ asset }: { asset: Asset }) {
+  const layers = flatAssetImages(asset);
+  if (layers.length === 0) return null;
+  const nonBaseLayers = layers.filter((l) => (l.zIndex ?? 0) !== 0);
+  const hasMissingBbox = nonBaseLayers.some(
+    (l) => !isNormalizedBboxValid(l.boundingBox?.normalized)
+  );
+
+  return (
+    <div
+      className="relative w-12 h-12 rounded overflow-hidden border border-accent/40
+        bg-bg-base shadow-sm pointer-events-none"
+      title={`图层资产 · ${layers.length} 层${
+        hasMissingBbox ? "（部分图层缺位置信息）" : ""
+      }`}
+    >
+      <LayerCompositeThumb asset={asset} className="absolute inset-0" />
+      {/* 角标：图层数 + bbox 状态（左下） */}
       <div
-        className="absolute bottom-0 right-0 px-1 py-0.5
+        className="absolute bottom-0 left-0 px-1 py-0.5
           bg-black/75 text-accent text-[9px] flex items-center gap-0.5"
       >
         <Layers className="w-2.5 h-2.5" />
         <span>{layers.length}</span>
-        {displayLayers.length === 0 && (
+        {hasMissingBbox && (
           <AlertTriangle className="w-2.5 h-2.5 text-amber-400 ml-0.5" />
         )}
       </div>
@@ -102,12 +135,13 @@ function LayerThumbnailMini({ asset }: { asset: Asset }) {
  * 三种状态互斥,优先级 broken > 备份中 > 本地
  */
 function StatusBadge({ asset }: { asset: Asset }) {
-  // 图层资产：检查底图层（zIndex=0）的本地化状态
+  // 图层资产：检查底图层（zIndex=0）的本地化状态（flatAssetImages 会把
+  // layerLocalPaths 合并到 layer.localPath，所以这里统一用它取）
   // 普通资产：检查 urls[0] / localPaths[0]
   const isLayer = asset.isLayerDecomposition && asset.payload.layers?.length;
+  const layers = isLayer ? flatAssetImages(asset) : [];
   const baseLayer = isLayer
-    ? [...(asset.payload.layers ?? [])].find((l) => (l.zIndex ?? 0) === 0) ??
-      asset.payload.layers?.[0]
+    ? layers.find((l) => (l.zIndex ?? 0) === 0) ?? layers[0]
     : null;
   const hasLocal = isLayer
     ? !!baseLayer?.localPath
@@ -212,8 +246,10 @@ export default function AssetCard({
         }`}
         title={asset.prompt}
       >
-        <div className="aspect-square bg-bg-elev rounded overflow-hidden border border-border">
-          {main ? (
+        <div className="relative aspect-square bg-bg-elev rounded overflow-hidden border border-border">
+          {asset.isLayerDecomposition ? (
+            <LayerCompositeThumb asset={asset} className="absolute inset-0" />
+          ) : main ? (
             <SafeImage
               src={main}
               alt={asset.prompt}
@@ -253,7 +289,9 @@ export default function AssetCard({
         `}
       >
         <div className="relative aspect-square bg-bg-elev overflow-hidden">
-          {main ? (
+          {asset.isLayerDecomposition ? (
+            <LayerCompositeThumb asset={asset} className="absolute inset-0" />
+          ) : main ? (
             <SafeImage
               src={main}
               alt={asset.prompt}
@@ -351,7 +389,9 @@ export default function AssetCard({
       `}
     >
       <div className="relative h-48 bg-bg-elev overflow-hidden">
-        {main ? (
+        {asset.isLayerDecomposition ? (
+          <LayerCompositeThumb asset={asset} className="absolute inset-0" />
+        ) : main ? (
           <SafeImage
             src={main}
             alt={asset.prompt}
