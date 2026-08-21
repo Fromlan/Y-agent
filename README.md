@@ -91,3 +91,13 @@ M0 原型 → M1 MVP → M2 v0.4（当前）→ M3 角色工坊 → M4 场景+UI
 ## 📄 License
 
 MIT
+
+## 生视频模式（v0.3 新增）
+
+- 设置面板填入视频 API Key（MiniMax H3 平台，独立于生图 Key）
+- 切到「生视频」输入模式
+- 输入 prompt + 选时长 / 分辨率 / 比例 → 点生成
+- 视频生成中（异步，30s\~2min），资产区出现 pending 卡片
+- 完成后自动入库，资产库 / 详情页可播放
+
+详见 `doc/api-integration.md` Part 7。

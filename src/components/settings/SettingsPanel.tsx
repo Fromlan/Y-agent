@@ -1,6 +1,11 @@
 ﻿import { useEffect, useState } from "react";
 import { X, Eye, EyeOff, FlaskConical, Brain, Activity, Palette, Database } from "lucide-react";
 import { getApiKey, setApiKey, clearApiKey } from "@/lib/api-key";
+import {
+  getVideoApiKey,
+  setVideoApiKey,
+  clearVideoApiKey,
+} from "@/lib/video";
 import { getPref, setPref } from "@/lib/prefs";
 import { useToast } from "@/components/shared/Toast";
 import { MODEL_OPTIONS, modelCapabilities, type ModelOption } from "@/lib/types";
@@ -28,6 +33,12 @@ export default function SettingsPanel({ open, onClose }: Props) {
   const [saving, setSaving] = useState(false);
   const [defaultModel, setDefaultModel] = useState<ModelOption>(MODEL_OPTIONS[0]);
   const [defaultSize, setDefaultSize] = useState("2k");
+  // P8：视频 API Key 状态
+  const [videoKey, setVideoKey] = useState("");
+  const [showVideoKey, setShowVideoKey] = useState(false);
+  const [hasVideoKey, setHasVideoKey] = useState(false);
+  const [savingVideoKey, setSavingVideoKey] = useState(false);
+
   // LLM 配置
   const [llmProvider, setLlmProvider] = useState<keyof typeof LLM_PRESETS>("deepseek");
   const [llmApiKey, setLlmApiKey] = useState("");
@@ -65,6 +76,13 @@ export default function SettingsPanel({ open, onClose }: Props) {
         .then((k) => {
           setKey(k ?? "");
           setHasKey(!!k);
+        })
+        .catch(console.error);
+      // P8：加载视频 API Key
+      getVideoApiKey()
+        .then((k) => {
+          setVideoKey(k ?? "");
+          setHasVideoKey(!!k);
         })
         .catch(console.error);
       // P5：聚合近 24h 用量（按 asset.createdAt 过滤）
@@ -175,6 +193,37 @@ export default function SettingsPanel({ open, onClose }: Props) {
       setKey("");
       setHasKey(false);
       toast.success("已清除");
+    } catch (e: any) {
+      toast.error(`清除失败：${e?.message ?? e}`);
+    }
+  };
+
+  // P8：保存视频 API Key
+  const onSaveVideoKey = async () => {
+    if (!videoKey.trim()) {
+      toast.warn("请输入视频 API Key");
+      return;
+    }
+    setSavingVideoKey(true);
+    try {
+      await setVideoApiKey(videoKey.trim());
+      toast.success("视频 API Key 已保存");
+      setHasVideoKey(true);
+    } catch (e: any) {
+      toast.error(`保存失败：${e?.message ?? e}`);
+    } finally {
+      setSavingVideoKey(false);
+    }
+  };
+
+  const onClearVideoKey = async () => {
+    const ok = await confirmDialog("确认清除视频 API Key？", { kind: "warning", okLabel: "清除" });
+    if (!ok) return;
+    try {
+      await clearVideoApiKey();
+      setVideoKey("");
+      setHasVideoKey(false);
+      toast.success("视频 API Key 已清除");
     } catch (e: any) {
       toast.error(`清除失败：${e?.message ?? e}`);
     }
@@ -326,6 +375,64 @@ export default function SettingsPanel({ open, onClose }: Props) {
                   火山方舟控制台
                 </a>
                 获取 Key。
+              </p>
+            </div>
+
+            {/* P8：视频 API Key */}
+            <div className="mt-3 pt-3 border-t border-border/40">
+              <label className="label flex items-center justify-between">
+                <span>视频（MiniMax H3）API Key</span>
+                {hasVideoKey && (
+                  <span className="text-[10px] text-accent-success">● 已配置</span>
+                )}
+              </label>
+              <div className="relative mt-1.5 flex gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type={showVideoKey ? "text" : "password"}
+                    value={videoKey}
+                    onChange={(e) => setVideoKey(e.target.value)}
+                    placeholder="eyJ..."
+                    className="input pr-10"
+                    autoComplete="off"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowVideoKey((s) => !s)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary"
+                  >
+                    {showVideoKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <button
+                  onClick={onSaveVideoKey}
+                  disabled={savingVideoKey || !videoKey.trim()}
+                  className="btn btn-primary text-xs h-[38px] px-3"
+                >
+                  {savingVideoKey ? "保存中…" : "保存"}
+                </button>
+              </div>
+              <p className="text-[11px] text-text-muted mt-1.5">
+                在
+                <a
+                  className="text-accent hover:underline mx-1"
+                  href="https://platform.minimaxi.com/user-center/basic-information/interface-key"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  MiniMax 开放平台
+                </a>
+                获取 Key（与即梦 Key 独立）。以
+                <code className="px-1 bg-bg-elev rounded">demo-</code>
+                开头走 Demo 模式不消耗 token。
+                {hasVideoKey && (
+                  <button
+                    onClick={onClearVideoKey}
+                    className="ml-2 text-text-muted hover:text-accent-danger text-[10px] underline-offset-2 hover:underline"
+                  >
+                    清除
+                  </button>
+                )}
               </p>
             </div>
           </section>
