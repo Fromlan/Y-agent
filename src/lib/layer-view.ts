@@ -2,7 +2,7 @@
  * 图层视图的纯函数助手。
  * 从 `AssetDetailDialog` 抽出，便于单测。
  */
-import type { GeneratedImage } from "@/lib/types";
+import type { Asset, GeneratedImage } from "@/lib/types";
 
 /**
  * 派生"当前应该在合成画布上渲染的图层列表"。
@@ -211,4 +211,33 @@ export function pickMainLayer(layers: GeneratedImage[]): GeneratedImage | null {
   }
   // 退化：所有非底图层都缺 bbox → 返底图层(铺满)或 null
   return baseLayer;
+}
+
+/**
+ * 判断资产能否做「多层 bbox 合成」。
+ *
+ * 适用场景：
+ * - `AssetCard` 的主图（`LayerCompositeThumb`）：true → 走多层 bbox 合成，false → 走主图单图 fallback
+ * - `LayerCompositeStage` 详情画布：true → 走多层 bbox 合成，false → 已有「整体降级单图层」分支
+ * - 未来可能加的资产下载预览 / 缩略图 / 列表等：统一调用此函数避免散落判断
+ *
+ * 返回 true 当且仅当：
+ * 1. `asset.isLayerDecomposition === true`（这是个图层资产）
+ * 2. `payload.layers` 存在且非空
+ * 3. 至少 1 个「非底图层」（`zIndex > 0`）有合法的 `boundingBox.normalized`
+ *
+ * 第 3 条的语义：底图不算。如果只有底图或所有非底图层都缺 bbox，
+ * 那「多层合成」跟「单图底图」视觉上没区别 → 调单图 fallback 即可，省得多挂 N-1 个 SafeImage。
+ *
+ * 跟 `getBboxHealth` 的区别：
+ * - `getBboxHealth`：返回完整健康度统计（ok 数 / missing indices / total），用于详情画布的 banner
+ * - `canCompositeAssetLayers`：二元判断「能不能做合成」，用于资产卡等简单 UI 的分支选择
+ */
+export function canCompositeAssetLayers(asset: Asset): boolean {
+  if (!asset.isLayerDecomposition) return false;
+  const layers = asset.payload.layers;
+  if (!layers || layers.length === 0) return false;
+  return layers.some(
+    (l) => (l.zIndex ?? 0) !== 0 && isNormalizedBboxValid(l.boundingBox?.normalized)
+  );
 }

@@ -1,6 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { pickVisibleLayers, parseBaseSize, layerRectPercent, layerRectNormalized, getBboxHealth, pickMainLayer, isNormalizedBboxValid } from "@/lib/layer-view";
-import type { GeneratedImage } from "@/lib/types";
+import {
+  pickVisibleLayers,
+  parseBaseSize,
+  layerRectPercent,
+  layerRectNormalized,
+  getBboxHealth,
+  pickMainLayer,
+  isNormalizedBboxValid,
+  canCompositeAssetLayers,
+} from "@/lib/layer-view";
+import type { Asset, GeneratedImage } from "@/lib/types";
 
 const L = (i: number): GeneratedImage => ({ url: `l${i}.png`, zIndex: i });
 
@@ -353,5 +362,127 @@ describe("pickMainLayer — 资产卡缩略图主体图层派生", () => {
       { url: "ok.png", zIndex: 2, boundingBox: { normalized: [0, 0, 500, 500] } },
     ];
     expect(pickMainLayer(layers)?.url).toBe("ok.png");
+  });
+});
+
+/**
+ * 构造一个最小可用的 layer 资产用于 canCompositeAssetLayers 用例。
+ * 默认带 1 底图 + 1 含 bbox 的非底图层,canComposite 返回 true。
+ * 单测里用解构 + 覆盖字段做微调(避免每个用例都重新写一遍 base)。
+ */
+function makeLayerAsset(overrides: Partial<Asset> = {}): Asset {
+  return {
+    id: "a1",
+    projectId: "p1",
+    prompt: "",
+    model: "",
+    modelName: "",
+    size: "2k",
+    refCount: 0,
+    costMs: 0,
+    isLayerDecomposition: true,
+    createdAt: 0,
+    payload: {
+      urls: [],
+      layers: [
+        { url: "base.png", zIndex: 0 },
+        { url: "l1.png", zIndex: 1, boundingBox: { normalized: [0, 0, 500, 500] } },
+      ],
+    },
+    ...overrides,
+  };
+}
+
+describe("canCompositeAssetLayers", () => {
+  it("非图层资产 → false", () => {
+    const a: Asset = {
+      ...makeLayerAsset(),
+      isLayerDecomposition: false,
+    };
+    expect(canCompositeAssetLayers(a)).toBe(false);
+  });
+
+  it("图层资产但 payload.layers 缺失（历史 ToolsTab 数据）→ false", () => {
+    const a: Asset = {
+      ...makeLayerAsset(),
+      // 模拟历史数据：只有 urls 没有 layers
+      payload: { urls: ["b.png", "l1.png", "l2.png"] },
+    };
+    expect(canCompositeAssetLayers(a)).toBe(false);
+  });
+
+  it("图层资产只有底图层（layers.length === 1）→ false", () => {
+    const a = makeLayerAsset({
+      payload: {
+        urls: [],
+        layers: [{ url: "base.png", zIndex: 0 }],
+      },
+    });
+    expect(canCompositeAssetLayers(a)).toBe(false);
+  });
+
+  it("图层资产所有非底图层都缺 bbox → false", () => {
+    const a = makeLayerAsset({
+      payload: {
+        urls: [],
+        layers: [
+          { url: "base.png", zIndex: 0 },
+          { url: "l1.png", zIndex: 1 }, // 缺 bbox
+          { url: "l2.png", zIndex: 2 }, // 缺 bbox
+        ],
+      },
+    });
+    expect(canCompositeAssetLayers(a)).toBe(false);
+  });
+
+  it("图层资产至少 1 个非底图层有合法 bbox → true", () => {
+    const a = makeLayerAsset({
+      payload: {
+        urls: [],
+        layers: [
+          { url: "base.png", zIndex: 0 },
+          { url: "l1.png", zIndex: 1, boundingBox: { normalized: [0, 0, 500, 500] } },
+        ],
+      },
+    });
+    expect(canCompositeAssetLayers(a)).toBe(true);
+  });
+
+  it("多层 + 部分 bbox 缺失（只要 1 个合法） → true", () => {
+    const a = makeLayerAsset({
+      payload: {
+        urls: [],
+        layers: [
+          { url: "base.png", zIndex: 0 },
+          { url: "l1.png", zIndex: 1 }, // 缺 bbox
+          { url: "l2.png", zIndex: 2 }, // 缺 bbox
+          { url: "l3.png", zIndex: 3, boundingBox: { normalized: [100, 100, 800, 800] } },
+        ],
+      },
+    });
+    expect(canCompositeAssetLayers(a)).toBe(true);
+  });
+
+  it("非底图层 bbox 全部非法（反向 / 零面积）→ false", () => {
+    const a = makeLayerAsset({
+      payload: {
+        urls: [],
+        layers: [
+          { url: "base.png", zIndex: 0 },
+          // 反向：r < l
+          { url: "rev.png", zIndex: 1, boundingBox: { normalized: [800, 0, 200, 1000] } },
+          // 零面积：r === l
+          { url: "zero.png", zIndex: 2, boundingBox: { normalized: [100, 100, 100, 500] } },
+        ],
+      },
+    });
+    expect(canCompositeAssetLayers(a)).toBe(false);
+  });
+
+  it("payload.layers 为空数组 → false（防止空合成）", () => {
+    const a = makeLayerAsset({
+      payload: { urls: [], layers: [] },
+    });
+    expect(canCompositeAssetLayers(a)).toBe(false);
   });
 });
