@@ -251,14 +251,23 @@ struct ApiImage {
     error: Option<ApiError>,
 }
 
+/// 5.0 Pro 图层边界框。
+///
+/// **数值类型**: 用 `f64` 而不是 `i32`。5.0 Pro 文档示例给的是整数
+/// (`[220, 432, 777, 1000]`),但实际响应偶发返回浮点
+/// (`[220.5, 432.1, 777.3, 1000.0]`)。`i32` 解析浮点会 silent 失败,整条
+/// `bounding_box` 变成 `None` → 前端 `layerRectNormalized` 全部回退"铺满" →
+/// 合成视图"所有图层叠在一起"。改 `f64` 兼容两种,前端 `number[]` 已能接。
+///
+/// 历史资产兼容: 旧资产 SQLite 里存的整数 JSON 也能被 `f64` 解析,无需迁移。
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct BoundingBox {
     /// 输出底图坐标系绝对像素坐标 [left, top, right, bottom]
     #[serde(default)]
-    pub absolute: Option<Vec<i32>>,
+    pub absolute: Option<Vec<f64>>,
     /// 归一化坐标 [left, top, right, bottom]（0-1000）
     #[serde(default)]
-    pub normalized: Option<Vec<i32>>,
+    pub normalized: Option<Vec<f64>>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -432,6 +441,30 @@ pub async fn generate(
             anyhow::bail!("API error ({code}): {msg}");
         }
         anyhow::bail!("API returned no images");
+    }
+    // P0+：图层拆分场景的 bbox 健康度诊断。排查"图层全叠在一起"问题：
+    // 如果这里看到 boundingBox 都是 None,说明 5.0 Pro API 当次没返 bbox,
+    // 前端 fallback 铺满不是 bug,而是上游数据缺失。
+    if out.iter().any(|img| img.z_index.is_some() && img.z_index != Some(0)) {
+        let sample: Vec<_> = out
+            .iter()
+            .take(3)
+            .map(|img| {
+                (
+                    img.z_index,
+                    img.name.as_deref(),
+                    img.size.as_deref(),
+                    img.bounding_box
+                        .as_ref()
+                        .map(|bb| (bb.absolute.clone(), bb.normalized.clone())),
+                )
+            })
+            .collect();
+        log::info!(
+            "jimeng layer_decomposition response: data.len={}, sample_bboxes={:?}",
+            out.len(),
+            sample
+        );
     }
     Ok(GenerateResult {
         images: out,

@@ -31,6 +31,8 @@ interface Props {
   transparent: boolean;
   setTransparent: (b: boolean) => void;
   generating: boolean;
+  /** 当前输入模式：决定底部 "正在..." 提示文案 */
+  inputMode?: "chat" | "generate" | "tools";
   onSubmit: () => void;
 }
 
@@ -56,6 +58,7 @@ export default function PromptBar({
   transparent,
   setTransparent,
   generating,
+  inputMode = "generate",
   onSubmit,
 }: Props) {
   const toast = useToast();
@@ -282,7 +285,11 @@ export default function PromptBar({
       </div>
       {generating && (
         <p className="text-xs text-text-secondary text-center animate-pulse">
-          正在调用即梦 API，请稍候（最多 ~3 分钟）...
+          {inputMode === "chat"
+            ? "Agent 处理中…（LLM 流式输出 / 工具调用）"
+            : inputMode === "generate"
+            ? "正在调用即梦 API，请稍候（最多 ~3 分钟）…"
+            : "工具执行中…"}
         </p>
       )}
     </div>

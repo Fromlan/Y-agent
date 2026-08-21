@@ -693,12 +693,15 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
       costMs: 0,
       isDemo: false,
     };
+    // 文案更短 + 加引导：把"去配置 LLM"做成可点击的"打开设置"按钮
+    // P1 改进 7：原版整条都塞同一段长句，现在拆成"短结论" + "PlanCard 内的提示"
+    const content = "已规划好生成计划，点下方「开始生成」即可。\n（未配置 Agent LLM，规则路由模式。）";
     setMessages((prev) => [
       ...prev,
       {
         id: agentId,
         role: "agent",
-        content: "（未配置 LLM，使用规则路由。请点下方「开始生成」或继续发消息调整计划。）",
+        content,
         events: [...events],
         skillLog,
         createdAt: Date.now(),
@@ -709,7 +712,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     persistInsert(chatSessionId!, {
       id: agentId,
       role: "agent",
-      content: "（未配置 LLM，使用规则路由。请点下方「开始生成」或继续发消息调整计划。）",
+      content,
       events: [...events],
       skillLog,
       pendingPlan: plan,
@@ -1013,6 +1016,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
           transparent={transparent}
           setTransparent={setTransparent}
           generating={generating}
+          inputMode={inputMode}
           onSubmit={onSubmit}
         />
         )}

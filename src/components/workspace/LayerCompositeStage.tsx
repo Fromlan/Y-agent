@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { ZoomIn, ZoomOut, Maximize2, ImageIcon, Layers } from "lucide-react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { ZoomIn, ZoomOut, Maximize2, ImageIcon, Layers, AlertTriangle } from "lucide-react";
 import type { GeneratedImage } from "@/lib/types";
 import { imageInput } from "@/lib/types";
 import SafeImage from "@/components/shared/SafeImage";
-import { parseBaseSize, layerRectNormalized } from "@/lib/layer-view";
+import { parseBaseSize, layerRectNormalized, getBboxHealth } from "@/lib/layer-view";
 import { resolveImageUrl } from "@/lib/image-resolver";
 
 interface Props {
@@ -99,6 +99,15 @@ export default function LayerCompositeStage({
     setErroredLayers(new Set());
   }, [layers.length]);
 
+  // P0+：bbox 健康度。缺 bbox 的图层不再"铺满画布"（会跟其它图层重叠），
+  // 改为渲染一个虚线占位块 + 顶部 banner 提示。
+  // 父组件 AssetDetailDialog 也会读这个值做整体降级判断（所有图层都缺 → 自动切单图层）。
+  const bboxHealth = useMemo(() => getBboxHealth(layers), [layers]);
+  const missingSet = useMemo(
+    () => new Set(bboxHealth.missing),
+    [bboxHealth.missing]
+  );
+
   const reset = useCallback(() => {
     setScale(1);
     setTx(0);
@@ -171,6 +180,19 @@ export default function LayerCompositeStage({
         }}
       />
 
+      {/* P0+：bbox 缺失警告 banner。有图层缺位置信息时显示，让用户立刻看到问题。 */}
+      {bboxHealth.missing.length > 0 && (
+        <div
+          className="absolute top-2 left-1/2 -translate-x-1/2 z-20 px-2.5 py-1
+            rounded bg-amber-500/95 text-white text-[10px] flex items-center gap-1
+            shadow-md pointer-events-none"
+          title="这些图层的 boundingBox 数据缺失（API 没返或解析失败），按 PS 定位不可用"
+        >
+          <AlertTriangle className="w-3 h-3" />
+          {bboxHealth.missing.length} 个图层位置信息缺失
+        </div>
+      )}
+
       {/* 缩放 + 平移容器 */}
       <div
         className="absolute inset-0"
@@ -194,6 +216,11 @@ export default function LayerCompositeStage({
           const n = layerRectNormalized(img);
           const errored = erroredLayers.has(i);
           const isBase = (img.zIndex ?? 0) === 0;
+          // P0+：bbox 缺失时不渲染图。layerRectNormalized 在缺 bbox 时会回退铺满
+          // [0, 0, 1, 1]，那样会和底图/其它图层 100% 重叠，视觉上"全部叠在一起"。
+          // 改成虚线占位 + 标注"缺位置"，让用户知道问题出在数据上。
+          // 底图层（zIndex=0）即使缺 bbox 也保留底图本身（位置就是全画布）。
+          const bboxMissing = missingSet.has(i) && !isBase;
           return (
             <div
               key={i}
@@ -204,11 +231,18 @@ export default function LayerCompositeStage({
                 width: `${n.width * 100}%`,
                 height: `${n.height * 100}%`,
               }}
-              title={img.name}
+              title={bboxMissing ? `${img.name ?? `图层 ${i + 1}`}（缺位置信息）` : img.name}
             >
               {errored ? (
                 <div className="w-full h-full flex items-center justify-center bg-bg-base/60 text-text-muted">
                   <ImageIcon className="w-6 h-6 opacity-50" />
+                </div>
+              ) : bboxMissing ? (
+                <div className="w-full h-full border-2 border-dashed border-warning/70
+                  bg-warning/10 flex flex-col items-center justify-center
+                  text-[9px] text-warning gap-0.5 select-none">
+                  <AlertTriangle className="w-3 h-3" />
+                  <span>缺位置</span>
                 </div>
               ) : (
                 <SafeImage
@@ -229,7 +263,12 @@ export default function LayerCompositeStage({
                     }
                   }}
                   draggable={false}
-                  className="w-full h-full"
+                  // 关键: 加 block —— <img> 默认 inline-block 会有"天然宽高"行为,
+                  // 当图层 PNG 天然尺寸(如 bag 714x736)远大于 bbox(如 13%×8.9% ≈ 80×55)
+                  // 时, 部分浏览器会让图片按天然尺寸渲染,溢出 bbox 被外层 overflow-hidden
+                  // 裁掉,视觉上"图层被放大到撑满"。加 block 让 w-full/h-full 真正生效,
+                  // objectFit: contain 才会按 bbox 缩放。
+                  className="block w-full h-full"
                   style={{
                     imageRendering: scale > 2 ? "pixelated" : "auto",
                     // 关键：图层 image 的原始尺寸 = 底图尺寸（如 1024x1536），

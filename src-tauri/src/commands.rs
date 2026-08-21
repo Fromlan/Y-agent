@@ -17,6 +17,146 @@ fn map_err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
+/// 把 image[] 数组里所有 "本应用可读" 的 URL 转成 dataURL：
+/// - `http://asset.localhost/<encoded-path>` → 从 app_data_dir/assets 解出绝对路径，读字节，转 data URL
+/// - `asset://localhost/<encoded-path>` → 同上
+/// - `https://...` / `http://...`（非 asset 域名）→ 保留原样（外部 URL，火山方舟直接 fetch）
+/// - `data:image/...;base64,...` → 保留原样
+/// - 空字符串 / 其它 → 保留原样
+///
+/// 解决前端 "ToolsTab / 局部编辑" 把 localPath 通过 `image-resolver` 转成
+/// `http://asset.localhost/...` 后，jimeng 服务端在公网 fetch 不到
+/// （错误: dial tcp [::1]:80: connect: connection refused）的问题。
+fn resolve_local_image_urls(images: Vec<String>, app: &AppHandle) -> Vec<String> {
+    let assets_root = match app.path().app_data_dir() {
+        Ok(d) => d.join("assets"),
+        Err(_) => return images,
+    };
+    let canonical_assets = assets_root
+        .canonicalize()
+        .unwrap_or_else(|_| assets_root.clone());
+
+    images
+        .into_iter()
+        .map(|url| {
+            // 1) data: / 空字符串 / 其它：原样
+            if url.is_empty() || url.starts_with("data:") {
+                return url;
+            }
+            // 2) 只处理 asset 协议，外部 https URL 保留
+            let encoded = if let Some(rest) = url.strip_prefix("http://asset.localhost/") {
+                rest
+            } else if let Some(rest) = url.strip_prefix("https://asset.localhost/") {
+                rest
+            } else if let Some(rest) = url.strip_prefix("asset://localhost/") {
+                rest
+            } else if let Some(rest) = url.strip_prefix("asset://") {
+                rest
+            } else {
+                return url;
+            };
+            // 3) URL decode（路径分隔符、空格、中文等）
+            let decoded = match url_decode(encoded) {
+                Ok(s) => s,
+                Err(_) => return url,
+            };
+            let p = std::path::PathBuf::from(&decoded);
+            // 4) 必须在 app_data_dir/assets 下（防越权）
+            let canonical = match p.canonicalize() {
+                Ok(c) => c,
+                Err(_) => return url,
+            };
+            if !canonical.starts_with(&canonical_assets) {
+                return url;
+            }
+            // 5) 读字节，按 magic bytes 推断 MIME
+            let bytes = match std::fs::read(&canonical) {
+                Ok(b) => b,
+                Err(_) => return url,
+            };
+            let mime = match infer_mime(&bytes, &canonical) {
+                Some(m) => m,
+                None => return url,
+            };
+            format!("data:{};base64,{}", mime, B64.encode(&bytes))
+        })
+        .collect()
+}
+
+/// 极简 URL-decode（只处理 %XX，其它原样）。失败返回 Err 让调用方保留原 URL。
+fn url_decode(s: &str) -> Result<String, String> {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = hex_val(bytes[i + 1]);
+            let lo = hex_val(bytes[i + 2]);
+            match (hi, lo) {
+                (Some(h), Some(l)) => {
+                    out.push((h << 4) | l);
+                    i += 3;
+                }
+                _ => {
+                    out.push(bytes[i]);
+                    i += 1;
+                }
+            }
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).map_err(|e| format!("url decode utf8: {e}"))
+}
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// 按 magic bytes 推断图片 MIME。和 read_image_data_url 共用同一套规则。
+fn infer_mime(bytes: &[u8], path: &Path) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if bytes.starts_with(b"\xff\xd8\xff") {
+        Some("image/jpeg")
+    } else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else {
+        // SVG / XML 文本头
+        let head = bytes
+            .iter()
+            .take_while(|b| b.is_ascii_whitespace())
+            .count();
+        if head < bytes.len()
+            && (bytes[head..].starts_with(b"<?xml") || bytes[head..].starts_with(b"<svg"))
+        {
+            Some("image/svg+xml")
+        } else {
+            // 扩展名兜底
+            let ext = path
+                .extension()
+                .and_then(|s| s.to_str())
+                .unwrap_or("png")
+                .to_lowercase();
+            Some(match ext.as_str() {
+                "jpg" | "jpeg" => "image/jpeg",
+                "webp" => "image/webp",
+                "gif" => "image/gif",
+                "svg" => "image/svg+xml",
+                _ => "image/png",
+            })
+        }
+    }
+}
+
 /// 资产本地兜底完成事件 payload(camelCase 序列化给前端)。
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -113,6 +253,10 @@ pub async fn jimeng_generate(
     state: State<'_, Mutex<AppState>>,
     app: AppHandle,
 ) -> Result<JsGenerateResponse, String> {
+    // P5+：把前端传来的 http://asset.localhost/... 类型的本地资产 URL
+    // 转成 dataURL，jimeng 公网 API 才能 fetch（修复
+    // "ToolsTab / 局部编辑 / 图层拆分" 报 dial tcp [::1]:80 connection refused）
+    let resolved_images = resolve_local_image_urls(params.image.unwrap_or_default(), &app);
     let (api_key, p) = {
         let s = state.lock().map_err(map_err)?;
         let enc = s.storage.get_kv(KEY_KV).map_err(map_err)?;
@@ -124,7 +268,11 @@ pub async fn jimeng_generate(
             GenerateImageParams {
                 model: params.model,
                 prompt: params.prompt,
-                image: params.image,
+                image: if resolved_images.is_empty() {
+                    None
+                } else {
+                    Some(resolved_images)
+                },
                 size: params.size,
                 sequential_image_generation: params.sequential,
                 sequential_image_generation_options: params
@@ -194,6 +342,9 @@ pub async fn jimeng_generate_stream(
     state: State<'_, Mutex<AppState>>,
     app: AppHandle,
 ) -> Result<String, String> {
+    // P5+：把前端传来的 http://asset.localhost/... 本地资产 URL 转成 dataURL
+    // （同 jimeng_generate 注释）
+    let resolved_images = resolve_local_image_urls(params.image.unwrap_or_default(), &app);
     let (api_key, p) = {
         let s = state.lock().map_err(map_err)?;
         let enc = s.storage.get_kv(KEY_KV).map_err(map_err)?;
@@ -205,7 +356,11 @@ pub async fn jimeng_generate_stream(
             GenerateImageParams {
                 model: params.model,
                 prompt: params.prompt,
-                image: params.image,
+                image: if resolved_images.is_empty() {
+                    None
+                } else {
+                    Some(resolved_images)
+                },
                 size: params.size,
                 sequential_image_generation: params.sequential,
                 sequential_image_generation_options: params
@@ -633,11 +788,15 @@ pub fn delete_asset(
 /// - 普通生成：payload.urls
 /// - 图层拆分：layers 数组的 url（按 zIndex 升序）
 fn extract_urls_for_backfill(payload: &Value) -> Vec<String> {
+    // 图层拆分场景的 payload 固定带 `urls: []`，所以不能因为 urls 是空数组
+    // 就直接返回空列表；空数组要落到 layers 分支，否则图层本地路径永远不会补下。
     if let Some(arr) = payload.get("urls").and_then(|v| v.as_array()) {
-        return arr
-            .iter()
-            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-            .collect();
+        if !arr.is_empty() {
+            return arr
+                .iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect();
+        }
     }
     if let Some(arr) = payload.get("layers").and_then(|v| v.as_array()) {
         let mut pairs: Vec<(i32, String)> = arr
@@ -660,10 +819,59 @@ fn extract_urls_for_backfill(payload: &Value) -> Vec<String> {
 
 /// 从 payload 里抽出已有的 localPaths（按位置平行于 urls），缺位填 None。
 fn extract_local_paths_for_backfill(payload: &Value) -> Vec<Option<String>> {
-    let raw = payload
-        .get("localPaths")
-        .or_else(|| payload.get("layerLocalPaths"))
-        .and_then(|v| v.as_array());
+    // 图层拆分 payload 固定带 `urls: []` + `layers`，应优先读 layerLocalPaths；
+    // 普通 payload 才读 localPaths。避免历史数据里意外写入的 localPaths 干扰。
+    let has_urls = payload
+        .get("urls")
+        .and_then(|v| v.as_array())
+        .map(|a| !a.is_empty())
+        .unwrap_or(false);
+    let has_layers = payload
+        .get("layers")
+        .and_then(|v| v.as_array())
+        .map(|a| !a.is_empty())
+        .unwrap_or(false);
+    let is_layer_mode = !has_urls && has_layers;
+    let raw = if is_layer_mode {
+        payload
+            .get("layerLocalPaths")
+            .or_else(|| payload.get("localPaths"))
+    } else {
+        payload
+            .get("localPaths")
+            .or_else(|| payload.get("layerLocalPaths"))
+    }
+    .and_then(|v| v.as_array());
+
+    if is_layer_mode {
+        // 和 extract_urls_for_backfill 一样按 zIndex 排序后再返回，
+        // 避免 layers / layerLocalPaths 初始顺序与 zIndex 不一致时对错位。
+        let layers = payload
+            .get("layers")
+            .and_then(|v| v.as_array())
+            .map(|a| a.as_slice())
+            .unwrap_or_default();
+        let mut pairs: Vec<(i32, Option<String>)> = layers
+            .iter()
+            .enumerate()
+            .map(|(i, layer)| {
+                let z = layer
+                    .get("zIndex")
+                    .or_else(|| layer.get("z_index"))
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0) as i32;
+                let p = raw
+                    .and_then(|arr| arr.get(i))
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string());
+                (z, p)
+            })
+            .collect();
+        pairs.sort_by_key(|(z, _)| *z);
+        return pairs.into_iter().map(|(_, p)| p).collect();
+    }
+
     let urls_len = extract_urls_for_backfill(payload).len();
     let mut out: Vec<Option<String>> = (0..urls_len).map(|_| None).collect();
     if let Some(arr) = raw {
@@ -729,14 +937,70 @@ fn write_local_paths_to_payload(
         }
     }
 
-    // 选择字段：urls 模式写 localPaths，图层模式写 layerLocalPaths
-    let is_layer_mode = !obj.get("urls").map(|v| v.is_array()).unwrap_or(false)
-        && obj.get("layers").map(|v| v.is_array()).unwrap_or(false);
+    // 选择字段：urls 模式写 localPaths，图层模式写 layerLocalPaths。
+    // 注意：图层拆分 payload 的 urls 是空数组（buildAssetPayload 会写入 urls: []），
+    // 所以不能用"urls 是否数组"判断，而要按"有没有非空 urls / 有没有 layers"判断。
+    let has_urls = obj
+        .get("urls")
+        .and_then(|v| v.as_array())
+        .map(|a| !a.is_empty())
+        .unwrap_or(false);
+    let has_layers = obj
+        .get("layers")
+        .and_then(|v| v.as_array())
+        .map(|a| !a.is_empty())
+        .unwrap_or(false);
+    let is_layer_mode = !has_urls && has_layers;
     let field = if is_layer_mode { "layerLocalPaths" } else { "localPaths" };
+    // P0+：bbox 链路诊断。写回前打一次 bbox 摘要,写回后再打一次。
+    // 如果 before 都有、after 没了 → 说明 `as_object_mut().insert` 之外
+    // 还有路径在丢字段（理论上不应该，但加 log 兜底确认）。
+    if is_layer_mode {
+        let bbox_before: Vec<Option<Vec<f64>>> = obj
+            .get("layers")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .map(|l| {
+                        l.get("boundingBox")
+                            .and_then(|bb| bb.get("normalized"))
+                            .and_then(|n| n.as_array())
+                            .map(|a| a.iter().filter_map(|x| x.as_f64()).collect())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        log::debug!(
+            "write_local_paths_to_payload: before bbox_count={} sample_normalized={:?}",
+            bbox_before.len(),
+            bbox_before.iter().take(3).collect::<Vec<_>>()
+        );
+    }
     obj.insert(
         field.into(),
         Value::Array(cleaned.into_iter().map(Value::String).collect()),
     );
+    if is_layer_mode {
+        let bbox_after: Vec<Option<Vec<f64>>> = obj
+            .get("layers")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .map(|l| {
+                        l.get("boundingBox")
+                            .and_then(|bb| bb.get("normalized"))
+                            .and_then(|n| n.as_array())
+                            .map(|a| a.iter().filter_map(|x| x.as_f64()).collect())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        log::debug!(
+            "write_local_paths_to_payload: after bbox_count={} sample_normalized={:?}",
+            bbox_after.len(),
+            bbox_after.iter().take(3).collect::<Vec<_>>()
+        );
+    }
 
     let new_payload_str = serde_json::to_string(&payload).map_err(map_err)?;
     let now = chrono::Utc::now().timestamp_millis();
@@ -1397,6 +1661,15 @@ pub fn explain_error(raw: String) -> String {
         "5.0 Pro 的「背景透明」要求输入图是带至少一个透明像素的 PNG（不透明 PNG、JPEG、WebP 都会被拒）。通常 Y-agent 已经自动处理了左上角 1 像素，若仍报此错，多半是源图不是真 PNG（例如 .png 扩展名但实际是 JPEG 字节），请换一张真 PNG 再试。"
     } else if lower.contains("internalserviceerror") {
         "服务端内部错误（通常 5xx）。重试一次，或等几分钟后回来。"
+    } else if lower.contains("dial tcp")
+        || lower.contains("connection refused")
+        || (lower.contains("error while downloading") && (lower.contains("asset.localhost") || lower.contains("asset://")))
+    {
+        // 修复：原始 raw 错误可能已经是 dataURL（Rust 端自动转过），但 explainError 看到的可能是
+        // 用户界面上展示的二次错误。匹配 dial tcp / connection refused / asset.localhost fetch 失败
+        // — 通常意味着 jimeng API 在公网 fetch 不到本地资源（理论上 Rust 已经转 dataURL，
+        // 但保留这条 hint 兜底非本地资产直传 URL 失败场景）。
+        "服务端无法访问输入图 URL（火山方舟在公网 fetch 不到）。通常 Y-agent 已自动把本地资产转 dataURL 内联到请求里，若仍报此错，请检查源图是否被外部删除。"
     } else if lower.contains("invalidparameter") {
         "参数错误。常见原因：size 写了大写（应是 `2k` 不是 `2K`）；或单图请求去掉了 `sequential_image_generation` 字段；或图层拆分场景误传 `output_format: jpeg`。"
     } else if lower.contains("authentication") {

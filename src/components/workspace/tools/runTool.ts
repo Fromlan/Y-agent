@@ -78,21 +78,48 @@ async function runToolSync(
   params: RunToolParams,
   onProgress?: (p: ToolProgress) => void
 ): Promise<Asset> {
+  const t0 = Date.now();
   onProgress?.({ phase: "requesting", message: `调用 ${params.modelName}…` });
   const resp = await generateImage(await buildGenParams(params));
 
-  onProgress?.({ phase: "downloading", message: "下载到本地缓存…" });
-  // 注意：Rust 端 jimeng_generate 已经 download_to_cache 了，这里只是 UI 反馈
-
   onProgress?.({ phase: "persisting", message: "写入资产库…" });
-  const localPaths = resp.images
-    .map((i) => i.localPath)
-    .filter((p): p is string => !!p);
+  // 用空串占位缺失项，保持数组与 urls/layers 一一对应；空串在入库/兜底时视为缺失。
+  const localPaths = resp.images.map((i) => i.localPath ?? "");
   const actualFormat = resolveFormat({
     respFormat: resp.output_format,
     reqFormat: params.outputFormat,
     modelId: params.modelId,
   });
+  const costMs = Date.now() - t0;
+  // 图层拆分（5.0 Pro）必须把完整 layers 存进 payload：
+  // 每个 layer 都带 zIndex / name / size / boundingBox，合成视图才能按 bbox 定位。
+  // 之前这里只存 urls，导致详情页 flatAssetImages 拿不到 zIndex/bbox，
+  // 所有图层被当作"底图"铺满画布 → 视觉上"全部放大、叠在中心"。
+  const isLayer = !!params.layerDecomposition;
+  const payload = isLayer
+    ? buildAssetPayload(
+        {
+          urls: [],
+          layers: resp.images,
+          usage: resp.usage,
+          isTransparent: !!params.isTransparent,
+          layerLocalPaths: localPaths,
+          parentAssetId: params.sourceAssetId,
+          bbox: params.bbox,
+        },
+        actualFormat
+      )
+    : buildAssetPayload(
+        {
+          urls: resp.images.map((i) => i.url),
+          usage: resp.usage,
+          isTransparent: !!params.isTransparent,
+          localPaths,
+          parentAssetId: params.sourceAssetId,
+          bbox: params.bbox,
+        },
+        actualFormat
+      );
   const asset = await createAsset({
     projectId: params.projectId,
     prompt: params.prompt,
@@ -100,19 +127,9 @@ async function runToolSync(
     modelName: params.modelName,
     size: params.size,
     refCount: params.image?.length ?? 0,
-    costMs: 0,
-    isLayerDecomposition: !!params.layerDecomposition,
-    payload: buildAssetPayload(
-      {
-        urls: resp.images.map((i) => i.url),
-        usage: resp.usage,
-        isTransparent: !!params.isTransparent,
-        localPaths,
-        parentAssetId: params.sourceAssetId,
-        bbox: params.bbox,
-      },
-      actualFormat
-    ),
+    costMs,
+    isLayerDecomposition: isLayer,
+    payload,
   });
 
   onProgress?.({
@@ -132,6 +149,7 @@ async function runToolStream(
   params: RunToolParams,
   onProgress?: (p: ToolProgress) => void
 ): Promise<Asset> {
+  const t0 = Date.now();
   const totalCount = params.maxImages ?? 1;
   const partials: { url: string; index: number; localPath?: string }[] = [];
 
@@ -149,7 +167,7 @@ async function runToolStream(
         partials.push({ url, index, localPath });
         onProgress?.({
           phase: "downloading",
-          message: `已就绪 ${partials.length} / ${totalCount} 张`,
+          message: `已生成 ${partials.length} / ${totalCount} 张`,
           partialCount: partials.length,
           totalCount,
         });
@@ -163,15 +181,15 @@ async function runToolStream(
       onCompleted: async (info) => {
         try {
           onProgress?.({ phase: "persisting", message: "写入资产库…" });
-          const localPaths = partials
-            .map((p) => p.localPath)
-            .filter((p): p is string => !!p);
           const sorted = partials.sort((a, b) => a.index - b.index);
+          // localPaths 必须与 sorted urls 同序，不能按 partial 到达顺序算。
+          const localPaths = sorted.map((p) => p.localPath ?? "");
           const actualFormat = resolveFormat({
             respFormat: (info as { output_format?: string }).output_format,
             reqFormat: params.outputFormat,
             modelId: params.modelId,
           });
+          const costMs = Date.now() - t0;
           const asset = await createAsset({
             projectId: params.projectId,
             prompt: params.prompt,
@@ -179,7 +197,7 @@ async function runToolStream(
             modelName: params.modelName,
             size: params.size,
             refCount: params.image?.length ?? 0,
-            costMs: 0,
+            costMs,
             isLayerDecomposition: !!params.layerDecomposition,
             payload: buildAssetPayload(
               {

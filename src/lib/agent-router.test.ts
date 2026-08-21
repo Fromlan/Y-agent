@@ -90,3 +90,43 @@ describe("route — P7：用户选择优先（不再被 Skill 覆盖）", () => 
     expect(r.suggestedModelName).toBeUndefined();
   });
 });
+
+/**
+ * Bug 3 回归：KEYWORD_MAP 之前只覆盖 6/13 Skill，导致
+ * "信息图" / "图层拆分" / "局部编辑" 等自然语言输入落到 fallback。
+ * 修复后必须命中对应 Skill。
+ */
+describe("route — 关键词命中（覆盖全部 13 个 builtin Skill）", () => {
+  const cases: Array<{ input: string; expectedId: string }> = [
+    // 基础生图
+    { input: "画一个三视图角色",     expectedId: "character-turnaround" },
+    { input: "做个九宫格表情",       expectedId: "expression-grid" },
+    { input: "做一张角色设定卡",     expectedId: "character-sheet" },
+    { input: "出一张气氛图",         expectedId: "scene-mood" },
+    { input: "画一组 UI 图标",       expectedId: "ui-icons" },
+    { input: "做一个 KV 海报",       expectedId: "kv-poster" },
+    // 组图
+    { input: "角色一致性套图",       expectedId: "character-consistency-set" },
+    { input: "场景光影早午晚夜",     expectedId: "scene-mood-light-variants" },
+    { input: "商品图主图电商",       expectedId: "product-shot-pack" },
+    // 5.0 Pro 专属
+    { input: "透明图标 icon pack",   expectedId: "icon-pack-transparent" },
+    { input: "图层拆分",             expectedId: "layer-separation" },
+    { input: "局部编辑改局部",       expectedId: "local-edit-bbox" },
+    { input: "信息图海报",           expectedId: "infographic-poster" },
+  ];
+
+  for (const c of cases) {
+    it(`"${c.input}" → ${c.expectedId}`, () => {
+      const r = route(c.input, defaultModel, []);
+      expect(r.triggerType).toBe("keyword");
+      expect(r.skill?.id).toBe(c.expectedId);
+    });
+  }
+
+  it("英文关键词 character consistency 命中 character-consistency-set", () => {
+    const r = route("character consistency set", defaultModel, []);
+    expect(r.triggerType).toBe("keyword");
+    expect(r.skill?.id).toBe("character-consistency-set");
+  });
+});

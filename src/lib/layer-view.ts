@@ -102,3 +102,53 @@ export function layerRectNormalized(
   b = Math.max(0, Math.min(1, b));
   return { left: l, top: t, width: r - l, height: b - t };
 }
+
+/**
+ * 派生一组图层的 bbox 健康度。
+ *
+ * 用于:
+ * - `LayerCompositeStage` 决定是否显示 "位置信息缺失" 警告 banner
+ * - `AssetDetailDialog` 决定整体降级到单图层视图
+ * - 任何依赖 bbox 的 UI（资产卡 mini 缩略图等）
+ *
+ * 判定标准（"ok"）：
+ * - `boundingBox.normalized` 存在
+ * - 长度恰好 4
+ * - 4 个值都是有限数（不是 `NaN` / `Infinity`）
+ *
+ * 底图层（zIndex=0）即使缺 bbox 也算 ok — 底图本就铺满，不影响合成。
+ * 这条规则避免"5.0 Pro 不给底图返 bbox（合理）"被误判为缺失。
+ *
+ * 返回值:
+ * - `ok`: 健康图层数（>=0）
+ * - `missing`: 缺 bbox 的图层 indices 列表（用于"哪一个有问题"定位）
+ * - `total`: 输入的图层总数
+ */
+export function getBboxHealth(layers: GeneratedImage[]): {
+  ok: number;
+  missing: number[];
+  total: number;
+} {
+  const missing: number[] = [];
+  let ok = 0;
+  for (let i = 0; i < layers.length; i++) {
+    const img = layers[i];
+    // 底图层：缺 bbox 视为健康（应当铺满）
+    const isBase = (img.zIndex ?? 0) === 0;
+    if (isBase) {
+      ok += 1;
+      continue;
+    }
+    const n = img.boundingBox?.normalized;
+    if (
+      n &&
+      n.length === 4 &&
+      n.every((v) => Number.isFinite(v))
+    ) {
+      ok += 1;
+    } else {
+      missing.push(i);
+    }
+  }
+  return { ok, missing, total: layers.length };
+}

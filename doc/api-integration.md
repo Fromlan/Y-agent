@@ -303,6 +303,64 @@ buildAssetPayload({ layers, layerLocalPaths, ... })
 - 合成视图下：键盘 ←/→ 禁用（没有"当前图层"概念）；缩略图条 opacity-60 淡化，hover 提示"点击切到单图层视图"。
 - 选中图层（点击行）会在合成画布上画 accent 描边 + 名称 tag；行点击在单图层模式切 idx，在合成模式置 selectedLayerIdx。
 
+#### 1.7.2 bbox 数据流与排错指南（M3+ 补丁）
+
+**完整数据流**：
+
+```
+5.0 Pro API
+  └─ resp.data[].{z_index, name, description, size, output_format,
+                  bounding_box.{absolute, normalized}, url, isBase64}
+       │
+       ▼ Rust 解析 (src-tauri/src/jimeng.rs:226-262)
+  GeneratedImage (Rust struct, jimeng.rs:264-291)
+    #[serde(rename_all = "camelCase")]
+    -> { url, isBase64, zIndex, name, description, size,
+         outputFormat, boundingBox: { absolute, normalized }, error, localPath }
+       │
+       ▼ serde JSON → Tauri IPC
+  GeneratedImage (TS src/lib/types.ts:199-215)
+    -> { url, zIndex?, name?, description?, size?, outputFormat?,
+         boundingBox?: { absolute?: number[], normalized?: number[] }, ... }
+       │
+       ▼ buildAssetPayload (src/lib/asset-payload.ts:96-98)
+  AssetPayload.layers = GeneratedImage[]
+       │
+       ▼ Tauri command create_asset (commands.rs:670-690)
+  payload 整个 JSON 字符串塞 SQLite (TEXT 列)
+       │
+       ▼ list_assets / read (commands.rs:728-755)
+  payload 读出 → serde_json::Value → 序列化为 camelCase → 前端
+       │
+       ▼ AssetDetailDialog + LayerCompositeStage
+  按 boundingBox.normalized 定位图层
+```
+
+**数值类型**（重要）：Rust 端 `BoundingBox.normalized: Option<Vec<f64>>`、前端 `number[]`。**5.0 Pro 文档示例是整数，但实测偶发浮点**（如 `[220.5, 432.1, 777.3, 1000.0]`）。Rust 改 f64 兼容两种；前端 `number[]` 已能接。
+
+**常见症状 + 排错**：
+
+| 症状 | 根因 | 排查 |
+|---|---|---|
+| 合成视图所有图层**叠在一起**（看起来像全屏同尺寸） | bbox 缺失/无效,`layerRectNormalized` 全部 fallback 铺满 | ① Rust 端 `log::info!` 看 `jimeng layer_decomposition response` 是否有 bbox ② 改 `boundingBox.normalized` 类型 (5.0 Pro 实测可能返浮点,i32 解析失败) ③ SQLite 写回链路是否丢字段 (`log::debug!` before/after) |
+| 部分图层位置错位 | 个别图层 bbox 缺失,其它正常 | P0+ 防御: 缺 bbox 图层在合成视图里**不渲染图**(改成虚线占位"缺位置"字样),避免铺满重叠;合成画布顶部显示 `N 个图层位置信息缺失` 警告 banner |
+| 详情对话框**自动切到单图层** | 所有非底图层的 bbox 都缺失 | 顶部黄条提示"所有图层的 boundingBox 位置信息缺失,合成视图不可用"。常见原因:用了不支持的旧模型/endpoint,或 5.0 Pro API 整体返 bbox 失败 |
+| 底图被压成竖长条 / 容器比例错 | 5.0 Pro `size` 字段偶发缺失或不规范 | `parseBaseSize` 回退 2048x2048 + `LayerCompositeStage` onLoad 校正真实 natural size 兜底 |
+| 资产卡看不到 mini 合成缩略图 | 资产非图层拆分,或 bbox 全部缺失 | 正常行为:只有 `isLayerDecomposition && layers.length > 0 && 至少有 1 个有 bbox` 才显示。`Layers 图标 + N` 角标代表图层数;如果 bbox 全缺,角标里会有 ⚠️ 警示 |
+| 旧资产在合成视图里 bbox 缺失 | 旧数据 `boundingBox.normalized` 真的缺失 | 5.0 Pro 出的资产才会带 bbox,旧数据(用 Lite/4.5 强行调 layer_decomposition 失败的)确实没 bbox,正常 |
+
+**CI 证据**：
+- `src/lib/layer-view.test.ts` — 11+5 个用例覆盖 `layerRectNormalized` 和 `getBboxHealth`（含 bbox 全缺/部分缺/NaN/Infinity/底图豁免等场景）
+- `src/lib/asset-payload.test.ts` — 3 个新 IPC shape round-trip 用例,断言整数 + 浮点 + 16 层全字段经过前端 → JSON 字符串 → 解析回 Value 形状后无精度损失
+
+**Rust 端诊断 log 位置**（`log::info!` 默认 info 级别可见）：
+- `src-tauri/src/jimeng.rs` `generate()` 末尾 — 图层拆分场景输出前 3 张图的 z_index/name/size/bbox 摘要
+- `src-tauri/src/commands.rs` `write_local_paths_to_payload` — SQLite 写回 layerLocalPaths 前后的 bbox 摘要（`log::debug!`,需要 `RUST_LOG=debug` 才能看到）
+
+**前端诊断 console.debug**（dev 模式可见）：
+- `src/lib/layer-view.ts` 暂未内置 console,需要时手动在 `LayerCompositeStage` 渲染里加 `console.debug("bbox", img.boundingBox)` 临时观察
+
+
 ### 1.8 流式输出（P1，5.0 Lite / 4.5 / 4.0 支持，5.0 Pro 不支持）
 
 ```typescript

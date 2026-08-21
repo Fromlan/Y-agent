@@ -200,10 +200,9 @@ export async function executePlan(
     reqFormat: plan.outputFormat,
     modelId: plan.modelId,
   });
-  // P5：把每张图的 localPath 持久化（Rust 端已下载到本地缓存）
-  const localPaths = resp.images
-    .map((i) => i.localPath)
-    .filter((p): p is string => !!p);
+  // P5：把每张图的 localPath 持久化（Rust 端已下载到本地缓存）。
+  // 用空串占位缺失项，保持数组与 urls/layers 一一对应；空串在入库/兜底时视为缺失。
+  const localPaths = resp.images.map((i) => i.localPath ?? "");
   // 图层拆分场景：urls 留空（实际图存在 layers），localPath 与 layers 平行存到 layerLocalPaths
   // 之前图层拆分场景的 `localPaths` 字段实际上从未被读（flatAssetImages 在图层拆分场景
   // 只读 layer.localPath / layer.url，不读 payload.localPaths），改用 layerLocalPaths

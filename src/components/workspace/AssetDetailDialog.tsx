@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   X,
   Copy,
@@ -25,6 +25,7 @@ import {
   Focus,
   Grid2X2,
   Image,
+  AlertTriangle,
 } from "lucide-react";
 import type { Asset, GeneratedImage } from "@/lib/types";
 import { assetMainImage, flatAssetImages, imageInput } from "@/lib/types";
@@ -34,7 +35,7 @@ import { buildAssetPayload, resolveFormat } from "@/lib/asset-payload";
 import { resolveImageUrl } from "@/lib/image-resolver";
 import SafeImage from "@/components/shared/SafeImage";
 import { createAsset } from "@/lib/assets";
-import { pickVisibleLayers } from "@/lib/layer-view";
+import { pickVisibleLayers, getBboxHealth, layerRectNormalized } from "@/lib/layer-view";
 import LayerCompositeStage from "@/components/workspace/LayerCompositeStage";
 
 /**
@@ -154,9 +155,7 @@ export default function AssetDetailDialog({
               bbox,
               // P5：把 Rust 端下好的本地路径一起持久化（24h 兜底）。
               // 后端 create_asset 也会兜底：万一这里漏了或下载失败，会自动重拉。
-              localPaths: resp.images
-                .map((i) => i.localPath)
-                .filter((p): p is string => !!p),
+              localPaths: resp.images.map((i) => i.localPath ?? ""),
             },
             actualFormat
           ),
@@ -212,6 +211,15 @@ export default function AssetDetailDialog({
     () => (selectedLayerIdx === null ? null : images[selectedLayerIdx] ?? null),
     [images, selectedLayerIdx]
   );
+  // P0+：bbox 健康度（从所有图层派生，不只看 visibleLayers — 整体降级用）
+  // 判定：非底图层 bbox 全部缺失 → 合成视图无意义，自动降级到单图层视图
+  const bboxHealth = useMemo(() => getBboxHealth(images), [images]);
+  // "非底图层" 至少要有 1 个有 bbox，合成视图才有意义
+  // getBboxHealth 把底图算 ok(1)，所以 nonBaseOk = bboxHealth.ok - (有底图 ? 1 : 0)
+  const hasBaseInImages = images.some((img) => (img.zIndex ?? 0) === 0);
+  const nonBaseOk = bboxHealth.ok - (hasBaseInImages ? 1 : 0);
+  const allNonBaseBboxMissing =
+    asset.isLayerDecomposition && images.length > 1 && nonBaseOk === 0;
   // 行点击：合成模式 → 高亮 bbox；单图层模式 → 切到该图层
   const onLayerRowClick = (i: number) => {
     if (viewMode === "single" || !asset.isLayerDecomposition) {
@@ -221,12 +229,24 @@ export default function AssetDetailDialog({
     }
   };
 
-  // 如果当前 idx 被隐藏，自动跳到第一个可见图层
+  // P0+：整体降级 — 如果非底图层 bbox 全缺,在合成模式下自动切到单图层。
+  // 用 useEffect 避免在渲染期间 setState 触发循环。
+  useEffect(() => {
+    if (
+      asset.isLayerDecomposition &&
+      viewMode === "composite" &&
+      allNonBaseBboxMissing
+    ) {
+      setViewMode("single");
+    }
+  }, [asset.isLayerDecomposition, viewMode, allNonBaseBboxMissing]);
+
+  // 如果当前 idx 被隐藏，自动跳到第一个可见图层；全部隐藏时返回 -1
   const visibleIdx = hiddenLayers.has(idx)
     ? images.findIndex((_, k) => !hiddenLayers.has(k))
     : idx;
-  const effectiveIdx = visibleIdx === -1 ? idx : visibleIdx;
-  const cur = images[effectiveIdx];
+  const effectiveIdx = visibleIdx === -1 ? -1 : visibleIdx;
+  const cur = effectiveIdx === -1 ? undefined : images[effectiveIdx];
 
   // 切换资产/打开时归零
   useEffect(() => {
@@ -238,6 +258,10 @@ export default function AssetDetailDialog({
     setSelectedLayerIdx(null);
     // 图层资产默认走合成；非图层资产强制走单图层（防御性，正常不会进入该分支）
     setViewMode(asset.isLayerDecomposition ? "composite" : "single");
+    // 局部编辑状态：切资产时也清掉，避免上一个资产的 bbox / prompt 留到新资产上
+    setEditMode(false);
+    setEditPrompt("");
+    editBboxRef.current = null;
   }, [asset.id, asset.isLayerDecomposition]);
 
   // 视图模式变化时清掉选中高亮（合成 <-> 单图层 概念不同）
@@ -348,6 +372,21 @@ export default function AssetDetailDialog({
           </button>
         </div>
 
+        {/* P0+：bbox 整体缺失 notice — 当所有非底图层的 boundingBox 都缺失时,
+            自动切到单图层视图 + 顶部黄条提示,让用户知道为什么没看到合成。 */}
+        {asset.isLayerDecomposition && allNonBaseBboxMissing && (
+          <div
+            className="px-4 py-1.5 bg-amber-500/10 border-b border-amber-500/30
+              text-amber-200 text-xs flex items-center gap-2 flex-shrink-0"
+            title="API 没返回图层位置信息（boundingBox）。常见原因:用了不支持的旧模型/endpoint,或响应解析失败。已自动切到单图层视图。"
+          >
+            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+            <span>
+              所有图层的 boundingBox 位置信息缺失,合成视图不可用。已切到单图层视图。
+            </span>
+          </div>
+        )}
+
         {/* 主体：左预览 + 右元数据 */}
         <div className="flex-1 flex min-h-0">
           {/* 左侧：统一尺寸预览区 */}
@@ -388,6 +427,8 @@ export default function AssetDetailDialog({
                     editBboxRef.current = b;
                   }}
                 />
+              ) : !cur ? (
+                <AllHiddenPlaceholder />
               ) : asset.isLayerDecomposition && viewMode === "composite" ? (
                 <LayerCompositeStage
                   layers={visibleLayers}
@@ -413,6 +454,7 @@ export default function AssetDetailDialog({
                   setEditPrompt("");
                   editBboxRef.current = null;
                 }}
+                canSubmit={!editBusy && !!editPrompt.trim() && !!editBboxRef.current}
               />
             )}
             {/* 多图切换控件（单图层模式 / 合成模式都显示，但合成模式淡化） */}
@@ -627,20 +669,25 @@ export default function AssetDetailDialog({
                               : "border-border bg-bg-elev hover:border-border-strong"}
                           `}
                         >
-                          <SafeImage
-                            src={imageInput(img)}
-                            alt=""
-                            className="w-12 h-12 object-cover rounded flex-shrink-0"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (isHidden) return;
-                              // 缩略图点击 = 切到单图层并定位（与底条行为一致）
-                              if (asset.isLayerDecomposition && viewMode === "composite") {
-                                setViewMode("single");
-                              }
-                              setIdx(i);
-                            }}
-                          />
+                          <div className="flex flex-col gap-1 flex-shrink-0">
+                            <SafeImage
+                              src={imageInput(img)}
+                              alt=""
+                              className="w-12 h-12 object-cover rounded"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (isHidden) return;
+                                // 缩略图点击 = 切到单图层并定位（与底条行为一致）
+                                if (asset.isLayerDecomposition && viewMode === "composite") {
+                                  setViewMode("single");
+                                }
+                                setIdx(i);
+                              }}
+                            />
+                            {/* P0+：bbox 位置 mini 缩略图(底图比例 + 当前图层 bbox 描边)。
+                                缺 bbox 时仍渲染（fallback 铺满 + 虚线表示位置信息缺失）。 */}
+                            <LayerBboxMini baseLayer={baseLayer} layer={img} />
+                          </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5 text-xs">
                               {isBase ? (
@@ -784,6 +831,76 @@ export default function AssetDetailDialog({
             </div>
           </aside>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 详情面板行内单图层 bbox 位置缩略图。
+ * - 32x32px：底图作背景 + 当前图层 bbox 描边
+ * - 缺 bbox 时退化为底图全铺
+ * - 底图层（zIndex=0）bbox 等于全画布 → 整张描边
+ *
+ * 关键实现细节：用 `inset 0 0 0 1.5px` 的 `box-shadow` 而不是 `border`。
+ * 原因：`border` 渲染在 div 外面（默认 box-sizing），bbox 占满 32x32 时
+ * border 外沿被容器 `overflow-hidden` 裁掉，只剩右下角一截 L 形
+ * 1-2px 残片，看起来像"小框在角落"。inset shadow 渲染在 div 内部，
+ * 不会被裁，bbox 真实大小和位置都看得见。
+ */
+function LayerBboxMini({
+  baseLayer,
+  layer,
+}: {
+  baseLayer: GeneratedImage | undefined;
+  layer: GeneratedImage;
+}) {
+  const baseUrl = baseLayer ? imageInput(baseLayer) : null;
+  const n = layerRectNormalized(layer);
+  return (
+    <div
+      className="relative w-8 h-8 rounded overflow-hidden border border-border
+        bg-bg-base flex-shrink-0"
+      title={`bbox [${(layer.boundingBox?.normalized ?? []).join(", ")}] (0-1000)`}
+    >
+      {baseUrl ? (
+        <SafeImage
+          src={baseUrl}
+          alt=""
+          className="block absolute inset-0 w-full h-full object-cover"
+          loading="lazy"
+        />
+      ) : (
+        <div className="absolute inset-0 bg-bg-elev" />
+      )}
+      {/* bbox 描边：accent 色,inset 1.5px(向内),不被裁 */}
+      <div
+        className="absolute pointer-events-none"
+        style={{
+          left: `${n.left * 100}%`,
+          top: `${n.top * 100}%`,
+          width: `${n.width * 100}%`,
+          height: `${n.height * 100}%`,
+          boxShadow:
+            "inset 0 0 0 1.5px rgb(124, 92, 255), inset 0 0 0 2px rgba(0, 0, 0, 0.4)",
+        }}
+      />
+    </div>
+  );
+}
+
+/**
+ * 所有图层都被隐藏时的占位（单图层视图路径）
+ */
+function AllHiddenPlaceholder() {
+  return (
+    <div
+      className="w-full max-w-[640px] aspect-[16/10] bg-bg-elev rounded-md
+        flex items-center justify-center text-text-muted border border-border"
+    >
+      <div className="text-center">
+        <EyeOff className="w-10 h-10 mx-auto mb-2 opacity-50" />
+        <p className="text-xs">所有图层都已隐藏</p>
       </div>
     </div>
   );
@@ -1087,13 +1204,21 @@ function EditBar({
   onPromptChange,
   onSubmit,
   onCancel,
+  canSubmit,
 }: {
   busy: boolean;
   prompt: string;
   onPromptChange: (v: string) => void;
   onSubmit: () => void;
   onCancel: () => void;
+  /** 父组件判定：!busy && prompt 非空 && bbox 已画 */
+  canSubmit: boolean;
 }) {
+  const hint = !canSubmit && !busy
+    ? prompt.trim()
+      ? "请先在图上画一个矩形框"
+      : "请输入修改指令"
+    : undefined;
   return (
     <div className="border-t border-border bg-bg-panel p-3 flex items-center gap-2 flex-shrink-0">
       <input
@@ -1101,7 +1226,7 @@ function EditBar({
         value={prompt}
         onChange={(e) => onPromptChange(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && !busy) onSubmit();
+          if (e.key === "Enter" && canSubmit) onSubmit();
         }}
         placeholder="修改指令（例：在框内加一束花）"
         disabled={busy}
@@ -1113,10 +1238,12 @@ function EditBar({
       <button
         onClick={onSubmit}
         className="btn btn-primary text-xs h-8"
-        disabled={busy}
+        disabled={!canSubmit}
+        title={hint}
       >
         <Send className="w-3.5 h-3.5" /> {busy ? "生成中…" : "提交"}
       </button>
+      {hint && <span className="text-[11px] text-text-muted">{hint}</span>}
     </div>
   );
 }

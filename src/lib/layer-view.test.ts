@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pickVisibleLayers, parseBaseSize, layerRectPercent, layerRectNormalized } from "@/lib/layer-view";
+import { pickVisibleLayers, parseBaseSize, layerRectPercent, layerRectNormalized, getBboxHealth } from "@/lib/layer-view";
 import type { GeneratedImage } from "@/lib/types";
 
 const L = (i: number): GeneratedImage => ({ url: `l${i}.png`, zIndex: i });
@@ -167,5 +167,88 @@ describe("layerRectNormalized（aspect-independent bbox，0-1000 -> 0-1）", () 
     expect(
       layerRectNormalized({ url: "x", boundingBox: { normalized: [0, 0, 1000, 1000, 500] as unknown as number[] } })
     ).toEqual({ left: 0, top: 0, width: 1, height: 1 });
+  });
+});
+
+describe("getBboxHealth — 派生图层 bbox 健康度", () => {
+  it("全部 bbox 正常 → ok=total, missing=[]", () => {
+    const layers: GeneratedImage[] = [
+      { url: "b.png", zIndex: 0 }, // 底图没 bbox 也算 ok
+      {
+        url: "l1.png",
+        zIndex: 1,
+        boundingBox: { normalized: [187, 59, 808, 188] },
+      },
+      {
+        url: "l2.png",
+        zIndex: 2,
+        boundingBox: { normalized: [10, 20, 100, 200] },
+      },
+    ];
+    const h = getBboxHealth(layers);
+    expect(h).toEqual({ ok: 3, missing: [], total: 3 });
+  });
+
+  it("底图（zIndex=0）即使缺 bbox 也算 ok", () => {
+    // 这是关键：5.0 Pro 实际响应里底图往往不带 bbox（应当铺满），
+    // 不能误判为缺失。
+    const layers: GeneratedImage[] = [
+      { url: "b.png", zIndex: 0, size: "2048x2048" },
+      {
+        url: "l1.png",
+        zIndex: 1,
+        boundingBox: { normalized: [187, 59, 808, 188] },
+      },
+    ];
+    const h = getBboxHealth(layers);
+    expect(h).toEqual({ ok: 2, missing: [], total: 2 });
+  });
+
+  it("部分图层缺 bbox → missing 列出 indices, ok 不计", () => {
+    const layers: GeneratedImage[] = [
+      { url: "b.png", zIndex: 0 },
+      { url: "l1.png", zIndex: 1, boundingBox: { normalized: [10, 20, 100, 200] } },
+      { url: "l2.png", zIndex: 2 }, // 缺
+      { url: "l3.png", zIndex: 3, boundingBox: { normalized: [0, 0, 0, 0] } }, // 全 0 也是 4 元素但渲染会反向 — 这里 getBboxHealth 只看"是否数值合法"，4 个 0 都是有限数 → 算 ok
+    ];
+    const h = getBboxHealth(layers);
+    expect(h.ok).toBe(3);
+    expect(h.missing).toEqual([2]);
+    expect(h.total).toBe(4);
+  });
+
+  it("normalized 含 NaN/Infinity → missing", () => {
+    const layers: GeneratedImage[] = [
+      { url: "b.png", zIndex: 0 },
+      {
+        url: "l1.png",
+        zIndex: 1,
+        boundingBox: { normalized: [NaN, 10, 100, 200] as unknown as number[] },
+      },
+      {
+        url: "l2.png",
+        zIndex: 2,
+        boundingBox: { normalized: [10, Infinity, 100, 200] as unknown as number[] },
+      },
+    ];
+    const h = getBboxHealth(layers);
+    expect(h.ok).toBe(1); // 底图 1 个
+    expect(h.missing).toEqual([1, 2]);
+    expect(h.total).toBe(3);
+  });
+
+  it("全部缺失（且底图也缺 bbox 的异常情况）→ ok=0, missing=全部非底图", () => {
+    // 极端情况：所有图层都没 bbox，底图也没 — 这时候合成视图应该整体降级。
+    const layers: GeneratedImage[] = [
+      { url: "b.png", zIndex: 0 }, // 底图仍按"ok"算（防御性）
+      { url: "l1.png", zIndex: 1 },
+      { url: "l2.png", zIndex: 2 },
+    ];
+    const h = getBboxHealth(layers);
+    // 设计选择: 底图"有 bbox 缺失"也当 ok,因为底图的位置语义固定。
+    // 但 ok=0 的判定应该用 visibleLayers 派生"非底图层"再来一遍。
+    expect(h.ok).toBe(1);
+    expect(h.missing).toEqual([1, 2]);
+    expect(h.total).toBe(3);
   });
 });

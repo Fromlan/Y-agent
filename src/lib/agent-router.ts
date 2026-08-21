@@ -33,31 +33,119 @@ export interface RouteDecision {
   suggestedModelName?: string;
 }
 
-// 关键词词典：6 类 Skill 的中英触发词
+// 关键词词典：覆盖 13 个内置 Skill 的中英触发词
+// - 匹配规则：用户输入小写后做 includes() 检查（子串匹配）
+// - 优先级：先匹配到的先命中（数组顺序敏感）
+// - 中文 / 英文各列几个变体，避免漏命中
 const KEYWORD_MAP: { skillId: string; keywords: string[] }[] = [
+  // 基础生图
   {
     skillId: "character-turnaround",
-    keywords: ["三视图", "turnaround", "character sheet", "character_sheet"],
+    keywords: ["三视图", "turnaround", "character sheet", "character_sheet", "角色三视图"],
   },
   {
     skillId: "expression-grid",
-    keywords: ["九宫格", "表情包", "8 表情", "expression grid", "expression"],
+    keywords: ["九宫格", "表情包", "8 表情", "expression grid", "expression", "表情九宫格"],
   },
   {
     skillId: "character-sheet",
-    keywords: ["角色设定", "设定卡", "character card", "角色卡"],
+    keywords: ["角色设定", "设定卡", "character card", "角色卡", "character sheet", "character_sheet"],
   },
   {
     skillId: "scene-mood",
-    keywords: ["气氛图", "场景气氛", "mood board", "关卡气氛", "远景"],
+    keywords: ["气氛图", "场景气氛", "mood board", "关卡气氛", "远景", "场景氛围"],
   },
   {
     skillId: "ui-icons",
-    keywords: ["UI 图标", "HUD", "icon set", "图标组", "icon pack"],
+    // 注意："icon pack" 是 icon-pack-transparent 的关键词，**不要放在这里**
+    // 否则 "透明图标 icon pack" 会被 ui-icons 抢匹配。
+    // 用户说 "icon pack" 时让他走 icon-pack-transparent（更具体）。
+    keywords: ["UI 图标", "HUD", "icon set", "图标组", "游戏图标"],
   },
   {
     skillId: "kv-poster",
-    keywords: ["KV 海报", "主视觉", "key visual", "store banner", "商店图"],
+    keywords: ["KV 海报", "主视觉", "key visual", "store banner", "商店图", "商店 banner"],
+  },
+  // 组图（仅 5.0 Lite / 4.x）
+  {
+    skillId: "character-consistency-set",
+    keywords: [
+      "角色一致性",
+      "角色套图",
+      "动作变体",
+      "character consistency",
+      "character set",
+      "角色多动作",
+    ],
+  },
+  {
+    skillId: "scene-mood-light-variants",
+    keywords: [
+      "光影变体",
+      "时段变体",
+      "早午晚夜",
+      "light variants",
+      "场景光影",
+      "时段变体图",
+      "早午晚",
+    ],
+  },
+  {
+    skillId: "product-shot-pack",
+    keywords: [
+      "商品图",
+      "电商",
+      "主图",
+      "product shot",
+      "商品套图",
+      "上架图",
+      "电商主图",
+    ],
+  },
+  // 5.0 Pro 专属
+  {
+    skillId: "icon-pack-transparent",
+    keywords: [
+      "透明图标",
+      "UI 图标包",
+      "icon pack transparent",
+      "透明背景图标",
+      "icon pack",
+      "透明 icon",
+    ],
+  },
+  {
+    skillId: "layer-separation",
+    keywords: [
+      "图层拆分",
+      "分层",
+      "layer separation",
+      "拆图层",
+      "decompose layers",
+      "拆层",
+    ],
+  },
+  {
+    skillId: "local-edit-bbox",
+    keywords: [
+      "局部编辑",
+      "局部重画",
+      "改局部",
+      "local edit",
+      "局部改",
+      "bbox 编辑",
+    ],
+  },
+  {
+    skillId: "infographic-poster",
+    keywords: [
+      "信息图",
+      "infographic",
+      "信息海报",
+      "数据海报",
+      "图表海报",
+      "信息图海报",
+    ],
   },
 ];
 

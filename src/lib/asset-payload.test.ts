@@ -220,3 +220,131 @@ describe("图层拆分 payload 字段 round-trip（保证信息无损入库）",
     expect(round.layers[0].zIndex).toBe(0);
   });
 });
+
+/**
+ * P0+：模拟"前端 → Rust (Value) → SQLite 字符串 → 读出 (Value) → camelCase → 前端"
+ * 整条 IPC 链路,断言 boundingBox 数值精度无损失。
+ *
+ * 背景:之前 5.0 Pro 图层合成的"全叠在一起"症状,排查时怀疑 SQLite 写回
+ * 链路 (`write_local_paths_to_payload`) 会丢 bbox。这里用 JSON 字符串往返
+ * 模拟整条链路核心,验证关键字段无损。
+ */
+describe("图层 bbox 经过 IPC shape round-trip 后字段无损", () => {
+  it("整数 normalized [187, 59, 808, 188] 经过前端 → Rust → SQLite → 前端 无精度损失", () => {
+    const layers: GeneratedImage[] = [
+      {
+        url: "b.png",
+        zIndex: 0,
+        size: "2048x2048",
+        outputFormat: "png",
+      },
+      {
+        url: "l1.png",
+        zIndex: 1,
+        name: "标题",
+        size: "1273x265",
+        outputFormat: "png",
+        description: "黄色大号衬线字体",
+        boundingBox: {
+          absolute: [383, 120, 1655, 384],
+          normalized: [187, 59, 808, 188],
+        },
+      },
+    ];
+    const p = buildAssetPayload(
+      { urls: [], layers, isTransparent: true, layerLocalPaths: ["/tmp/b.png", "/tmp/l1.png"] },
+      "png"
+    );
+    // 模拟前端 → Rust：JSON.stringify 把 TS 对象序列化为 wire format
+    const wireFormat = JSON.stringify(p);
+    // 模拟 Rust 端 serde_json::Value 接收（直接 parse 回 Value 形状）
+    const asValue: Record<string, unknown> = JSON.parse(wireFormat);
+    // 模拟 Rust 端 SQLite 存 (TEXT 列) + 读出 (TEXT 列) — 再 stringify 一次
+    const sqliteRound = JSON.parse(JSON.stringify(asValue));
+    // 模拟 Rust → 前端：camelCase 已经是前端 shape，无 rename 需要
+    // （camelCase 由 #[serde(rename_all = "camelCase")] 已经在 GeneratedImage 上做掉，
+    // bbox 字段在 StoredImage 上不做 rename 所以是 boundingBox 已经是前端字段名）
+    const back = sqliteRound;
+    // 关键断言：bbox 数值精度无损
+    expect((back.layers as unknown[])[1]).toMatchObject({
+      url: "l1.png",
+      zIndex: 1,
+      name: "标题",
+      size: "1273x265",
+      outputFormat: "png",
+      description: "黄色大号衬线字体",
+      boundingBox: {
+        absolute: [383, 120, 1655, 384],
+        normalized: [187, 59, 808, 188],
+      },
+    });
+    expect((back as { layerLocalPaths: string[] }).layerLocalPaths).toEqual([
+      "/tmp/b.png",
+      "/tmp/l1.png",
+    ]);
+  });
+
+  it("浮点 normalized [220.5, 432.1, 777.3, 1000.0] 经过 IPC 链 无精度损失", () => {
+    // 这是 5.0 Pro 偶发返回浮点的场景。Rust 端改 Vec<f64> 后必须能解出来。
+    const layers: GeneratedImage[] = [
+      {
+        url: "l1.png",
+        zIndex: 1,
+        boundingBox: {
+          absolute: [225, 442, 796, 1414],
+          normalized: [220.5, 432.1, 777.3, 1000.0],
+        },
+      },
+    ];
+    const p = buildAssetPayload(
+      { urls: [], layers, isTransparent: false },
+      "png"
+    );
+    const wireFormat = JSON.stringify(p);
+    const back = JSON.parse(wireFormat);
+    const norm = (back.layers[0] as { boundingBox: { normalized: number[] } })
+      .boundingBox.normalized;
+    expect(norm).toHaveLength(4);
+    // JSON 序列化 1 位小数的浮点会保留 1 位精度,这里只断言数值差异在容差内
+    expect(Math.abs(norm[0] - 220.5)).toBeLessThan(0.001);
+    expect(Math.abs(norm[1] - 432.1)).toBeLessThan(0.001);
+    expect(Math.abs(norm[2] - 777.3)).toBeLessThan(0.001);
+    expect(Math.abs(norm[3] - 1000.0)).toBeLessThan(0.001);
+  });
+
+  it("多层 layers(底图+15 层)经过 IPC 链,所有 bbox 字段都保留", () => {
+    // 5.0 Pro 限制 16 层,这里测 1 底图 + 15 图层的全字段
+    const layers: GeneratedImage[] = [
+      { url: "b.png", zIndex: 0, size: "2048x2048" }, // 底图
+    ];
+    for (let i = 1; i <= 15; i++) {
+      layers.push({
+        url: `l${i}.png`,
+        zIndex: i,
+        name: `图层 ${i}`,
+        size: "256x256",
+        boundingBox: {
+          absolute: [i * 100, i * 50, i * 100 + 256, i * 50 + 256],
+          normalized: [i * 50, i * 25, i * 50 + 125, i * 25 + 125],
+        },
+      });
+    }
+    const p = buildAssetPayload(
+      { urls: [], layers, isTransparent: true },
+      "png"
+    );
+    const back = JSON.parse(JSON.stringify(p));
+    expect(back.layers).toHaveLength(16);
+    for (let i = 1; i <= 15; i++) {
+      const layer = back.layers[i];
+      expect(layer.zIndex).toBe(i);
+      expect(layer.name).toBe(`图层 ${i}`);
+      expect(layer.boundingBox.normalized).toEqual([
+        i * 50,
+        i * 25,
+        i * 50 + 125,
+        i * 25 + 125,
+      ]);
+    }
+  });
+});

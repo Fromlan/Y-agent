@@ -12,11 +12,86 @@ import {
   Loader2,
 } from "lucide-react";
 import type { Asset } from "@/lib/types";
-import { assetMainImage } from "@/lib/types";
+import { assetMainImage, imageInput } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
 import SafeImage from "@/components/shared/SafeImage";
+import { layerRectNormalized } from "@/lib/layer-view";
 
 export type ViewMode = "masonry" | "grid" | "compact";
+
+/**
+ * 图层拆分资产的 mini 合成缩略图。
+ * - 56x56 像素
+ * - 底图作背景 + 每个图层按 bbox 比例定位
+ * - 仅当图层资产 + 至少有 1 个图层有 bbox 时才显示
+ * - lazy 加载：仅资产卡可见时渲染图层图
+ */
+function LayerThumbnailMini({ asset }: { asset: Asset }) {
+  const layers = asset.payload.layers ?? [];
+  if (layers.length === 0) return null;
+  const baseLayer =
+    layers.find((l) => (l.zIndex ?? 0) === 0) ?? layers[0];
+  const baseUrl = baseLayer.localPath ?? baseLayer.url;
+  // 取前 3 个有 bbox 的图层（太多在小图里挤成一片反而看不清）
+  const displayLayers = layers
+    .filter((l) => (l.zIndex ?? 0) !== 0)
+    .filter((l) => l.boundingBox?.normalized?.length === 4)
+    .slice(0, 3);
+
+  return (
+    <div
+      className="relative w-14 h-14 rounded overflow-hidden border border-accent/40
+        bg-bg-base shadow-sm pointer-events-none"
+      title={`图层资产 · ${layers.length} 层${
+        displayLayers.length < layers.length - 1 ? "（缩略仅显示前 3 层）" : ""
+      }`}
+    >
+      {/* 底图缩略图 */}
+      {baseUrl ? (
+        <SafeImage
+          src={imageInput(baseLayer)}
+          alt=""
+          className="block absolute inset-0 w-full h-full object-cover"
+          loading="lazy"
+        />
+      ) : (
+        <div className="absolute inset-0 bg-bg-elev" />
+      )}
+      {/* 其它图层 bbox 色块（半透明 + 边框，bbox 一眼可见） */}
+      {displayLayers.map((layer, i) => {
+        const n = layerRectNormalized(layer);
+        const colors = [
+          "border-rose-400/80 bg-rose-400/25",
+          "border-amber-400/80 bg-amber-400/25",
+          "border-emerald-400/80 bg-emerald-400/25",
+        ];
+        return (
+          <div
+            key={i}
+            className={`absolute border ${colors[i % colors.length]}`}
+            style={{
+              left: `${n.left * 100}%`,
+              top: `${n.top * 100}%`,
+              width: `${n.width * 100}%`,
+              height: `${n.height * 100}%`,
+            }}
+          />
+        );
+      })}
+      {/* 角标：图层数 + bbox 状态（缺 bbox 时显示警告） */}
+      <div
+        className="absolute bottom-0 right-0 px-1 py-0.5
+          bg-black/75 text-accent text-[9px] flex items-center gap-0.5"
+      >
+        <Layers className="w-2.5 h-2.5" />
+        <span>{layers.length}</span>
+        {displayLayers.length === 0 && (
+          <AlertTriangle className="w-2.5 h-2.5 text-amber-400 ml-0.5" />
+        )}
+      </div>
+    </div>
+  );
+}
 
 /**
  * 资产本地兜底状态徽标。
@@ -27,9 +102,17 @@ export type ViewMode = "masonry" | "grid" | "compact";
  * 三种状态互斥,优先级 broken > 备份中 > 本地
  */
 function StatusBadge({ asset }: { asset: Asset }) {
-  const hasLocal =
-    asset.payload.localPaths?.[0] && asset.payload.localPaths[0].length > 0;
-  const firstUrl = asset.payload.urls?.[0] ?? "";
+  // 图层资产：检查底图层（zIndex=0）的本地化状态
+  // 普通资产：检查 urls[0] / localPaths[0]
+  const isLayer = asset.isLayerDecomposition && asset.payload.layers?.length;
+  const baseLayer = isLayer
+    ? [...(asset.payload.layers ?? [])].find((l) => (l.zIndex ?? 0) === 0) ??
+      asset.payload.layers?.[0]
+    : null;
+  const hasLocal = isLayer
+    ? !!baseLayer?.localPath
+    : !!asset.payload.localPaths?.[0];
+  const firstUrl = isLayer ? baseLayer?.url ?? "" : asset.payload.urls?.[0] ?? "";
   const isHttp = firstUrl.startsWith("http://") || firstUrl.startsWith("https://");
   if (asset.payload.broken) {
     return (
@@ -150,7 +233,7 @@ export default function AssetCard({
         {asset.isLayerDecomposition && (
           <Layers className="absolute top-1 right-1 w-3 h-3 text-accent drop-shadow" />
         )}
-        {!asset.isLayerDecomposition && <StatusBadge asset={asset} />}
+        <StatusBadge asset={asset} />
         {selectMode && (
           <CheckBox selected={selected} className="top-1 left-1" />
         )}
@@ -186,18 +269,24 @@ export default function AssetCard({
               <Layers className="w-3 h-3" /> 图层
             </div>
           )}
-          {!asset.isLayerDecomposition && <StatusBadge asset={asset} />}
+          <StatusBadge asset={asset} />
           {asset.payload.transparent && (
             <div className="absolute top-2 left-2 bg-emerald-500/85 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"
               title="PNG 透明背景">
               <Droplet className="w-3 h-3" /> 透明
             </div>
           )}
-          {asset.payload.localPaths?.[0] && !asset.payload.broken && (
-            <div className="absolute bottom-2 right-2 bg-blue-500/85 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"
-              title="已下载到本地,URL 失效后仍可查看">
-              <HardDrive className="w-3 h-3" /> 本地
+          {asset.isLayerDecomposition ? (
+            <div className="absolute bottom-2 right-2">
+              <LayerThumbnailMini asset={asset} />
             </div>
+          ) : (
+            asset.payload.localPaths?.[0] && !asset.payload.broken && (
+              <div className="absolute bottom-2 right-2 bg-blue-500/85 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"
+                title="已下载到本地,URL 失效后仍可查看">
+                <HardDrive className="w-3 h-3" /> 本地
+              </div>
+            )
           )}
           {asset.refCount > 0 && (
             <div className="absolute bottom-2 left-2 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded">
@@ -279,12 +368,24 @@ export default function AssetCard({
             <Layers className="w-3 h-3" /> 图层
           </div>
         )}
-        {!asset.isLayerDecomposition && <StatusBadge asset={asset} />}
+        <StatusBadge asset={asset} />
         {asset.payload.transparent && (
           <div className="absolute top-2 left-2 bg-emerald-500/85 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"
             title="PNG 透明背景">
             <Droplet className="w-3 h-3" /> 透明
           </div>
+        )}
+        {asset.isLayerDecomposition ? (
+          <div className="absolute bottom-2 right-2">
+            <LayerThumbnailMini asset={asset} />
+          </div>
+        ) : (
+          asset.payload.localPaths?.[0] && !asset.payload.broken && (
+            <div className="absolute bottom-2 right-2 bg-blue-500/85 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"
+              title="已下载到本地,URL 失效后仍可查看">
+              <HardDrive className="w-3 h-3" /> 本地
+            </div>
+          )
         )}
         {asset.refCount > 0 && (
           <div className="absolute bottom-2 left-2 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded">

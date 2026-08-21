@@ -139,7 +139,7 @@ export function useProjectBootstrap(projectId: string | undefined): ProjectBoots
   // - projectId 切换时重新订阅(实际 listener 是模块级单例,这里是参数 projectId 过滤)
   useEffect(() => {
     if (!projectId) return;
-    startAssetEventListener((evt) => {
+    const apply = (evt: { projectId: string; assetId: string; localPaths?: string[]; layerLocalPaths?: string[] }) => {
       // 跨项目事件:AssetCenter 模式会监听所有;此处按当前 projectId 过滤
       if (evt.projectId !== projectId) return;
       setAssets((prev) =>
@@ -157,9 +157,10 @@ export function useProjectBootstrap(projectId: string | undefined): ProjectBoots
           return next;
         })
       );
-    });
+    };
+    startAssetEventListener(apply);
     return () => {
-      stopAssetEventListener();
+      stopAssetEventListener(apply);
     };
   }, [projectId]);
 

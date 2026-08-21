@@ -66,7 +66,7 @@ export default function AssetCenterPage() {
   // 订阅后端"资产本地兜底完成"事件。AssetCenter 是跨项目视图,无 projectId 过滤,
   // 任何资产的 localPath 落盘都会让对应卡片切到 asset:// 协议,首屏不会出现"图片下载中"长卡顿。
   useEffect(() => {
-    startAssetEventListener((evt) => {
+    const apply = (evt: { projectId: string; assetId: string; localPaths?: string[]; layerLocalPaths?: string[] }) => {
       setAssets((prev) =>
         prev.map((a) => {
           if (a.id !== evt.assetId) return a;
@@ -80,9 +80,10 @@ export default function AssetCenterPage() {
           return next;
         })
       );
-    });
+    };
+    startAssetEventListener(apply);
     return () => {
-      stopAssetEventListener();
+      stopAssetEventListener(apply);
     };
   }, []);
 
