@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Layers,
   ImageIcon,
+  Video as VideoIcon,
   Clock,
   Ruler,
   Cpu,
@@ -27,7 +28,8 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import type { Asset, GeneratedImage } from "@/lib/types";
-import { assetMainImage, flatAssetImages, imageInput } from "@/lib/types";
+import { assetMainImage, assetVideoSource, flatAssetImages, imageInput } from "@/lib/types";
+import { resolveImageUrlSync } from "@/lib/image-resolver";
 import { useToast } from "@/components/shared/Toast";
 import { generateImage as jimengGenerate, explainError } from "@/lib/jimeng";
 import { buildAssetPayload, resolveFormat } from "@/lib/asset-payload";
@@ -91,6 +93,8 @@ export default function AssetDetailDialog({
   onAssetCreated,
 }: Props) {
   const images = flatAssetImages(asset);
+  const isVideo = asset.payload?.kind === "video";
+  const videoSrc = isVideo ? resolveImageUrlSync(assetVideoSource(asset)) : "";
   const [idx, setIdx] = useState(0);
   const toast = useToast();
   const [confirmDel, setConfirmDel] = useState(false);
@@ -309,6 +313,68 @@ export default function AssetDetailDialog({
     const label = cur.name ? `-${cur.name.replace(/\s+/g, "_")}` : `-${effectiveIdx + 1}`;
     onDownload(cur.url, `y-agent-${asset.id}${label}.${ext}`);
   };
+
+  // P8：视频资产走专用渲染（无多图/图层/局部编辑）
+  if (isVideo) {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-bg-overlay"
+        onClick={onClose}
+      >
+        <div
+          className="panel w-[90vw] max-w-4xl p-4 max-h-[90vh] flex flex-col gap-3"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs text-text-muted">
+              <VideoIcon className="w-4 h-4 text-accent" />
+              <span>
+                视频资产 · {asset.payload.video?.resolution} · {asset.payload.video?.duration}s · {asset.payload.video?.ratio}
+              </span>
+            </div>
+            <button onClick={onClose} className="btn-icon">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="flex-1 flex items-center justify-center bg-black rounded overflow-hidden min-h-0">
+            {videoSrc ? (
+              <video
+                src={videoSrc}
+                controls
+                autoPlay
+                playsInline
+                className="max-w-full max-h-[60vh] object-contain"
+              />
+            ) : (
+              <div className="text-text-muted text-sm p-8">
+                视频源不可用（可能 URL 24h 过期或本地缓存丢失）
+              </div>
+            )}
+          </div>
+          <div className="flex items-center justify-between text-[11px] text-text-muted">
+            <p className="line-clamp-2 flex-1">{asset.prompt}</p>
+            <div className="flex items-center gap-2">
+              {videoSrc && (
+                <a href={videoSrc} download={`y-agent-${asset.id}.mp4`} target="_blank" rel="noreferrer" className="btn-icon p-1" title="下载">
+                  <Download className="w-3.5 h-3.5" />
+                </a>
+              )}
+              <button onClick={() => onCopyPrompt(asset.prompt)} className="btn-icon p-1" title="复制 prompt">
+                <Copy className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); onDelete(asset.id); }}
+                className="btn-icon p-1 text-text-muted hover:text-accent-danger"
+                title="删除"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const onDownloadAll = async () => {
     toast.info(`开始下载 ${images.length} 张图…`);

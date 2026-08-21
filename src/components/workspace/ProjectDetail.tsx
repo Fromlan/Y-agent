@@ -1,13 +1,25 @@
 import { useEffect, useState, useRef } from "react";
 import { ArrowLeft, Brain, KeyRound, Trash2 } from "lucide-react";
 import { useSession } from "@/lib/session";
-import { deleteAsset, backfillLocalAssets } from "@/lib/assets";
+import { deleteAsset, backfillLocalAssets, createAsset } from "@/lib/assets";
+import { buildAssetPayload } from "@/lib/asset-payload";
 import { renameProject } from "@/lib/projects";
 import { explainError } from "@/lib/jimeng";
 import { hasApiKey } from "@/lib/api-key";
 import { useToast } from "@/components/shared/Toast";
 import { usePrompt } from "@/components/shared/PromptProvider";
 import { confirmDialog } from "@/lib/dialog";
+import VideoPromptBar from "@/components/workspace/VideoPromptBar";
+import {
+  submitVideo,
+  cancelVideo,
+  hasVideoApiKey,
+  subscribeVideoEvents,
+  validateAndFixParams,
+  type ContentItem,
+  type VideoRatio,
+  type VideoResolution,
+} from "@/lib/video";
 import { useProjectBootstrap } from "@/lib/hooks/useProjectBootstrap";
 import { MODEL_OPTIONS, type Asset, type ModelOption } from "@/lib/types";
 import {
@@ -83,6 +95,16 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   const [outputFormat, setOutputFormat] = useState<"" | "png" | "jpeg">("png");
   const [transparent, setTransparent] = useState(false);
 
+  // P8：生视频模式状态（与生图解耦）
+  const [videoPrompt, setVideoPrompt] = useState("");
+  const [videoContent, setVideoContent] = useState<ContentItem[]>([]);
+  const [videoResolution, setVideoResolution] = useState<VideoResolution>("2K");
+  const [videoDuration, setVideoDuration] = useState<number>(5);
+  const [videoRatio, setVideoRatio] = useState<VideoRatio | "auto">("16:9");
+  const [videoWatermark, setVideoWatermark] = useState(false);
+  const [hasVideoKey, setHasVideoKey] = useState<boolean | null>(null);
+  const [videoTaskId, setVideoTaskId] = useState<string | null>(null);
+
   // 输入模式：生图（M1 直调）/ 对话（Agent 路由）
   const [inputMode, setInputMode] = useState<InputMode>("chat");
 
@@ -112,7 +134,101 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   useEffect(() => {
     if (!currentProject) return;
     hasApiKey().then(setHasKey).catch(() => setHasKey(false));
+    hasVideoApiKey().then(setHasVideoKey).catch(() => setHasVideoKey(false));
   }, [currentProject, generating]);
+
+  // P8：切到生视频模式时检查 video key
+  useEffect(() => {
+    if (inputMode === "video") {
+      hasVideoApiKey().then(setHasVideoKey).catch(() => setHasVideoKey(false));
+    }
+  }, [inputMode]);
+
+  // P8：订阅视频事件（progress / succeeded / failed / cancelled）
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    const t0 = Date.now();
+    subscribeVideoEvents({
+      onProgress: ({ taskId, status }) => {
+        if (taskId !== videoTaskId) return;
+        const sec = Math.round((Date.now() - t0) / 1000);
+        toast.info(`视频生成中… ${sec}s（${status}）`);
+      },
+      onSucceeded: async ({ taskId, url, localPath, resolution, duration, ratio }) => {
+        if (taskId !== videoTaskId) return;
+        if (!currentProject) return;
+        try {
+          const t1 = Date.now();
+          await createAsset({
+            projectId: currentProject!.id,
+            prompt: videoPrompt.trim(),
+            model: "MiniMax-H3",
+            modelName: "MiniMax H3 (视频)",
+            size: resolution || videoResolution,
+            refCount: videoContent.filter(
+              (c) =>
+                c.type === "image_url" ||
+                c.type === "video_url" ||
+                c.type === "audio_url"
+            ).length,
+            costMs: Date.now() - t1,
+            isLayerDecomposition: false,
+            payload: buildAssetPayload(
+              {
+                urls: [],
+                isTransparent: false,
+                kind: "video",
+                video: {
+                  url,
+                  localPath,
+                  duration: duration || videoDuration,
+                  ratio: ratio || videoRatio,
+                  resolution: (resolution || videoResolution) as "768P" | "2K",
+                  taskId,
+                },
+                status: "approved",
+              },
+              undefined
+            ),
+          });
+          await reload({ silent: true });
+          toast.success("视频已生成，已入库到资产库");
+        } catch (e: any) {
+          const raw = e?.message ?? String(e);
+          const friendly = await explainError(raw).catch(() => raw);
+          toast.error(`视频入库失败：${friendly}`);
+        } finally {
+          setVideoTaskId(null);
+          setGenerating(false);
+        }
+      },
+      onFailed: async ({ taskId, code, message }) => {
+        if (taskId !== videoTaskId) return;
+        const raw = `${code ? `(${code}) ` : ""}${message}`;
+        const friendly = await explainError(raw).catch(() => raw);
+        toast.error(`视频生成失败：${friendly}`);
+        setVideoTaskId(null);
+          setGenerating(false);
+      },
+      onCancelled: ({ taskId }) => {
+        if (taskId !== videoTaskId) return;
+        toast.info("视频生成已取消");
+        setVideoTaskId(null);
+        setGenerating(false);
+      },
+    })
+      .then((u) => {
+        if (cancelled) u();
+        else unlisten = u;
+      })
+      .catch((e) => console.error("subscribeVideoEvents failed", e));
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+    };
+  }, [videoTaskId, currentProject, videoPrompt, videoContent, videoResolution, videoDuration, videoRatio, toast, reload]);
+
 
   // P5+：切项目时主动 backfill 一次，把历史"url 有但 localPath 缺"的资产补下本地。
   // 后端并发下完后通过 `assets://local-backfilled` 事件增量更新到 useProjectBootstrap.assets，
@@ -157,7 +273,13 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     if (isProjectSwitch) {
       lastSyncedProjectIdRef.current = currentProject.id;
     }
-    setTab(inputMode === "tools" ? "tools" : inputMode === "generate" ? "assets" : "chat");
+    setTab(
+      inputMode === "tools"
+        ? "tools"
+        : inputMode === "generate" || inputMode === "video"
+        ? "assets"
+        : "chat"
+    );
   }, [currentProject, inputMode]);
 
   if (!currentProject) {
@@ -762,7 +884,68 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     });
   };
 
-  const onSubmit = inputMode === "chat" ? onSubmitChat : onSubmitGenerate;
+  // P8：生视频提交（异步任务模式）
+  const onSubmitVideo = async () => {
+    if (generating) return;
+    if (!videoPrompt.trim()) {
+      toast.warn("请输入提示词");
+      return;
+    }
+    if (hasVideoKey === false) {
+      toast.error("未配置视频 API Key，请到设置里填");
+      onOpenSettings();
+      return;
+    }
+    // v1：单项目同时只允许 1 个视频任务
+    if (videoTaskId) {
+      toast.warn("上一个视频还没生成完");
+      return;
+    }
+    setGenerating(true);
+    try {
+      const fixedRatio = videoRatio === "auto" ? undefined : videoRatio;
+      const finalContent: ContentItem[] = [
+        ...videoContent,
+        { type: "text", text: videoPrompt.trim() },
+      ];
+      const check = validateAndFixParams({
+        model: "MiniMax-H3",
+        content: finalContent,
+        resolution: videoResolution,
+        duration: videoDuration,
+        ratio: fixedRatio,
+        aigcWatermark: videoWatermark || undefined,
+      });
+      if (!check.ok) {
+        toast.warn(check.reason);
+        setGenerating(false);
+        return;
+      }
+      const taskId = await submitVideo(check.fixed, currentProject.id);
+      setVideoTaskId(taskId);
+      toast.info("视频已提交，异步生成中…");
+      // 切到 assets tab 让用户看到结果
+      if (tab !== "assets") setTab("assets");
+      // 清空 prompt（保留素材，让用户能快速重试微调）
+      setVideoPrompt("");
+    } catch (e: any) {
+      const raw = e?.message ?? String(e);
+      const friendly = await explainError(raw).catch(() => raw);
+      toast.error(friendly);
+      setGenerating(false);
+    }
+  };
+
+  const onCancelVideo = async () => {
+    if (!videoTaskId) return;
+    try {
+      await cancelVideo(videoTaskId);
+    } catch (e: any) {
+      console.warn("cancelVideo failed", e);
+    }
+  };
+
+  const onSubmit = inputMode === "chat" ? onSubmitChat : inputMode === "video" ? onSubmitVideo : onSubmitGenerate;
 
   /** 规则降级：用户点了"开始生成"按钮 */
   const onConfirmPlan = async (msgId: string) => {
@@ -992,6 +1175,36 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
 
       {/* 底部统一输入区 */}
       <div className="border-t border-border bg-bg-panel p-4 flex-shrink-0">
+        {inputMode === "video" && hasVideoKey === false && (
+          <div
+            className="mb-2 flex items-center gap-2 px-3 py-2 rounded-md border text-xs"
+            style={{
+              backgroundColor:
+                "color-mix(in srgb, var(--status-warn) 8%, transparent)",
+              borderColor:
+                "color-mix(in srgb, var(--status-warn) 28%, transparent)",
+            }}
+          >
+            <KeyRound
+              className="w-4 h-4 flex-shrink-0"
+              style={{ color: "var(--status-warn)" }}
+            />
+            <span className="flex-1 text-text-secondary">
+              还没配置视频 API Key。填了才能生视频。
+            </span>
+            <button
+              onClick={onOpenSettings}
+              className="px-2 py-0.5 rounded text-xs font-medium hover:opacity-80"
+              style={{
+                color: "var(--status-warn)",
+                backgroundColor:
+                  "color-mix(in srgb, var(--status-warn) 18%, transparent)",
+              }}
+            >
+              打开设置
+            </button>
+          </div>
+        )}
         {hasKey === false && (
           <div
             className="mb-2 flex items-center gap-2 px-3 py-2 rounded-md border text-xs"
@@ -1025,7 +1238,25 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
         <div className="flex items-center gap-2 mb-2">
           <ModeSwitch mode={inputMode} onChange={setInputMode} disabled={generating} />
         </div>
-        {inputMode !== "tools" && (
+        {inputMode === "video" ? (
+          <VideoPromptBar
+            prompt={videoPrompt}
+            setPrompt={setVideoPrompt}
+            content={videoContent}
+            setContent={setVideoContent}
+            resolution={videoResolution}
+            setResolution={setVideoResolution}
+            duration={videoDuration}
+            setDuration={setVideoDuration}
+            ratio={videoRatio}
+            setRatio={setVideoRatio}
+            watermark={videoWatermark}
+            setWatermark={setVideoWatermark}
+            generating={generating && !!videoTaskId}
+            onSubmit={onSubmit}
+            onCancel={onCancelVideo}
+          />
+        ) : inputMode !== "tools" && (
         <PromptBar
           prompt={prompt}
           setPrompt={setPrompt}

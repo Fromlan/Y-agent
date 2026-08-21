@@ -10,9 +10,11 @@ import {
   HardDrive,
   AlertTriangle,
   Loader2,
+  Video as VideoIcon,
 } from "lucide-react";
 import type { Asset } from "@/lib/types";
-import { assetMainImage, flatAssetImages, imageInput } from "@/lib/types";
+import { assetMainImage, assetVideoSource, flatAssetImages, imageInput } from "@/lib/types";
+import { resolveImageUrlSync } from "@/lib/image-resolver";
 import { useToast } from "@/components/shared/Toast";
 import SafeImage from "@/components/shared/SafeImage";
 import { layerRectNormalized, isNormalizedBboxValid } from "@/lib/layer-view";
@@ -213,6 +215,8 @@ export default function AssetCard({
 }: Props) {
   const toast = useToast();
   const main = assetMainImage(asset);
+  const isVideo = asset.payload?.kind === "video";
+  const videoSrc = isVideo ? resolveImageUrlSync(assetVideoSource(asset)) : "";
   const [hover, setHover] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
 
@@ -258,7 +262,22 @@ export default function AssetCard({
         title={asset.prompt}
       >
         <div className="relative aspect-square bg-bg-elev rounded overflow-hidden border border-border">
-          {asset.isLayerDecomposition ? (
+          {isVideo ? (
+            videoSrc ? (
+              <video
+                src={videoSrc}
+                className="w-full h-full object-cover"
+                muted
+                playsInline
+                preload="metadata"
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-text-muted bg-bg-base">
+                <VideoIcon className="w-5 h-5" />
+              </div>
+            )
+          ) : asset.isLayerDecomposition ? (
             <LayerCompositeThumb asset={asset} className="absolute inset-0" />
           ) : main ? (
             <SafeImage
@@ -300,7 +319,22 @@ export default function AssetCard({
         `}
       >
         <div className="relative aspect-square bg-bg-elev overflow-hidden">
-          {asset.isLayerDecomposition ? (
+          {isVideo ? (
+            videoSrc ? (
+              <video
+                src={videoSrc}
+                className="w-full h-full object-cover"
+                muted
+                playsInline
+                preload="metadata"
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-text-muted bg-bg-base">
+                <VideoIcon className="w-10 h-10" />
+              </div>
+            )
+          ) : asset.isLayerDecomposition ? (
             <LayerCompositeThumb asset={asset} className="absolute inset-0" />
           ) : main ? (
             <SafeImage
@@ -311,6 +345,11 @@ export default function AssetCard({
           ) : (
             <div className="w-full h-full flex items-center justify-center text-text-muted">
               <ImageIcon className="w-10 h-10" />
+            </div>
+          )}
+          {isVideo && (
+            <div className="absolute top-2 left-2 bg-black/75 text-accent text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1">
+              <VideoIcon className="w-3 h-3" /> 视频
             </div>
           )}
           {asset.isLayerDecomposition && (
@@ -402,7 +441,22 @@ export default function AssetCard({
       `}
     >
       <div className="relative h-48 bg-bg-elev overflow-hidden">
-        {asset.isLayerDecomposition ? (
+        {isVideo ? (
+          videoSrc ? (
+            <video
+              src={videoSrc}
+              className="w-full h-full object-cover block"
+              muted
+              playsInline
+              preload="metadata"
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-text-muted bg-bg-base">
+              <VideoIcon className="w-10 h-10" />
+            </div>
+          )
+        ) : asset.isLayerDecomposition ? (
           <LayerCompositeThumb asset={asset} className="absolute inset-0" />
         ) : main ? (
           <SafeImage
@@ -414,6 +468,11 @@ export default function AssetCard({
         ) : (
           <div className="w-full h-full flex items-center justify-center text-text-muted">
             <ImageIcon className="w-10 h-10" />
+          </div>
+        )}
+        {isVideo && (
+          <div className="absolute top-2 left-2 bg-black/75 text-accent text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1">
+            <VideoIcon className="w-3 h-3" /> 视频
           </div>
         )}
         {asset.isLayerDecomposition && (
