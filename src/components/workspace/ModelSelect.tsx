@@ -22,14 +22,23 @@ function buildCustomOption(id: string): ModelOption {
 function summarizeCaps(c: ModelCapabilities): string {
   const flags: string[] = [];
   if (c.webSearch) flags.push("联网");
-  if (c.stream) flags.push("流式");
   if (c.fastMode) flags.push("极速");
   if (c.background) flags.push("透明");
   if (c.layerDecomposition) flags.push("图层");
-  if (c.interactiveEdit) flags.push("bbox");
+  if (c.interactiveEdit) flags.push("局部编辑");
   if (c.outputFormats.includes("png") && c.outputFormats.includes("jpeg")) flags.push("PNG/JPEG");
   else if (c.outputFormats.includes("jpeg")) flags.push("仅 JPEG");
   return flags.length > 0 ? flags.join(" · ") : "基础生图";
+}
+
+function summarizeCapsShort(c: ModelCapabilities): string {
+  const flags: string[] = [];
+  if (c.webSearch) flags.push("联网");
+  if (c.fastMode) flags.push("极速");
+  if (c.background) flags.push("透明");
+  if (c.layerDecomposition) flags.push("图层");
+  // 只显示前 2 个，剩余放 tooltip
+  return flags.slice(0, 2).join(" · ");
 }
 
 export default function ModelSelect({ value, onChange }: Props) {
@@ -41,6 +50,9 @@ export default function ModelSelect({ value, onChange }: Props) {
   // 自定义模型 ID 不局限于 ep-/custom- 前缀；只要不是内置模型，都应显示自定义编辑框
   const isCustom =
     value.id === "CUSTOM" || !MODEL_OPTIONS.some((m) => m.id === value.id);
+
+  const shortSummary = summarizeCapsShort(value.capabilities);
+  const fullSummary = value.hint ?? summarizeCaps(value.capabilities);
 
   return (
     <div className="flex items-center gap-1.5">
@@ -65,13 +77,15 @@ export default function ModelSelect({ value, onChange }: Props) {
           </option>
         ))}
       </select>
-      {/* 选中模型的能力位摘要（连同 hint） */}
-      <span
-        className="text-[10px] text-text-muted"
-        title={value.hint ?? summarizeCaps(value.capabilities)}
-      >
-        {summarizeCaps(value.capabilities)}
-      </span>
+      {/* 能力位摘要：主行只显示前 2 个，hover tooltip 看全部 */}
+      {shortSummary && (
+        <span
+          className="text-[10px] text-text-muted hidden md:inline"
+          title={fullSummary}
+        >
+          {shortSummary}
+        </span>
+      )}
       {(isCustom || editing) && (
         <input
           type="text"
