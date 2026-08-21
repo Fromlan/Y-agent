@@ -7,6 +7,7 @@ import {
   Image as ImageIcon,
   Info,
   AlertCircle,
+  Sparkles,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useToast } from "@/components/shared/Toast";
@@ -43,6 +44,9 @@ interface Props {
   setRatio: (r: VideoRatio | "auto") => void;
   watermark: boolean;
   setWatermark: (b: boolean) => void;
+  /** P9：是否启用 H3-Context-IR 提示词增强。默认 ON。Optional: 旧调用点不传时按 ON 处理。 */
+  optimizePrompt?: boolean;
+  setOptimizePrompt?: (b: boolean) => void;
   generating: boolean;
   onSubmit: () => void;
   onCancel?: () => void;
@@ -61,6 +65,8 @@ export default function VideoPromptBar({
   setRatio,
   watermark,
   setWatermark,
+  optimizePrompt = true,
+  setOptimizePrompt = () => {},
   generating,
   onSubmit,
   onCancel,
@@ -387,6 +393,21 @@ export default function VideoPromptBar({
                 )}
               </select>
             </Field>
+
+            {/* P9: AI 增强提示词 toggle（用 H3-Context-IR 把描述扩成分镜/声音/配乐） */}
+            <label
+              className="flex items-center gap-1.5 h-[38px] cursor-pointer select-none"
+              title="用 H3-Context-IR 把你的描述扩成镜头分镜 + 声音 + 配乐,通常 +5-15s"
+            >
+              <input
+                type="checkbox"
+                checked={optimizePrompt}
+                onChange={(e) => setOptimizePrompt(e.target.checked)}
+                className="accent-accent"
+              />
+              <Sparkles className="w-3.5 h-3.5 text-accent" />
+              <span className="text-xs whitespace-nowrap">AI 增强提示词</span>
+            </label>
 
             {/* 更多按钮 */}
             <button
