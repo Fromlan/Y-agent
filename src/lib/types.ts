@@ -214,6 +214,26 @@ export interface GeneratedImage {
   localPath?: string;
 }
 
+/** 资产类型。`image`（默认）= 图片；`video` = 视频。
+ * 老资产 payload 缺 `kind` 字段时一律按 image 处理。P8 新增。 */
+export type AssetKind = "image" | "video";
+
+/** 视频资产的元信息。`kind === "video"` 时必有。P8 新增。 */
+export interface VideoPayload {
+  /** 视频外链 URL（H3 产物，24h 失效）。localPath 有值时优先用 localPath。 */
+  url: string;
+  /** 本地缓存绝对路径（Rust 端 succeeded 时下载）。 */
+  localPath?: string;
+  /** 视频时长（秒）。 */
+  duration: number;
+  /** 视频宽高比：16:9 / 9:16 / adaptive 等。 */
+  ratio: string;
+  /** 分辨率：768P | 2K。 */
+  resolution: "768P" | "2K";
+  /** MiniMax H3 返回的 task_id。UI 重连或排查时用。 */
+  taskId: string;
+}
+
 export interface AssetPayload {
   /** 单图/组图时所有图的 url 列表 */
   urls: string[];
@@ -247,6 +267,10 @@ export interface AssetPayload {
   relatedAssetIds?: string[];
   /** P1：组件契约 id（拆页面为组件时绑定 ui-component-breakdown 的产物）。 */
   componentContractId?: string;
+  /** P8：资产类型。缺省视为 `"image"`。 */
+  kind?: AssetKind;
+  /** P8：视频元信息。`kind === "video"` 时必有。 */
+  video?: VideoPayload;
 }
 
 export interface Asset {
@@ -307,6 +331,9 @@ export function flatAssetImages(asset: Asset): GeneratedImage[] {
  *  上层应通过 `@/lib/image-resolver` 的 `resolveImageUrl` 异步转成可用的 data URL。
  *  P5：优先 localPath，没有时回退 url。 */
 export function assetMainImage(asset: Asset): string | null {
+  // 视频资产走 video.localPath / video.url
+  const v = assetVideoSource(asset);
+  if (v) return v;
   if (asset.isLayerDecomposition && asset.payload.layers?.length) {
     const rawLayers = asset.payload.layers;
     const layerLocalPaths = asset.payload.layerLocalPaths ?? [];
@@ -318,6 +345,14 @@ export function assetMainImage(asset: Asset): string | null {
   const local = asset.payload.localPaths?.[0];
   return local ?? asset.payload.urls?.[0] ?? null;
 }
+/** 取视频资产的播放源：localPath 优先，缺失时回退 url。
+ *  返回的是原始字符串（可能是 Windows 路径 / http URL / data URL），
+ *  上层应通过 `resolveImageUrlSync` 转成浏览器可用的 `asset://` / `data:` URL。 */
+export function assetVideoSource(asset: Asset): string | null {
+  if (asset.payload?.kind !== "video" || !asset.payload.video) return null;
+  return asset.payload.video.localPath ?? asset.payload.video.url ?? null;
+}
+
 
 /** 同步版：从 GeneratedImage 拿"输入路径"（localPath 优先，回退 url） */
 export function imageInput(img: GeneratedImage): string {

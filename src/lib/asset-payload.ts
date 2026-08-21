@@ -13,7 +13,13 @@
  * 所有 createAsset 调用点都必须通过这两个函数构造 payload，禁止再手写
  * `payload.outputFormat` 等字段（避免再次发生字段遗漏）。
  */
-import type { AssetPayload, GeneratedImage, Usage } from "@/lib/types";
+import type {
+  AssetPayload,
+  GeneratedImage,
+  Usage,
+  AssetKind,
+  VideoPayload,
+} from "@/lib/types";
 import { applyOutputFormatDefault } from "@/lib/jimeng";
 
 /** 局部编辑时画的 bbox（图像素坐标，x1 y1 x2 y2） */
@@ -50,7 +56,12 @@ export interface BuildAssetPayloadInput {
   relatedAssetIds?: string[];
   /** P1：组件契约 id。 */
   componentContractId?: string;
+  /** P8：资产类型。图片（缺省）/ 视频。 */
+  kind?: AssetKind;
+  /** P8：视频元信息。`kind === "video"` 时必传。 */
+  video?: VideoPayload;
 }
+
 
 /**
  * 统一 format 解析规则。
@@ -144,6 +155,13 @@ export function buildAssetPayload(
   }
   if (input.componentContractId) {
     payload.componentContractId = input.componentContractId;
+  }
+  // P8：资产类型（缺省视为 image，老数据不写此字段以保持兼容）
+  if (input.kind) {
+    payload.kind = input.kind;
+  }
+  if (input.video) {
+    payload.video = input.video;
   }
   return payload;
 }

@@ -1,6 +1,6 @@
-import { Image as ImageIcon, MessageSquare, Wrench } from "lucide-react";
+import { Image as ImageIcon, MessageSquare, Video, Wrench } from "lucide-react";
 
-export type InputMode = "generate" | "chat" | "tools";
+export type InputMode = "generate" | "chat" | "tools" | "video";
 
 interface Props {
   mode: InputMode;
@@ -10,8 +10,9 @@ interface Props {
 
 /**
  * 输入模式 / 视图 tab 切换：
- * - 对话：M2 Agent 路由（命中 Skill 再生成）
+ * - 对话：M2 Agent 路由（命中 Skill 后再生成）
  * - 生图：M1 直调即梦（基础生图 + 资产看板）
+ * - 生视频：直接调 MiniMax H3（异步轮询，资产入库）
  * - 工具：高级能力工作台（批量组图 / 联网 / 去背 / 图层 / 局部编辑）
  */
 export default function ModeSwitch({ mode, onChange, disabled }: Props) {
@@ -27,6 +28,12 @@ export default function ModeSwitch({ mode, onChange, disabled }: Props) {
       label: "生图",
       icon: ImageIcon,
       title: "直接生图（不经过 Agent）",
+    },
+    {
+      id: "video",
+      label: "生视频",
+      icon: Video,
+      title: "直接生视频（MiniMax H3，不经过 Agent）",
     },
     {
       id: "tools",
