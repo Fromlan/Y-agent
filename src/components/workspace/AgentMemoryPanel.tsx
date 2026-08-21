@@ -103,22 +103,18 @@ export default function AgentMemoryPanel({ open, onClose, projectId, onContextCh
         </div>
 
         <p className="text-xs text-text-muted mb-4">
-          Agent 会从这个项目里学到的画风偏好。每次生成后，自动从 prompt 里提取关键词。
-          你也可以手动编辑覆盖自动学习结果。
+          Agent 学到的画风偏好，会拼到每次对话模式生成的 prompt 末尾。
         </p>
 
         <div className="space-y-4">
           <section>
-            <label className="label">画风偏好（用「、」分隔，最多 8 个）</label>
+            <label className="label">画风偏好</label>
             <input
               value={styleHintsText}
               onChange={(e) => setStyleHintsText(e.target.value)}
               placeholder="例如：厚涂、写实、3:2、暖色调"
               className="input"
             />
-            <p className="text-[11px] text-text-muted mt-1">
-              这些关键词会被拼到每次对话模式生成的 prompt 末尾
-            </p>
           </section>
 
           <section>

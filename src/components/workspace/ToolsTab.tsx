@@ -142,12 +142,7 @@ export default function ToolsTab({ projectId, assets, onAssetCreated, hasKey, on
   return (
     <div className="flex-1 overflow-y-auto p-6">
       <div className="max-w-5xl mx-auto space-y-4">
-        <div>
-          <h2 className="text-base font-medium">工具</h2>
-          <p className="text-xs text-text-muted mt-1">
-            即梦 API 全部能力的快捷入口。每个工具用合适的模型预设参数，一键完成常见任务。
-          </p>
-        </div>
+        <h2 className="text-base font-medium">工具</h2>
 
         {hasKey === false && (
           <div
@@ -158,7 +153,7 @@ export default function ToolsTab({ projectId, assets, onAssetCreated, hasKey, on
             }}
           >
             <span className="flex-1 text-text-secondary">
-              还没配置即梦 API Key。填了才能用工具。
+              还没配置即梦 API Key。
             </span>
             <button
               onClick={onOpenSettings}

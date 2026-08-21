@@ -36,11 +36,9 @@ export default function ChatMessageList({ messages, generating, onConfirmPlan, o
       <div className="flex-1 flex items-center justify-center text-text-muted text-sm">
         <div className="text-center max-w-md">
           <Sparkles className="w-8 h-8 mx-auto mb-3 text-accent" />
-          <p className="font-medium text-text-secondary">和 Y-agent 对话生成游戏美术</p>
-          <p className="text-xs mt-2 leading-relaxed">
-            在下方输入框描述你的需求，或输入 <code className="px-1 py-0.5 bg-bg-hover rounded">/</code> 选择预置 Skill
-            <br />
-            （角色三视图、九宫格表情、UI 图标、KV 海报等）
+          <p className="font-medium text-text-secondary">对话生成游戏美术</p>
+          <p className="text-xs mt-2 text-text-muted">
+            按 <code className="px-1 py-0.5 bg-bg-hover rounded text-accent">/</code> 选 Skill
           </p>
         </div>
       </div>
@@ -207,7 +205,7 @@ function PlanCard({
   const displayModel = currentModelName ?? plan.modelName ?? "默认模型";
   return (
     <div className="mt-2 panel p-3 space-y-2 border-accent/40">
-      <div className="text-xs text-text-muted">📋 待执行计划</div>
+      <div className="text-xs text-text-muted">生成计划</div>
       <div className="grid grid-cols-3 gap-2 text-xs">
         <div>
           <div className="text-text-muted">模型</div>
@@ -229,14 +227,14 @@ function PlanCard({
           💡 Skill 推荐「{plan.suggestedModelName}」更合适（你当前选的是「{displayModel}」）。如需切换请先在 PromptBar 改模型。
         </div>
       )}
-      <details className="text-xs">
-        <summary className="cursor-pointer text-text-secondary hover:text-text-primary">
-          查看完整 prompt
-        </summary>
-        <pre className="mt-1 p-2 bg-bg-base rounded text-[11px] whitespace-pre-wrap break-all text-text-secondary">
+      <div>
+        <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1">
+          Prompt
+        </div>
+        <pre className="text-[11px] text-text-secondary bg-bg-base rounded p-2 max-h-24 overflow-y-auto whitespace-pre-wrap break-all">
           {plan.prompt}
         </pre>
-      </details>
+      </div>
       <div className="flex items-center gap-2 pt-1">
         <button
           onClick={onConfirm}
@@ -257,9 +255,6 @@ function PlanCard({
             取消
           </button>
         )}
-        <span className="text-[11px] text-text-muted ml-auto">
-          继续发消息可重新规划
-        </span>
       </div>
     </div>
   );
@@ -339,10 +334,6 @@ function SkillLog({
             {triggerLabel(log.triggerType)}
           </div>
           <div>
-            <span className="text-text-secondary">模型：</span>
-            {log.modelName}
-          </div>
-          <div>
             <span className="text-text-secondary">理由：</span>
             <span className="md-content md-compact inline">
               <Markdown remarkPlugins={[remarkGfm]}>{log.reasoning}</Markdown>
@@ -369,9 +360,9 @@ function SkillLog({
 }
 
 function triggerLabel(t: "explicit" | "keyword" | "fallback") {
-  if (t === "explicit") return <span className="text-accent">显式（/xxx）</span>;
-  if (t === "keyword") return <span className="text-accent">关键词匹配</span>;
-  return <span className="text-text-muted">默认</span>;
+  if (t === "explicit") return <span className="text-accent">/ 命令</span>;
+  if (t === "keyword") return <span className="text-accent">关键词</span>;
+  return <span className="text-text-muted">未指定</span>;
 }
 
 // ============================================================================
@@ -444,14 +435,6 @@ function ToolCallCard({ tc }: { tc: ToolCallRecord }) {
           {tc.result && (
             <div className="text-text-secondary">{tc.result}</div>
           )}
-          <details>
-            <summary className="cursor-pointer text-text-secondary hover:text-text-primary text-[10px]">
-              参数
-            </summary>
-            <pre className="mt-1 p-1.5 bg-bg-base rounded text-[10px] whitespace-pre-wrap break-all text-text-muted max-h-40 overflow-y-auto">
-              {JSON.stringify(tc.args, null, 2)}
-            </pre>
-          </details>
           {tc.assets && tc.assets.length > 0 && (
             <div className="text-[10px] text-text-muted">
               已生成 {tc.assets.length} 张图（见下方）

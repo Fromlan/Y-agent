@@ -63,7 +63,7 @@ export default function SkillCenterPage() {
         <div className="flex items-center gap-2">
           <Wand2 className="w-4 h-4 text-accent" />
           <h1 className="text-sm font-semibold text-text-primary">Skill 中心</h1>
-          <span className="text-[10px] text-text-muted">预设提示词模板 · {all.length} 个</span>
+          <span className="text-[10px] text-text-muted">· {all.length} 个</span>
         </div>
         <div className="flex-1 max-w-sm">
           <div className="relative">
@@ -261,10 +261,6 @@ function SkillDetail({
             );
           })}
         </div>
-        <p className="text-[11px] text-text-muted mt-2">
-          提示：在项目输入框里以 <code className="text-accent">/</code> 开头的命令会自动唤起
-          Skill picker。
-        </p>
       </section>
 
       {/* 推荐参数 */}
@@ -319,7 +315,7 @@ function SkillDetail({
           {skill.template}
         </pre>
         <p className="text-[11px] text-text-muted mt-2">
-          模板里的 <code className="text-accent">{"{{user_input}}"}</code> 会在使用时替换为你的原话。
+          <code className="text-accent">{"{{user_input}}"}</code> 会替换为你的原话。
         </p>
       </section>
     </div>

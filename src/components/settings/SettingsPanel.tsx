@@ -246,9 +246,6 @@ export default function SettingsPanel({ open, onClose }: Props) {
               外观主题
             </h3>
             <ThemePicker />
-            <p className="text-[10px] text-text-muted/70 mt-1.5">
-              即时切换，自动保存。下次启动仍生效。
-            </p>
           </section>
 
           {/* 默认偏好 */}
@@ -319,7 +316,7 @@ export default function SettingsPanel({ open, onClose }: Props) {
                 </button>
               </div>
               <p className="text-[11px] text-text-muted mt-1.5">
-                Key 通过本地加密存储在 Rust 端，不会上传到任何地方。在
+                在
                 <a
                   className="text-accent hover:underline mx-1"
                   href="https://console.volcengine.com/ark/region:cn-beijing/apiKey"
@@ -328,7 +325,7 @@ export default function SettingsPanel({ open, onClose }: Props) {
                 >
                   火山方舟控制台
                 </a>
-                获取。
+                获取 Key。
               </p>
             </div>
           </section>
@@ -371,9 +368,6 @@ export default function SettingsPanel({ open, onClose }: Props) {
             ) : (
               <p className="text-xs text-text-muted">加载中…</p>
             )}
-            <p className="text-[10px] text-text-muted/70 mt-1.5">
-              实际计费以火山方舟控制台账单为准（demo 模式不计入）
-            </p>
           </section>
 
           <section>
@@ -432,7 +426,7 @@ export default function SettingsPanel({ open, onClose }: Props) {
                 </div>
               )}
               <p className="text-[11px] text-text-muted">
-                LLM 用于「对话」模式：Agent 会主动反问、推荐选项、调工具生成图。留空则退到规则路由（不真对话，只展示计划）。
+                留空则退到规则路由（不真对话，只展示计划）。
                 {llmProvider === "deepseek" && (
                   <> 在 <a className="text-accent hover:underline mx-1" href="https://platform.deepseek.com/" target="_blank" rel="noreferrer">DeepSeek 平台</a> 注册免费拿 Key。</>
                 )}
@@ -463,7 +457,7 @@ export default function SettingsPanel({ open, onClose }: Props) {
                 </div>
               )}
               <p className="text-[10px] text-text-muted/70">
-                一次性操作，修复 P4 之前入库的资产"格式"为空。火山方舟 URL 不带扩展名时会跳过（属正常）。
+                一次性操作，已有字段不动。
               </p>
             </div>
           </section>
