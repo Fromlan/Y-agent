@@ -163,7 +163,7 @@ export default function VideoPromptBar({
     setContent((prev) => prev.filter((c) => !predicate(c)));
   };
 
-  // 参考视频/音频：v1 只支持外链 URL（避免 base64 超 64MB body 限制）
+  // 参考视频/音频：r2va 必传 URL（外链）
   const [videoUrlInput, setVideoUrlInput] = useState(
     refVideo?.type === "video_url" ? refVideo.video_url.url : ""
   );
@@ -476,7 +476,7 @@ export default function VideoPromptBar({
       {showAdvanced && (videoUrlInput || audioUrlInput) && (
         <div className="text-[10px] text-text-muted/80 flex items-center gap-1">
           <Info className="w-3 h-3" />
-          参考视频 ≤50MB / 参考音频 ≤15MB；请求体总大小 ≤64MB。视频/音频仅支持外链 URL（v1 不支持本地文件 base64 上传）。
+          参考视频 ≤50MB / 参考音频 ≤15MB；请求体总大小 ≤64MB。视频/音频仅支持外链 URL。
         </div>
       )}
       {isInvalid && (
