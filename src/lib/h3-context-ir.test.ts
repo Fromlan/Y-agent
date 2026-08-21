@@ -27,6 +27,7 @@ import {
   optimizeVideoPrompt,
   explainOptimizeReason,
   isOptimizeSuccess,
+  isHardFailure,
   type H3OptimizeResult,
   type OptimizeParams,
 } from "@/lib/h3-context-ir";
@@ -272,5 +273,32 @@ describe("isOptimizeSuccess", () => {
     expect(isOptimizeSuccess("parse")).toBe(false);
     expect(isOptimizeSuccess("skipped")).toBe(false);
     expect(isOptimizeSuccess("insufficient_balance")).toBe(false);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// isHardFailure (V2: 区分硬失败 / 软失败)
+// ----------------------------------------------------------------------------
+
+describe("isHardFailure", () => {
+  it("invalid_param / parse 是硬失败（程序员 bug, 不应静默降级）", () => {
+    expect(isHardFailure("invalid_param")).toBe(true);
+    expect(isHardFailure("parse")).toBe(true);
+  });
+
+  it("ok / demo / skipped 不是硬失败", () => {
+    expect(isHardFailure("ok")).toBe(false);
+    expect(isHardFailure("demo")).toBe(false);
+    expect(isHardFailure("skipped")).toBe(false);
+  });
+
+  it("环境/用户类的失败都是软失败（可静默降级到原 prompt）", () => {
+    expect(isHardFailure("rate_limit")).toBe(false);
+    expect(isHardFailure("auth")).toBe(false);
+    expect(isHardFailure("insufficient_balance")).toBe(false);
+    expect(isHardFailure("sensitive")).toBe(false);
+    expect(isHardFailure("timeout")).toBe(false);
+    expect(isHardFailure("network")).toBe(false);
+    expect(isHardFailure("empty_response")).toBe(false);
   });
 });

@@ -23,6 +23,7 @@ import {
 import {
   optimizeVideoPrompt,
   explainOptimizeReason,
+  isHardFailure,
   type OptimizeReason,
 } from "@/lib/h3-context-ir";
 import { useProjectBootstrap } from "@/lib/hooks/useProjectBootstrap";
@@ -971,7 +972,21 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
             optimizedPrompt = opt.prompt;
             optimizationReason = opt.reason;
             toast.info("已优化 · 正在生成视频…");
+          } else if (isHardFailure(opt.reason)) {
+            // 硬失败（程序员 bug:传参错 / 响应解析失败）—— 必须显式弹出,
+            // 不静默降级,避免「视频能跑但其实没增强」的隐性 bug。
+            optimizationReason = opt.reason;
+            const why = explainOptimizeReason(opt.reason) ?? opt.reason;
+            toast.error(
+              `AI 增强失败（${why}）—— 视频仍会用原提示词生成,请检查后重试`
+            );
+            log.error("project-detail", "h3 hard failure:", opt.reason);
+            // 硬失败:用原 prompt 继续生成(不阻断用户),但 reason 标记为错误,
+            // 详情页会显示「未生效」
+            finalText = originalText;
+            optimizedPrompt = undefined;
           } else {
+            // 软失败（限流/鉴权/网络/超时/敏感/余额等）—— 可静默降级
             optimizationReason = opt.reason;
             const why = explainOptimizeReason(opt.reason);
             if (why) toast.warn(`优化跳过（${why}），用原提示词生成`);

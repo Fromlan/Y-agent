@@ -1131,20 +1131,36 @@ const DEMO_VIDEO_MP4: &[u8] = include_bytes!("../assets/demo-video.mp4");
 
 #### 7.10.4 失败兜底约定（重要）
 
-`jimeng_h3_optimize` 命令**永远不返回 `Err`**（除 Key 未设置外）。失败通过 `OptimizeResult { prompt, is_optimized: false, reason }` 透传：
+`jimeng_h3_optimize` 命令**永远不返回 `Err`**（除 Key 未设置外）。失败通过 `OptimizeResult { prompt, is_optimized: false, reason }` 透传。
 
-| 失败点 | `is_optimized` | `reason` | 前端行为 |
-|---|---|---|---|
-| H3 submit 4xx/5xx | false | 对应 reason（rate_limit / auth / ...） | toast.warn + 用原 prompt 继续 |
-| H3 poll 超时（60s） | false | `timeout` | 同上 |
-| 连续 3 次 poll 失败 | false | `network` | 同上 |
-| content.prompt 为空 | false | `empty_response` | 同上 |
-| 触发内容敏感 (1026) | false | `sensitive` | 同上 |
-| 响应 task_type 不是 h3_context_ir | false | `parse` | 同上 |
-| **成功** | true | `ok` | toast.info("已优化 · 正在生成视频…") |
-| **Demo 模式** | true | `demo` | 同上 |
+前端把 reason 拆成两类：
 
-**核心原则**：H3 失败**不影响视频生成**。前端用 `result.prompt`（= 原 prompt 透传）继续调 `submitVideo`。
+**硬失败**（程序员 bug, 不应出现, 必须显式弹出避免隐性 bug）：
+
+- `invalid_param` —— 前端传参错（如 content 缺 text）
+- `parse` —— 响应解析失败 / task_type 不对
+
+前端 `isHardFailure(reason)` 返回 true 时：**toast.error 弹**「AI 增强失败（reason）—— 视频仍会用原提示词生成」, `optimizationReason` 仍标 reason, 详情页显示「未生效」。
+
+**软失败**（环境/用户类, 可静默降级, 不影响视频生成）：
+
+| reason | 触发场景 | 前端行为 |
+|---|---|---|
+| `rate_limit` | H3 submit 4xx/5xx (1002) | toast.warn + 用原 prompt 继续 |
+| `auth` | 鉴权失败 (1004) | 同上 |
+| `insufficient_balance` | 余额不足 (1008) | 同上 |
+| `sensitive` | 触发内容审核 (1026) | 同上 |
+| `timeout` | H3 poll 超时（60s） | 同上 |
+| `network` | 连续 3 次 poll 失败 | 同上 |
+| `empty_response` | content.prompt 为空 | 同上 |
+| `skipped` | 用户主动关闭（前端跳过整个流程） | 不调 Rust |
+
+**成功**：`reason` 是 `ok` 或 `demo`，`isOptimizeSuccess(reason)` 返回 true，弹「已优化 · 正在生成视频…」。
+
+**核心原则**：
+
+- 软失败 → 静默降级, 不影响视频生成
+- 硬失败 → 显式弹错, 仍用原 prompt 跑视频（不阻断用户）, 但 reason 标记为错, 详情页可见
 
 #### 7.10.5 OptimizeReason 枚举对齐
 

@@ -138,3 +138,15 @@ export function explainOptimizeReason(r: OptimizeReason): string | null {
 export function isOptimizeSuccess(r: OptimizeReason): boolean {
   return r === "ok" || r === "demo";
 }
+
+/**
+ * 是否硬失败（程序员 bug，不应该出现）。
+ * 出现时说明前端传参错了或响应解析出错 —— 不应该静默兜底,
+ * 必须 toast.error 弹给用户看到,避免「视频能跑但其实没增强」的隐性 bug。
+ *
+ * 软失败（rate_limit / auth / network / timeout / sensitive / ...）走静默降级即可,
+ * 因为这些是用户可恢复或环境性的,不影响最终视频生成。
+ */
+export function isHardFailure(r: OptimizeReason): boolean {
+  return r === "invalid_param" || r === "parse";
+}
