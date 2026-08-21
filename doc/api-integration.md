@@ -292,6 +292,25 @@ buildAssetPayload({ layers, layerLocalPaths, ... })
 是 5.0 Pro 官方"任意尺寸重建"方案。`LayerCompositeStage` 优先使用，
 老数据（缺 normalized）由 `layerRectNormalized` 自动 fallback 铺满。
 
+##### 资产卡 fallback 行为（M3+ 补丁，资产库显示修复）
+
+资产卡（`AssetCard`）的图层缩略图（`LayerCompositeThumb` 主图 + `LayerThumbnailMini` 右下角 48×48）和详情对话框的 `LayerCompositeStage` 是**两套独立渲染**，fallback 策略不同：
+
+- **资产卡**（`LayerCompositeThumb` / `LayerThumbnailMini`）调用统一判断 `canCompositeAssetLayers(asset)`：
+  - `true`（`isLayerDecomposition && payload.layers 非空 && 至少 1 个非底图层有合法 bbox.normalized`）→ 多层 bbox 合成（含棋盘背景 + 8px 透明层）
+  - `false` → 自动降级到 `assetMainImage(asset)` 单图 `object-cover` 渲染；主图也拿不到时显示 `ImageIcon` 占位
+- **详情对话框**（`LayerCompositeStage`）走原 `bboxHealth` 路径：所有非底图层都缺 bbox 时自动切单图层视图（已有行为，详见 §1.7.2 排错表）。
+
+fallback 触发场景：
+1. **历史 ToolsTab 数据**（修复前入库的）：`payload.layers` 缺失，只有 `urls` → 走单图 fallback
+2. **`payload.layers` 存在但 bbox 全缺**（5.0 Pro 偶发返 bbox 失败 / 用 Lite/4.5 强行调 layer_decomposition）→ 走单图 fallback
+3. **完全没图层**（仅底图单层）→ 走单图 fallback（视觉与单图相同，省一层）
+4. **图层 URL 24h 过期 + localPath 缺失** → 走占位图标
+
+为什么是 fallback 而不是"按 bbox 铺满"：`layerRectNormalized` 缺 bbox 时回退铺满 [0, 0, 1, 1] 会让所有缺 bbox 的图层跟底图 100% 重叠，视觉上变成"全屏同尺寸"色块——对历史数据这种"所有图都缺 bbox"的情况特别糟，资产卡看上去全是空白或单色大色块。fallback 走主图至少给用户一张可识别的预览。
+
+新函数 `canCompositeAssetLayers` 位于 `src/lib/layer-view.ts`，8 个 Vitest 用例覆盖（`layer-view.test.ts` 末尾 `describe("canCompositeAssetLayers")` 块）：非图层 / 缺 layers / 仅底图 / 全部 bbox 缺失 / 至少 1 个合法 / 部分缺失 / 全非法 / 空数组。
+
 #### 1.7.1 前端合成视图（M3 升级）
 
 - `src/components/workspace/LayerCompositeStage.tsx`：把可见图层按 zIndex 升序叠放在一个固定比例的画布上。**定位用 `boundingBox.normalized` (0-1 浮点 × base 像素)**，aspect-independent，5.0 Pro 官方推荐；底图容器 aspect 用 onLoad 校正后的 base 自然像素（API 报告的 `size` 偶尔不准，作为初值兜底）。
