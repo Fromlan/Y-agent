@@ -20,7 +20,7 @@ export const AGENT_TOOLS: ToolDefinition[] = [
           prompt: {
             type: "string",
             description:
-              "中文/英文 prompt 描述。尽量具体：包含主体、画风、构图、配色、光照、镜头角度等。",
+              "中文/英文 prompt 描述。\n写 prompt 原则(Seedream 官方指南):\n- 简洁连贯,一段主体 + 行为 + 环境 + 1-3 个风格词\n- 写明应用场景(\"游戏 KV 海报\"/\"UI 截图基准\")\n- 文字内容放双引号:`标题 \"Seedream 4.5\"`\n- 多图参考用\"图一\"/\"图二\"指代\n- 多图输出触发词:\"一系列 N 张\"/\"一套 N 张\"/\"N 张组图\"\n- 避免堆砌华丽形容词、避免风格与画面矛盾",
           },
           model: {
             type: "string",
@@ -99,7 +99,7 @@ export const AGENT_TOOLS: ToolDefinition[] = [
           prompt: {
             type: "string",
             description:
-              "告诉模型想拆什么（如\"只拆人物和前景文字\"）。可选，缺省自动拆。",
+              "告诉模型想拆什么（如\"只拆人物和前景文字\"）。可选，缺省自动拆。\nSeedream 提示词原则:简洁一句话描述即可,避免堆词。",
           },
           model: {
             type: "string",
@@ -128,7 +128,7 @@ export const AGENT_TOOLS: ToolDefinition[] = [
           },
           edit_prompt: {
             type: "string",
-            description: "修改指令（中文）。例：\"把头发改成红色\"、\"在框内加一束花\"。",
+            description: "修改指令(中文)。例:\"把头发改成红色\"、\"在框内加一束花\"。\nSeedream 提示词原则:简洁明确,说明修改对象 + 修改内容,避免指代模糊的代词;如果不改的部分要保持原样,在 prompt 里显式强调\"其他保持不变\"。",
           },
           bbox: {
             type: "object",
@@ -177,6 +177,19 @@ export function renderSystemPrompt(opts: {
     : "";
 
   return `你是 Y-agent，一个游戏美术师 AI 助手，正在帮独立游戏美术师完成一张美术资产。
+
+## 写 prompt 的通用原则(Seedream 官方指南)
+
+1. **简洁连贯 > 堆词**——一段主体 + 行为 + 环境 + 1-3 个风格词,胜过堆砌华丽形容词
+2. **明确应用场景**——写"游戏 KV 海报"/"UI 截图基准"等具体用途
+3. **文字放双引号**——生成文字内容时 \`标题 "Seedream 4.5"\`
+4. **多图参考用"图一"/"图二"**指代,不写"这个图"
+5. **多图输出用"一系列 N 张"/"N 张组图"**触发(Seedream 专用触发词)
+6. **避免风格矛盾**——"写实厚涂 + 像素风格"会画崩
+
+反面:复述用户原话而不扩展、堆砌华丽词、风格与画面不匹配。
+
+
 
 ## 你的工作方式
 
