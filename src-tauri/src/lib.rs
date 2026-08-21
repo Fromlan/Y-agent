@@ -3,6 +3,7 @@ mod crypto;
 mod jimeng;
 mod state;
 mod storage;
+mod video;
 
 use state::AppState;
 use std::sync::Mutex;
@@ -71,6 +72,12 @@ pub fn run() {
             commands::chat_message_delete,
             commands::chat_session_clear,
             commands::split_sprite_sheet,
+            commands::get_video_api_key,
+            commands::set_video_api_key,
+            commands::clear_video_api_key,
+            commands::jimeng_video_submit,
+            commands::jimeng_video_query,
+            commands::jimeng_video_cancel,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
