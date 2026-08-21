@@ -261,8 +261,8 @@ function EmptyFiltered({
         <div className="w-16 h-16 rounded-2xl bg-bg-elev flex items-center justify-center mb-4">
           <ImageIcon className="w-7 h-7 text-text-muted" />
         </div>
-        <h2 className="text-base font-medium mb-1">这个项目还没有资产</h2>
-        <p className="text-text-secondary text-xs">在下方输入提示词开始第一次生成</p>
+        <h2 className="text-base font-medium mb-1">还没有资产</h2>
+        <p className="text-text-secondary text-xs">在下方输入框生成</p>
       </div>
     );
   }

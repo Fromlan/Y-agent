@@ -372,7 +372,9 @@ export default function AssetCard({
         </div>
         <div className="p-2 flex items-center justify-between text-[10px] text-text-muted">
           <span className="truncate">{asset.modelName}</span>
-          <span>{formatTime(asset.createdAt)}</span>
+          <span className="whitespace-nowrap tabular-nums">
+            {formatTime(asset.createdAt)} · {(asset.costMs / 1000).toFixed(1)}s
+          </span>
         </div>
       </div>
     );
@@ -466,14 +468,15 @@ export default function AssetCard({
                 <Trash2 className="w-3 h-3" />
               </button>
             </div>
-            <div className="flex items-center justify-between text-[10px] text-white/70">
-              <span className="truncate">{asset.modelName}</span>
-              <span className="ml-2 whitespace-nowrap">
-                {asset.size} · {asset.costMs}ms
-              </span>
-            </div>
           </div>
         )}
+      </div>
+      {/* 底部信息条：模型 + 耗时（不 hover 也可见） */}
+      <div className="p-2 flex items-center justify-between text-[10px] text-text-muted">
+        <span className="truncate">{asset.modelName}</span>
+        <span className="whitespace-nowrap tabular-nums">
+          {formatTime(asset.createdAt)} · {(asset.costMs / 1000).toFixed(1)}s
+        </span>
       </div>
     </div>
   );

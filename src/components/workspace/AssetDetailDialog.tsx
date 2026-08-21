@@ -9,7 +9,6 @@ import {
   Layers,
   ImageIcon,
   Clock,
-  Hash,
   Ruler,
   Cpu,
   CalendarClock,
@@ -348,9 +347,6 @@ export default function AssetDetailDialog({
         {/* 顶部栏 */}
         <div className="h-11 flex items-center justify-between px-4 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-2 text-text-secondary text-xs">
-            <span className="px-1.5 py-0.5 rounded bg-bg-elev text-text-muted">
-              资产详情
-            </span>
             {asset.isLayerDecomposition && (
               <span className="px-1.5 py-0.5 rounded bg-accent/20 text-accent flex items-center gap-1">
                 <Layers className="w-3 h-3" /> 图层拆分
@@ -382,9 +378,7 @@ export default function AssetDetailDialog({
             title="API 没返回图层位置信息（boundingBox）。常见原因:用了不支持的旧模型/endpoint,或响应解析失败。已自动切到单图层视图。"
           >
             <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
-            <span>
-              所有图层的 boundingBox 位置信息缺失,合成视图不可用。已切到单图层视图。
-            </span>
+            <span>图层位置缺失 — 已切到单图层视图</span>
           </div>
         )}
 
@@ -608,7 +602,7 @@ export default function AssetDetailDialog({
                   <MetaItem
                     icon={Clock}
                     label="耗时"
-                    value={`${(asset.costMs / 1000).toFixed(2)} s`}
+                    value={`${(asset.costMs / 1000).toFixed(1)} s`}
                   />
                   <MetaItem
                     icon={ImageIcon}
@@ -617,22 +611,18 @@ export default function AssetDetailDialog({
                   />
                   <MetaItem
                     icon={Layers}
-                    label="类型"
-                    value={asset.isLayerDecomposition ? "图层拆分" : "普通生图"}
-                  />
-                  <MetaItem
-                    icon={Hash}
-                    label="图片数"
-                    value={`${asset.payload.urls?.length || asset.payload.layers?.length || 1} 张`}
-                  />
-                  <MetaItem
-                    icon={ImageIcon}
-                    label="格式"
+                    label="详情"
                     value={
-                      asset.payload.outputFormat
-                        ? asset.payload.outputFormat.toUpperCase() +
-                          (asset.payload.transparent ? "（透明）" : "")
-                        : "—"
+                      asset.isLayerDecomposition
+                        ? `图层拆分 · ${asset.payload.layers?.length ?? 0} 层${
+                            asset.payload.transparent ? " · PNG(透明)" : ""
+                          }`
+                        : `普通生图 · ${asset.payload.urls?.length ?? 1} 张${
+                            asset.payload.outputFormat
+                              ? " · " + asset.payload.outputFormat.toUpperCase() +
+                                (asset.payload.transparent ? "(透明)" : "")
+                              : ""
+                          }`
                     }
                   />
                 </div>
@@ -826,7 +816,7 @@ export default function AssetDetailDialog({
                 <button
                   onClick={() => setEditMode(true)}
                   className="btn text-xs h-8"
-                  title="在图上画框，5.0 Pro 按框局部重新出图"
+                  title="画框并描述修改"
                 >
                   <Brush className="w-3.5 h-3.5" /> 局部编辑
                 </button>

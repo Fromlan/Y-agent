@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   Layers,
@@ -13,6 +13,7 @@ import {
   X,
   ArrowDownAZ,
   ArrowUpDown,
+  ChevronDown,
   Clock,
   Type,
 } from "lucide-react";
@@ -108,19 +109,19 @@ export default function BoardToolbar({
           <ViewBtn
             active={view === "masonry"}
             onClick={() => onView("masonry")}
-            title="瀑布流（自然比例）"
+            label="瀑布流"
             icon={GalleryVertical}
           />
           <ViewBtn
             active={view === "grid"}
             onClick={() => onView("grid")}
-            title="网格（等高）"
+            label="网格"
             icon={Grid2x2}
           />
           <ViewBtn
             active={view === "compact"}
             onClick={() => onView("compact")}
-            title="紧凑（小图）"
+            label="紧凑"
             icon={LayoutGrid}
           />
         </div>
@@ -133,17 +134,26 @@ export default function BoardToolbar({
         {/* 批量选择入口 */}
         <button
           onClick={onToggleSelectMode}
-          className={`btn text-xs h-7 px-2.5 ${
+          className={`btn text-xs h-7 px-2.5 relative ${
             selectMode ? "btn-primary" : ""
           }`}
           title="进入选择模式后可批量下载 / 删除"
         >
           {selectMode ? <CheckSquare className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5" />}
           {selectMode ? "退出选择" : "选择"}
+          {!selectMode && selectedIds.size > 0 && (
+            <span
+              className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1
+                rounded-full bg-accent text-text-inverse text-[10px]
+                font-semibold flex items-center justify-center tabular-nums"
+            >
+              {selectedIds.size}
+            </span>
+          )}
         </button>
       </div>
 
-      {/* 第二行：模型筛选 + 特殊筛选 */}
+      {/* 第二行：模型筛选 + 特殊筛选 + select 模式工具条 */}
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="text-[10px] text-text-muted uppercase tracking-wider">模型</span>
         <Chip
@@ -192,7 +202,7 @@ export default function BoardToolbar({
         </span>
       </div>
 
-      {/* 选择模式下的批量操作条 */}
+      {/* 选择模式下的批量操作条 — 合并到主工具条同一行（视觉更连续） */}
       {selectMode && (
         <div className="flex items-center gap-2 p-2 panel bg-bg-elev">
           <span className="text-xs text-text-secondary">
@@ -222,7 +232,7 @@ export default function BoardToolbar({
           <button
             onClick={onClearSelection}
             className="btn-icon p-1"
-            title="关闭"
+            title="清空选择"
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -236,24 +246,27 @@ function ViewBtn({
   active,
   onClick,
   title,
+  label,
   icon: Icon,
 }: {
   active: boolean;
   onClick: () => void;
-  title: string;
+  title?: string;
+  label: string;
   icon: typeof GalleryVertical;
 }) {
   return (
     <button
       onClick={onClick}
-      title={title}
-      className={`px-2 h-7 text-xs flex items-center transition-colors ${
+      title={title ?? label}
+      className={`px-2 h-7 text-xs flex items-center gap-1 transition-colors ${
         active
           ? "bg-accent text-text-inverse"
           : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"
       }`}
     >
       <Icon className="w-3.5 h-3.5" />
+      <span className="hidden sm:inline">{label}</span>
     </button>
   );
 }
@@ -295,6 +308,8 @@ function SortMenu({
   sortBy: SortBy;
   onChange: (s: SortBy) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
   const options: { value: SortBy; label: string; icon: typeof ArrowDownAZ }[] = [
     { value: "newest", label: "最新优先", icon: Clock },
     { value: "oldest", label: "最早优先", icon: Clock },
@@ -305,40 +320,60 @@ function SortMenu({
   ];
   const cur = options.find((o) => o.value === sortBy)!;
   const Icon = cur.icon;
+
+  // 点击外部关闭
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
   return (
-    <div className="relative group">
+    <div ref={ref} className="relative">
       <button
-        className="btn text-xs h-7 px-2.5"
+        onClick={() => setOpen((o) => !o)}
+        className={`btn text-xs h-7 px-2.5 ${open ? "bg-bg-hover" : ""}`}
         title="排序方式"
       >
         <Icon className="w-3.5 h-3.5" />
         {cur.label}
+        <ChevronDown
+          className={`w-3 h-3 text-text-muted transition-transform ${
+            open ? "rotate-180" : ""
+          }`}
+        />
       </button>
-      <div
-        className="absolute right-0 top-full mt-1 z-20 min-w-[140px] panel py-1
-          opacity-0 invisible group-hover:opacity-100 group-hover:visible
-          transition-opacity"
-      >
-        {options.map((o) => {
-          const OIcon = o.icon;
-          return (
-            <button
-              key={o.value}
-              onClick={() => onChange(o.value)}
-              className={`w-full text-left px-2.5 py-1 text-xs flex items-center gap-1.5
-                ${
-                  sortBy === o.value
-                    ? "bg-bg-hover text-accent"
-                    : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
-                }
-              `}
-            >
-              <OIcon className="w-3 h-3" />
-              {o.label}
-            </button>
-          );
-        })}
-      </div>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-20 min-w-[140px] panel py-1 shadow-lg">
+          {options.map((o) => {
+            const OIcon = o.icon;
+            return (
+              <button
+                key={o.value}
+                onClick={() => {
+                  onChange(o.value);
+                  setOpen(false);
+                }}
+                className={`w-full text-left px-2.5 py-1 text-xs flex items-center gap-1.5
+                  ${
+                    sortBy === o.value
+                      ? "bg-bg-hover text-accent"
+                      : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
+                  }
+                `}
+              >
+                <OIcon className="w-3 h-3" />
+                {o.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
