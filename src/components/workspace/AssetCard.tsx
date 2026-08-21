@@ -158,6 +158,17 @@ function StatusBadge({ asset }: { asset: Asset }) {
       </div>
     );
   }
+  // P1：风格契约漂移（styleContractId 变了 → 此资产与现契约不一致）
+  if (asset.payload.status === "stale") {
+    return (
+      <div
+        className="absolute top-2 right-2 bg-orange-500/85 text-white text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"
+        title="项目风格契约已变更,此资产与现契约不一致,建议重生成"
+      >
+        <AlertTriangle className="w-3 h-3" /> 风格漂移
+      </div>
+    );
+  }
   if (!hasLocal && isHttp) {
     return (
       <div

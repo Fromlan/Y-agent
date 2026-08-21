@@ -1,6 +1,7 @@
 use crate::jimeng::{self, GenerateImageParams, GeneratedImage};
 use crate::state::AppState;
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+use image::GenericImageView;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1717,6 +1718,34 @@ pub fn agent_context_update(
         .map_err(map_err)
 }
 
+// ---------- Project style_contract (P1) ----------
+
+/// 读项目 style_contract（JSON 字符串）。未设置返回 None。
+#[tauri::command]
+pub fn style_contract_get(
+    project_id: String,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<Option<String>, String> {
+    let s = state.lock().map_err(map_err)?;
+    s.storage
+        .get_project_style_contract(&project_id)
+        .map_err(map_err)
+}
+
+/// 写项目 style_contract（JSON 字符串）。空字符串 = 清除。
+/// 返回被标 stale 的资产数（前端用来 toast 提示"已标记 N 张资产风格漂移"）。
+#[tauri::command]
+pub fn style_contract_update(
+    project_id: String,
+    json: String,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<crate::storage::MarkStaleResult, String> {
+    let s = state.lock().map_err(map_err)?;
+    s.storage
+        .set_project_style_contract(&project_id, &json)
+        .map_err(map_err)
+}
+
 // ---------- Agent LLM Config (M2 v0.2) ----------
 
 /// 读 Agent LLM 配置。未设置返回 None。
@@ -1847,4 +1876,141 @@ pub fn chat_session_clear(
 ) -> Result<(), String> {
     let s = state.lock().map_err(map_err)?;
     s.storage.clear_chat_session(&session_id).map_err(map_err)
+}
+
+// ---------- P2: Sprite Sheet Splitter ----------
+
+/// sprite-splitter 返回的单个切图
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SplitTile {
+    /// 顺序索引（0..rows*cols）
+    pub index: usize,
+    /// 行列（1-based，方便前端展示）
+    pub row: usize,
+    pub col: usize,
+    /// 切图本地绝对路径
+    pub path: String,
+    /// 像素尺寸
+    pub width: u32,
+    pub height: u32,
+}
+
+/// sprite-splitter 返回结果
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SplitResult {
+    /// 输入图片尺寸
+    pub source_width: u32,
+    pub source_height: u32,
+    /// 切分参数
+    pub rows: u32,
+    pub cols: u32,
+    /// 输出 PNG 文件路径列表
+    pub tiles: Vec<SplitTile>,
+    /// 打包后的 ZIP 文件路径（如果 `output_zip` 为 true）
+    pub zip_path: Option<String>,
+}
+
+/// 把一张雪碧图按 `rows x cols` 网格切成单元素 PNG。
+///
+/// 设计取舍：MVP 用均匀网格（不做像素级 bounding box 检测）。
+/// - 简单可靠：用户告诉"几行几列"即可
+/// - 与 ui-component-breakdown 互补：后者输出"独立组件"（无需切图），前者处理"一张网格图"
+///
+/// # 参数
+/// - `input_path`: 源 PNG/JPG 绝对路径
+/// - `rows`: 行数（必须 ≥ 1）
+/// - `cols`: 列数（必须 ≥ 1）
+/// - `output_dir`: 输出目录（不存在会创建）
+/// - `base_name`: 输出文件名前缀（默认 "tile"）
+/// - `output_zip`: 是否同时打包成 ZIP
+#[tauri::command]
+pub fn split_sprite_sheet(
+    input_path: String,
+    rows: u32,
+    cols: u32,
+    output_dir: String,
+    base_name: Option<String>,
+    output_zip: bool,
+) -> Result<SplitResult, String> {
+    use std::fs;
+    use std::io::Write;
+
+    if rows == 0 || cols == 0 {
+        return Err(format!("rows 和 cols 必须 ≥ 1，实际 rows={rows} cols={cols}"));
+    }
+    let base_name = base_name.unwrap_or_else(|| "tile".to_string());
+
+    // 1. 读源图
+    let img = image::open(&input_path).map_err(|e| format!("读取 {input_path} 失败：{e}"))?;
+    let (w, h) = img.dimensions();
+
+    // 2. 算每个 tile 的尺寸
+    if w % cols != 0 || h % rows != 0 {
+        return Err(format!(
+            "图片尺寸 {w}x{h} 不能被 {cols}x{rows} 整除。建议改 rows/cols。"
+        ));
+    }
+    let tile_w = w / cols;
+    let tile_h = h / rows;
+
+    // 3. 创建输出目录
+    fs::create_dir_all(&output_dir).map_err(|e| format!("创建输出目录失败：{e}"))?;
+
+    // 4. 切图
+    let mut tiles: Vec<SplitTile> = Vec::with_capacity((rows * cols) as usize);
+    for r in 0..rows {
+        for c in 0..cols {
+            let x = c * tile_w;
+            let y = r * tile_h;
+            let sub = img.crop_imm(x, y, tile_w, tile_h);
+            let filename = format!("{base_name}_{:02}_{:02}.png", r + 1, c + 1);
+            let out_path = std::path::Path::new(&output_dir).join(&filename);
+            sub.save_with_format(&out_path, image::ImageFormat::Png)
+                .map_err(|e| format!("保存 {filename} 失败：{e}"))?;
+            let idx = (r * cols + c) as usize;
+            tiles.push(SplitTile {
+                index: idx,
+                row: r as usize + 1,
+                col: c as usize + 1,
+                path: out_path.to_string_lossy().into_owned(),
+                width: tile_w,
+                height: tile_h,
+            });
+        }
+    }
+
+    // 5. （可选）打 ZIP
+    let zip_path = if output_zip {
+        let zip_path = std::path::Path::new(&output_dir)
+            .join(format!("{base_name}.zip"));
+        let file = fs::File::create(&zip_path).map_err(|e| format!("创建 zip 失败：{e}"))?;
+        let mut zip = zip::ZipWriter::new(file);
+        let options: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        for tile in &tiles {
+            let p = std::path::Path::new(&tile.path);
+            let name = p
+                .file_name()
+                .ok_or_else(|| format!("无法取文件名：{}", tile.path))?
+                .to_string_lossy()
+                .into_owned();
+            zip.start_file(name, options)
+                .map_err(|e| format!("写 zip 失败：{e}"))?;
+            let bytes = fs::read(p).map_err(|e| format!("读 {} 失败：{e}", tile.path))?;
+            zip.write_all(&bytes).map_err(|e| format!("写 zip 内容失败：{e}"))?;
+        }
+        zip.finish().map_err(|e| format!("关闭 zip 失败：{e}"))?;
+        Some(zip_path.to_string_lossy().into_owned())
+    } else {
+        None
+    };
+
+    Ok(SplitResult {
+        source_width: w,
+        source_height: h,
+        rows,
+        cols,
+        tiles,
+        zip_path,
+    })
 }

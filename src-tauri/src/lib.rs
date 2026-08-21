@@ -59,6 +59,8 @@ pub fn run() {
             commands::read_image_data_url,
             commands::agent_context_get,
             commands::agent_context_update,
+            commands::style_contract_get,
+            commands::style_contract_update,
             commands::agent_llm_get,
             commands::agent_llm_update,
             commands::agent_llm_clear,
@@ -68,6 +70,7 @@ pub fn run() {
             commands::chat_message_update,
             commands::chat_message_delete,
             commands::chat_session_clear,
+            commands::split_sprite_sheet,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

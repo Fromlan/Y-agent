@@ -14,6 +14,7 @@
 
 import { findSkill, renderSkill, type Skill } from "@/lib/skill";
 import { MODEL_OPTIONS, type ModelOption } from "@/lib/types";
+import { renderStyleContract, type StyleContract } from "@/lib/style-contract";
 
 export type TriggerType = "explicit" | "keyword" | "fallback";
 
@@ -31,6 +32,8 @@ export interface RouteDecision {
   groupCount?: number;
   /** P7：当 Skill 推荐模型 ≠ 用户当前模型时，填入推荐模型名（仅展示提示，不影响执行） */
   suggestedModelName?: string;
+  /** P1：命中的 Skill id 短标识（如 `character-turnaround`），便于写进 plan/资产 payload。 */
+  sourceSkillId?: string;
 }
 
 // 关键词词典：覆盖 13 个内置 Skill 的中英触发词
@@ -147,6 +150,37 @@ const KEYWORD_MAP: { skillId: string; keywords: string[] }[] = [
       "信息图海报",
     ],
   },
+  // P1：游戏 UI 单页 / 组件拆解
+  {
+    skillId: "ui-page",
+    keywords: [
+      "UI 页",
+      "UI页",
+      "UI 页面",
+      "游戏界面",
+      "商城页",
+      "背包页",
+      "任务页",
+      "角色页",
+      "结算页",
+      "排行榜页",
+      "活动页",
+      "ui page",
+      "ui-page",
+    ],
+  },
+  {
+    skillId: "ui-component-breakdown",
+    keywords: [
+      "组件拆解",
+      "拆组件",
+      "UI 拆解",
+      "提取组件",
+      "拆成组件",
+      "ui component breakdown",
+      "ui-component-breakdown",
+    ],
+  },
 ];
 
 const EXPLICIT_PREFIX_RE = /^\/([^\s/]+)\s*([\s\S]*)$/;
@@ -154,7 +188,8 @@ const EXPLICIT_PREFIX_RE = /^\/([^\s/]+)\s*([\s\S]*)$/;
 export function route(
   input: string,
   currentModel: ModelOption,
-  styleHints: string[] = []
+  styleHints: string[] = [],
+  styleContract?: StyleContract
 ): RouteDecision {
   const text = input.trim();
   if (!text) {
@@ -174,7 +209,7 @@ export function route(
     const skill = findSkill(cmd) ?? findSkill(`/${cmd}`);
     if (skill) {
       const model = pickModel(skill, currentModel);
-      const rendered = renderSkill(skill, rest || "未指定角色", styleHints);
+      const rendered = renderSkill(skill, rest || "未指定角色", styleHints, styleContract);
       const suggested = skillModelSuggestion(skill, currentModel);
       return {
         skillName: skill.name,
@@ -186,6 +221,7 @@ export function route(
         remainingInput: rest,
         size: skill.size,
         groupCount: skill.groupCount,
+        sourceSkillId: skill.id,
         ...(suggested ? { suggestedModelName: suggested } : {}),
       };
     }
@@ -206,7 +242,7 @@ export function route(
       const skill = findSkill(skillId);
       if (skill) {
         const model = pickModel(skill, currentModel);
-        const rendered = renderSkill(skill, text, styleHints);
+        const rendered = renderSkill(skill, text, styleHints, styleContract);
         const suggested = skillModelSuggestion(skill, currentModel);
         return {
           skillName: skill.name,
@@ -217,6 +253,7 @@ export function route(
           reasoning: `检测到关键词「${keywords.find((k) => lower.includes(k.toLowerCase()))}」→ 命中 Skill「${skill.name}」`,
           size: skill.size,
           groupCount: skill.groupCount,
+          sourceSkillId: skill.id,
           ...(suggested ? { suggestedModelName: suggested } : {}),
         };
       }
@@ -224,7 +261,12 @@ export function route(
   }
 
   // 3) fallback
-  const fallbackPrompt = styleHints.length > 0
+  const contractBlock = styleContract && styleContract.checksum
+    ? renderStyleContractText(styleContract)
+    : "";
+  const fallbackPrompt = contractBlock
+    ? `${text}\n\n${contractBlock}`
+    : styleHints.length > 0
     ? `${text}\n\n[项目画风偏好] ${styleHints.join("、")}`
     : text;
   return {
@@ -234,6 +276,14 @@ export function route(
     reasoning: "未命中 Skill，走当前模型默认生图",
   };
 }
+
+/** fallback 路径的契约块渲染（避免循环 import，这里 inline 一下） */
+function renderStyleContractText(contract: StyleContract): string {
+  // 与 src/lib/style-contract.ts 的 renderStyleContract 保持同步；
+  // inline 是为了不让 route() 多一个 import 依赖
+  return renderStyleContract(contract);
+}
+
 
 /** P7：根据 Skill 推荐选模型，以用户当前模型为最高优先级
  *  - 用户当前模型 = 权威，不再被 Skill 推荐覆盖

@@ -76,6 +76,7 @@ impl Storage {
     }
 
     /// 渐进式迁移 projects 表。M2 引入 agent_context 列（JSON 字符串）。
+    /// P1 引入 style_contract 列（项目级视觉契约，含 8 字符 checksum 字段）。
     fn ensure_projects_schema(conn: &Connection) -> anyhow::Result<()> {
         let exists: i64 = conn
             .query_row(
@@ -91,6 +92,7 @@ impl Storage {
         let cols = Self::table_columns(conn, "projects")?;
         let additions: &[(&str, &str)] = &[
             ("agent_context", "TEXT"),
+            ("style_contract", "TEXT"),
         ];
         for (name, decl) in additions {
             if !cols.iter().any(|c| c.eq_ignore_ascii_case(name)) {
@@ -261,6 +263,76 @@ impl Storage {
         Ok(())
     }
 
+    // ---------- Project style_contract (P1) ----------
+
+    /// 读项目 style_contract（JSON 字符串）。未设置返回 Ok(None)。
+    pub fn get_project_style_contract(&self, project_id: &str) -> anyhow::Result<Option<String>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let mut stmt = conn.prepare("SELECT style_contract FROM projects WHERE id = ?1")?;
+        let mut rows = stmt.query(params![project_id])?;
+        if let Some(row) = rows.next()? {
+            let v: Option<String> = row.get(0)?;
+            Ok(v)
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// 写项目 style_contract（JSON 字符串）。
+    /// 同时：若新 checksum 与旧不同 → 把所有旧 checksum 的资产 payload 标 stale。
+    /// 空字符串 = 清除契约。
+    pub fn set_project_style_contract(
+        &self,
+        project_id: &str,
+        json: &str,
+    ) -> anyhow::Result<MarkStaleResult> {
+        let mut conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let tx = conn.transaction()?;
+
+        // 1. 读旧契约
+        let old_json: Option<String> = tx
+            .query_row(
+                "SELECT style_contract FROM projects WHERE id = ?1",
+                params![project_id],
+                |r| r.get(0),
+            )
+            .ok();
+        let old_checksum = old_json
+            .as_deref()
+            .and_then(|s| extract_checksum(s))
+            .unwrap_or_default();
+        let new_checksum = extract_checksum(json).unwrap_or_default();
+
+        // 2. 写新契约
+        let now = chrono::Utc::now().timestamp_millis();
+        let changed = tx.execute(
+            "UPDATE projects SET style_contract = ?1, updated_at = ?2 WHERE id = ?3",
+            params![json, now, project_id],
+        )?;
+        if changed == 0 {
+            anyhow::bail!("项目不存在：{project_id}");
+        }
+
+        // 3. 标记 stale：旧 checksum 非空 + 新 checksum 与旧不同 → 扫所有同 checksum 的资产
+        let mut marked: u64 = 0;
+        if !old_checksum.is_empty() && old_checksum != new_checksum {
+            // SQLite JSON 操作：json_extract(payload, '$.styleContractId') = old_checksum
+            marked = tx.execute(
+                "UPDATE assets
+                 SET payload = json_set(payload, '$.status', 'stale')
+                 WHERE project_id = ?1
+                   AND json_extract(payload, '$.styleContractId') = ?2
+                   AND json_extract(payload, '$.status') IS NOT 'stale'",
+                params![project_id, old_checksum],
+            )? as u64;
+        }
+
+        tx.commit()?;
+        Ok(MarkStaleResult { marked })
+    }
+
+    // ---------- Chat History (M2 v0.3) ----------
+
     // ---------- Chat History (M2 v0.3) ----------
     // v0.1 设计：每个项目一个 chat_session，多轮对话历史
     // messages 存结构化 JSON（skill_log / events / pending_plan / asset_ids 等）
@@ -410,4 +482,19 @@ impl Storage {
         )?;
         Ok(())
     }
+}
+
+/// 写 style_contract 后返回的"被标 stale 的资产数"统计。
+/// 前端用来弹个 toast："契约已更新，N 张资产已标记为风格漂移"。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MarkStaleResult {
+    pub marked: u64,
+}
+
+/// 从契约 JSON 字符串里抽 `checksum` 字段。
+/// 失败返回 None（视为"无 checksum"）。
+fn extract_checksum(json: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|v| v.get("checksum").and_then(|c| c.as_str().map(String::from)))
 }

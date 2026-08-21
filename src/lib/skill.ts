@@ -7,6 +7,7 @@
  */
 
 import { log } from "@/lib/logger";
+import { renderStyleContract, type StyleContract } from "@/lib/style-contract";
 
 export interface Skill {
   /** Skill 标识（目录名） */
@@ -102,11 +103,26 @@ export function parseSkillMd(id: string, raw: string): Skill {
 /**
  * 把 Skill 模板里的 {{user_input}} 占位符替换为用户原话。
  * v0.1 暂只支持这一个占位符。
+ *
+ * P1 增强：接受 `styleContract`，把契约字段拼到正向 prompt 末尾。
+ * 优先级：styleContract > styleHints（契约是结构化权威，hints 是 free-form 兜底）。
  */
-export function renderSkill(skill: Skill, userInput: string, styleHints: string[] = []): string {
+export function renderSkill(
+  skill: Skill,
+  userInput: string,
+  styleHints: string[] = [],
+  styleContract?: StyleContract
+): string {
   let prompt = skill.template.replace(/\{\{\s*user_input\s*\}\}/g, userInput.trim());
-  // 把项目级画风偏好拼到末尾（v0.1 简化：直接拼，不做 LLM 调度）
-  if (styleHints.length > 0) {
+  // P1：风格契约（结构化，权威）
+  if (styleContract && styleContract.checksum) {
+    const contractBlock = renderStyleContract(styleContract);
+    if (contractBlock) {
+      prompt += `\n\n${contractBlock}`;
+    }
+  }
+  // v0.1 兼容：项目级画风偏好（free-form 字符串数组，仅在无契约时追加）
+  if (styleHints.length > 0 && !(styleContract && styleContract.checksum)) {
     prompt += `\n\n[项目画风偏好] ${styleHints.join("、")}`;
   }
   return prompt;

@@ -29,6 +29,7 @@ import { loadLlmConfig } from "@/lib/llm-config";
 import { llmChatLoop, type LLMConfig, type ChatMessage as LLMChatMessage } from "@/lib/llm";
 import { AGENT_TOOLS, renderSystemPrompt } from "@/lib/agent-tools";
 import { executePlanStream, learnFromGeneration } from "@/lib/agent-flow";
+import { loadStyleContract, type StyleContract } from "@/lib/style-contract";
 import { log } from "@/lib/logger";
 
 interface Props {
@@ -87,6 +88,25 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
 
   // Agent 记忆面板开关
   const [memoryOpen, setMemoryOpen] = useState(false);
+
+  // P1：项目级风格契约（每次切项目时重新加载）
+  const [styleContract, setStyleContract] = useState<StyleContract | null>(null);
+  useEffect(() => {
+    if (!currentProject) return;
+    let cancelled = false;
+    loadStyleContract(currentProject.id)
+      .then((c) => {
+        if (!cancelled) setStyleContract(c);
+      })
+      .catch((e) => log.warn("style-contract", "load failed", e));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentProject?.id]);
+
+  // 风格契约生效时把 checksum 提出来给 agent-flow 用
+  const styleContractId = styleContract?.checksum || undefined;
 
   // 每次切项目 / 每次生成完都重新检测 API Key
   useEffect(() => {
@@ -228,6 +248,8 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
           tools: webSearch ? ["web_search"] : undefined,
           optimizePromptMode: fastMode ? "fast" : undefined,
           background: transparent ? "transparent" : undefined,
+          // P1：项目级风格契约短哈希（直接"Generate"按钮路径无 skill 上下文）
+          ...(styleContractId ? { styleContractId } : {}),
         },
         currentProject.id,
         {
@@ -503,6 +525,8 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
                 images: refs.length > 0 ? refs : undefined,
               };
               if (maxImages > 1) streamPlan.maxImages = maxImages;
+              // P1：项目级风格契约短哈希（LLM 工具调用路径也透传）
+              if (styleContractId) streamPlan.styleContractId = styleContractId;
               const result = await executePlanStream(
                 streamPlan,
                 currentProject.id,
@@ -661,7 +685,12 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     events: AgentEvent[],
     _off: () => void
   ) => {
-    const decision = route(userInput, model, agentCtx?.styleHints ?? []);
+    const decision = route(
+      userInput,
+      model,
+      agentCtx?.styleHints ?? [],
+      styleContract && styleContract.checksum ? styleContract : undefined
+    );
     agentEvents.emit({
       type: "skill_matched",
       skillName: decision.skillName ?? "(default)",
@@ -679,6 +708,10 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
       image?: string[];
       maxImages?: number;
       suggestedModelName?: string;
+      // P0：命中的 Skill id（写入资产 payload，便于按 Skill 维度筛选/统计）
+      sourceSkillId?: string;
+      // P1：项目级风格契约短哈希（写入资产 payload）
+      styleContractId?: string;
     } = {
       prompt: decision.prompt,
       size: decision.size ?? size,
@@ -687,6 +720,12 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     };
     if (decision.suggestedModelName) {
       plan.suggestedModelName = decision.suggestedModelName;
+    }
+    if (decision.skill?.id) {
+      plan.sourceSkillId = decision.skill.id;
+    }
+    if (styleContractId) {
+      plan.styleContractId = styleContractId;
     }
     const skillLog = {
       matchedSkill: decision.skillName,
@@ -765,6 +804,10 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
           size: plan.size,
           ...(plan.image ? { images: plan.image } : {}),
           ...(useMaxImages && useMaxImages > 1 ? { maxImages: useMaxImages } : {}),
+          // P0：透传 sourceSkillId 让入库资产可追溯到 Skill
+          ...(plan.sourceSkillId ? { sourceSkillId: plan.sourceSkillId } : {}),
+          // P1：透传 styleContractId 让入库资产可被契约变更追踪
+          ...(plan.styleContractId ? { styleContractId: plan.styleContractId } : {}),
         },
         currentProject.id,
         {

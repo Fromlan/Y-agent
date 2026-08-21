@@ -12,6 +12,10 @@
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
     "test": "vitest run",
     "test:watch": "vitest",
+    "validate:skills": "python scripts/validate_skills.py",
+    "validate:skills:win": "py scripts/validate_skills.py",
+    "validate:style-contract": "python scripts/validate_style_contract.py",
+    "ci:test": "vitest run && python scripts/validate_skills.py",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
