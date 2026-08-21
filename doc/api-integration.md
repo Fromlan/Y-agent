@@ -1047,3 +1047,150 @@ const DEMO_VIDEO_MP4: &[u8] = include_bytes!("../assets/demo-video.mp4");
 - `get_video_api_key` / `set_video_api_key` / `clear_video_api_key`
 
 不与生图 Key 共享（`KEY_KV`）。前端 UI：设置面板新增独立「视频（MiniMax H3）API Key」section。
+
+
+### 7.10 H3-Context-IR 提示词增强（P9 新增）
+
+> 数据源：`src-tauri/src/h3_context_ir.rs`（Rust 客户端）+ `src/lib/h3-context-ir.ts`（前端封装）。
+> Tauri command：`jimeng_h3_optimize`（同步 submit + poll，一次返回 `OptimizeResult`）。
+
+#### 7.10.1 接入基础
+
+- **Endpoint**：
+  - POST `https://api.minimaxi.com/v2/h3_context_ir` 异步提交
+  - GET `https://api.minimaxi.com/v2/query/video_generation/{task_id}` 轮询（**复用 video_generation 端点**，靠 `task_type: "h3_context_ir"` 区分）
+- **认证**：`Authorization: Bearer <VIDEO_API_KEY>`（**与 video_generation 共享 Key**，不新开槽位）
+- **控制台**：[MiniMax 开放平台](https://platform.minimaxi.com/user-center/basic-information/interface-key) 开 Key（与生视频同源）
+- **Demo 模式**：Key 以 `demo-` 开头走占位返回（不消耗 token），合成增强 prompt 让 UI 流程跑通
+
+#### 7.10.2 请求 / 响应
+
+**请求体**和 `/v2/video_generation` 几乎一致，**没有 `resolution` 字段**（H3 不产视频，只产 prompt）：
+
+```typescript
+{
+  model: "MiniMax-H3",       // 固定
+  content: ContentItem[],    // text / image_url / video_url / audio_url, role 语义同 video_generation
+  duration: number,          // 4..=15
+  ratio?: VideoRatio,        // t2va 必填 ≠ adaptive；i2va 强制 adaptive；r2va 可选默认 adaptive
+}
+```
+
+**提交响应**：
+```json
+{ "task_id": "424010985738629" }
+```
+
+**轮询响应**（`task_type: "h3_context_ir"` 区分）：
+
+```json
+{
+  "task": {
+    "id": "426586401755526",
+    "model": "MiniMax-H3",
+    "status": "succeeded",
+    "task_type": "h3_context_ir",
+    "content": {
+      "prompt": "integrated_multimodal_description: [Shot 1] ... overall_soundscape: ... non_diegetic_music: ..."
+    },
+    "usage": { "total_tokens": 9090, "prompt_tokens": 5664, "completion_tokens": 3426 },
+    "ratio": "16:9"
+  }
+}
+```
+
+`content.prompt` 才是增强 prompt。结构包含：
+- `integrated_multimodal_description: [Shot 1] ... [Shot 2] ...` —— 镜头分镜
+- `overall_soundscape: ...` —— 声音描述
+- `non_diegetic_music: ...` —— 配乐描述
+
+> **为什么需要这一步**：MiniMax 官方 [H3 文档](https://platform.minimaxi.com/docs/api-reference/video-generation-v2-h3-context-ir) 明确说 H3-Context-IR 深度理解多模态上下文并「在尽量保持用户原始意图的前提下丰富语义细节」。对独立游戏开发者来说，**AI 自动补齐镜头 / 声音 / 配乐**比手写分镜省大量时间。
+
+#### 7.10.3 端到端流程
+
+```
+[VideoPromptBar] 用户输入 prompt + 勾选「AI 增强提示词」（默认 ON）
+   ↓
+[ProjectDetail.onSubmitVideo]
+   1. validateAndFixParams 预校验（场景 / ratio 规则同 video_generation）
+   2. toast.info("正在优化提示词…")
+   3. invoke("jimeng_h3_optimize", { params, originalPrompt })
+   4. Rust 端 submit + poll（最长 60s），失败兜底为 { prompt: originalPrompt, is_optimized: false, reason }
+   5. toast.info("已优化 · 正在生成视频…") 或 toast.warn("优化跳过（原因），用原提示词生成")
+   6. 把 finalContent 里 text 项替换为 opt.prompt
+   7. submitVideo(finalContent) —— 与原行为一致
+   ↓
+[Rust poll_video_task] 现有 video_generation 异步轮询，零改动
+   ↓
+[jimeng_video://succeeded] 事件
+   ↓
+[ProjectDetail.onSucceeded]
+   - 从 videoTaskMetaRef 拿 meta（optimizedPrompt / originalPrompt / optimizationReason）
+   - 入库时塞进 payload.video，资产详情页可看对比
+```
+
+#### 7.10.4 失败兜底约定（重要）
+
+`jimeng_h3_optimize` 命令**永远不返回 `Err`**（除 Key 未设置外）。失败通过 `OptimizeResult { prompt, is_optimized: false, reason }` 透传：
+
+| 失败点 | `is_optimized` | `reason` | 前端行为 |
+|---|---|---|---|
+| H3 submit 4xx/5xx | false | 对应 reason（rate_limit / auth / ...） | toast.warn + 用原 prompt 继续 |
+| H3 poll 超时（60s） | false | `timeout` | 同上 |
+| 连续 3 次 poll 失败 | false | `network` | 同上 |
+| content.prompt 为空 | false | `empty_response` | 同上 |
+| 触发内容敏感 (1026) | false | `sensitive` | 同上 |
+| 响应 task_type 不是 h3_context_ir | false | `parse` | 同上 |
+| **成功** | true | `ok` | toast.info("已优化 · 正在生成视频…") |
+| **Demo 模式** | true | `demo` | 同上 |
+
+**核心原则**：H3 失败**不影响视频生成**。前端用 `result.prompt`（= 原 prompt 透传）继续调 `submitVideo`。
+
+#### 7.10.5 OptimizeReason 枚举对齐
+
+Rust 端 `h3_context_ir::OptimizeReason` 序列化为 snake_case 字符串，前端 `src/lib/h3-context-ir.ts::OptimizeReason` 是一一对应的 union。`AssetPayload.video.optimizationReason` 也用同一字面量（详见 `src/lib/types.ts`）。
+
+```typescript
+type OptimizeReason =
+  | "ok" | "demo" | "skipped"
+  | "rate_limit" | "auth" | "insufficient_balance"
+  | "sensitive" | "invalid_param"
+  | "timeout" | "network" | "parse" | "empty_response";
+```
+
+#### 7.10.6 资产入库（H3 增强状态持久化）
+
+`AssetPayload.video` 扩 3 字段（全部 optional，老数据兼容）：
+
+| 字段 | 类型 | 含义 |
+|---|---|---|
+| `optimizedPrompt?` | string | 实际发给 video_generation 的 prompt（增强后） |
+| `originalPrompt?` | string | 用户在 UI 输的原文（未增强） |
+| `optimizationReason?` | OptimizeReason | 增强状态/原因 |
+
+**资产详情对话框**（`AssetDetailDialog`）在视频模式下展示 collapsible「AI 增强」面板：
+- 成功时显示「AI 增强提示词（点击展开对比）」+ 原文 / 增强后 diff
+- 失败（非 ok/demo）时显示「AI 增强（未生效）· 原因」+ 失败原因
+- 老资产无 3 字段时不显示
+
+#### 7.10.7 媒体限制 / 错误码
+
+与 `video_generation` **完全一致**（共享 `ContentItem` 定义）：
+- 媒体限制：见 § 7.4
+- 错误码速查：见 § 7.6
+- 单个 text 元素最多 7000 字符（Rust 端超长会安全截断到最近换行，warn log）
+
+#### 7.10.8 关键文件索引
+
+| 文件 | 职责 |
+|---|---|
+| `src-tauri/src/h3_context_ir.rs` | Rust 客户端：`H3ContextIRReq` / `OptimizeResult` / `OptimizeReason` / `submit` / `query` / `optimize`（同步）、demo 模式、`validate_submit_params`、9 个单元测试 |
+| `src-tauri/src/commands.rs:2402-2471` | Tauri command `jimeng_h3_optimize`：解 Key → 调 `h3_context_ir::optimize` → 返回 `OptimizeResult` |
+| `src/lib/h3-context-ir.ts` | TS 封装：`OptimizeParams` / `H3OptimizeResult` / `optimizeVideoPrompt` / `explainOptimizeReason` / `isOptimizeSuccess` |
+| `src/lib/h3-context-ir.test.ts` | 15 个 Vitest 单测（happy / demo / 6 个 fallback reason / 入参透传 / 解释器） |
+| `src/lib/types.ts:235-258` | `VideoPayload` 扩 3 字段 |
+| `src/components/workspace/VideoPromptBar.tsx:396-414` | 「AI 增强提示词」toggle UI（Sparkles 图标，默认 ON） |
+| `src/components/workspace/ProjectDetail.tsx:104-115` | `optimizePrompt` state + `videoTaskMetaRef` |
+| `src/components/workspace/ProjectDetail.tsx:911-1010` | `onSubmitVideo` 改造：H3 预优化 → 替换 text → `submitVideo` |
+| `src/components/workspace/ProjectDetail.tsx:158-208` | `onSucceeded` 回填 3 字段到 `payload.video` |
+| `src/components/workspace/AssetDetailDialog.tsx:374-407` | 视频资产下的「AI 增强」collapsible 面板 |

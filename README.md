@@ -43,6 +43,7 @@
 | 📦 **本地资产库** | 每次生成自动入库，SQLite 永久保留 |
 | 💸 **Demo 模式** | 不填 API Key 也能跑，看 UI 不烧钱 |
 | 🔒 **本地加密** | API Key 走 AES-GCM 加密，不上传任何后端 |
+| ✨ **视频 AI 增强** | 提示词自动扩成分镜 + 声音 + 配乐（H3-Context-IR） |
 
 ---
 
@@ -101,3 +102,15 @@ MIT
 - 完成后自动入库，资产库 / 详情页可播放
 
 详见 `doc/api-integration.md` Part 7。
+
+## 视频提示词 AI 增强（v0.3 P9 新增）
+
+- 视频栏自带「✨ AI 增强提示词」开关,默认开启
+- 调 MiniMax 官方 H3-Context-IR API,把你写的一句话 prompt 自动扩成:
+  - 镜头分镜（`[Shot 1] ... [Shot 2] ...`）
+  - 声音设计（`overall_soundscape: ...`）
+  - 配乐（`non_diegetic_music: ...`）
+- 失败永远兜底为原 prompt（限流 / 鉴权失败 / 触发审核都不会阻塞视频生成）
+- 资产详情页可对比「原文 vs AI 增强后」,方便学习「AI 给它加了啥」
+
+详见 `doc/api-integration.md` § 7.10。
