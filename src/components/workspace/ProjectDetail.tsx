@@ -20,6 +20,11 @@ import {
   type VideoRatio,
   type VideoResolution,
 } from "@/lib/video";
+import {
+  optimizeVideoPrompt,
+  explainOptimizeReason,
+  type OptimizeReason,
+} from "@/lib/h3-context-ir";
 import { useProjectBootstrap } from "@/lib/hooks/useProjectBootstrap";
 import { MODEL_OPTIONS, type Asset, type ModelOption } from "@/lib/types";
 import {
@@ -104,6 +109,15 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   const [videoWatermark, setVideoWatermark] = useState(false);
   const [hasVideoKey, setHasVideoKey] = useState<boolean | null>(null);
   const [videoTaskId, setVideoTaskId] = useState<string | null>(null);
+  // P9: H3-Context-IR 提示词增强开关。默认 ON,用户在 VideoPromptBar 里改。
+  const [optimizePrompt, setOptimizePrompt] = useState(true);
+  // P9: 任务级元数据 Map。submit 时塞 succeeded 回调用,任务结束清。
+  // 用 useRef 不触发 re-render;key 是 task_id。
+  const videoTaskMetaRef = useRef<Map<string, {
+    optimizedPrompt?: string;
+    originalPrompt: string;
+    optimizationReason?: OptimizeReason;
+  }>>(new Map());
 
   // 输入模式：生图（M1 直调）/ 对话（Agent 路由）
   const [inputMode, setInputMode] = useState<InputMode>("chat");
@@ -160,9 +174,14 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
         if (!currentProject) return;
         try {
           const t1 = Date.now();
+          // P9: 从 meta 拿增强状态(原 prompt / 增强 prompt / 原因)
+          const meta = videoTaskMetaRef.current.get(taskId);
+          videoTaskMetaRef.current.delete(taskId);
+          // 入库的 prompt 字段:优先用原 prompt(videoPrompt.trim() 即 originalPrompt)
+          // 这样资产卡 hover 显示的是用户视角的输入,与现有行为一致
           await createAsset({
             projectId: currentProject!.id,
-            prompt: videoPrompt.trim(),
+            prompt: meta?.originalPrompt ?? videoPrompt.trim(),
             model: "MiniMax-H3",
             modelName: "MiniMax H3 (视频)",
             size: resolution || videoResolution,
@@ -186,6 +205,10 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
                   ratio: ratio || videoRatio,
                   resolution: (resolution || videoResolution) as "768P" | "2K",
                   taskId,
+                  // P9: 三个 H3 增强字段(全 optional,老数据无)
+                  ...(meta?.optimizedPrompt ? { optimizedPrompt: meta.optimizedPrompt } : {}),
+                  ...(meta?.originalPrompt ? { originalPrompt: meta.originalPrompt } : {}),
+                  ...(meta?.optimizationReason ? { optimizationReason: meta.optimizationReason } : {}),
                 },
                 status: "approved",
               },
@@ -205,14 +228,16 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
       },
       onFailed: async ({ taskId, code, message }) => {
         if (taskId !== videoTaskId) return;
+        videoTaskMetaRef.current.delete(taskId);
         const raw = `${code ? `(${code}) ` : ""}${message}`;
         const friendly = await explainError(raw).catch(() => raw);
         toast.error(`视频生成失败：${friendly}`);
         setVideoTaskId(null);
-          setGenerating(false);
+        setGenerating(false);
       },
       onCancelled: ({ taskId }) => {
         if (taskId !== videoTaskId) return;
+        videoTaskMetaRef.current.delete(taskId);
         toast.info("视频生成已取消");
         setVideoTaskId(null);
         setGenerating(false);
@@ -904,9 +929,70 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     setGenerating(true);
     try {
       const fixedRatio = videoRatio === "auto" ? undefined : videoRatio;
+      const originalText = videoPrompt.trim();
+      // H3-Context-IR 需要的内容数组（不含 text，由 optimize 自己拼）
+      const baseContent: ContentItem[] = videoContent;
+      // 第一步校验：场景 / ratio 规则（基于原 prompt）
+      const preCheck = validateAndFixParams({
+        model: "MiniMax-H3",
+        content: [...baseContent, { type: "text", text: originalText }],
+        resolution: videoResolution,
+        duration: videoDuration,
+        ratio: fixedRatio,
+        aigcWatermark: videoWatermark || undefined,
+      });
+      if (!preCheck.ok) {
+        toast.warn(preCheck.reason);
+        setGenerating(false);
+        return;
+      }
+
+      // P9: 提示词增强（可选）。失败永远兜底为原 prompt,不阻塞视频生成。
+      let finalText = originalText;
+      let optimizedPrompt: string | undefined;
+      let optimizationReason: OptimizeReason | undefined;
+      if (optimizePrompt) {
+        toast.info("正在优化提示词…");
+        try {
+          // H3 端只关心非 text 内容（图片/视频/音频）+ 整体参数
+          const h3Content = baseContent;
+          const opt = await optimizeVideoPrompt(
+            {
+              model: "MiniMax-H3",
+              content: h3Content,
+              duration: preCheck.fixed.duration,
+              ratio: preCheck.fixed.ratio,
+            },
+            originalText
+          );
+          finalText = opt.prompt;
+          if (opt.isOptimized) {
+            optimizedPrompt = opt.prompt;
+            optimizationReason = opt.reason;
+            toast.info("已优化 · 正在生成视频…");
+          } else {
+            optimizationReason = opt.reason;
+            const why = explainOptimizeReason(opt.reason);
+            if (why) toast.warn(`优化跳过（${why}），用原提示词生成`);
+          }
+        } catch (e: any) {
+          // 唯一会抛:Key 未设置。此时让上层走原 prompt
+          log.warn("project-detail", "h3 optimize threw:", e);
+          const raw = e?.message ?? String(e);
+          if (/API Key/i.test(raw)) {
+            toast.error("未配置视频 API Key，请到设置里填");
+            onOpenSettings();
+            setGenerating(false);
+            return;
+          }
+          toast.warn("优化调用异常，用原提示词生成");
+        }
+      }
+
+      // 第二步校验：用最终 prompt（含可能的增强 prompt）再过一遍护栏
       const finalContent: ContentItem[] = [
-        ...videoContent,
-        { type: "text", text: videoPrompt.trim() },
+        ...baseContent,
+        { type: "text", text: finalText },
       ];
       const check = validateAndFixParams({
         model: "MiniMax-H3",
@@ -921,8 +1007,15 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
         setGenerating(false);
         return;
       }
+
       const taskId = await submitVideo(check.fixed, currentProject.id);
       setVideoTaskId(taskId);
+      // P9: 把增强状态存到 taskId → meta,等 succeeded 时回填入库
+      videoTaskMetaRef.current.set(taskId, {
+        optimizedPrompt,
+        originalPrompt: originalText,
+        optimizationReason,
+      });
       toast.info("视频已提交，异步生成中…");
       // 切到 assets tab 让用户看到结果
       if (tab !== "assets") setTab("assets");
@@ -1252,6 +1345,8 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
             setRatio={setVideoRatio}
             watermark={videoWatermark}
             setWatermark={setVideoWatermark}
+            optimizePrompt={optimizePrompt}
+            setOptimizePrompt={setOptimizePrompt}
             generating={generating && !!videoTaskId}
             onSubmit={onSubmit}
             onCancel={onCancelVideo}

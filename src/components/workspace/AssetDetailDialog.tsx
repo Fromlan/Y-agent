@@ -26,11 +26,13 @@ import {
   Grid2X2,
   Image,
   AlertTriangle,
+  Sparkles,
 } from "lucide-react";
 import type { Asset, GeneratedImage } from "@/lib/types";
 import { assetMainImage, assetVideoSource, flatAssetImages, imageInput } from "@/lib/types";
 import { resolveImageUrlSync } from "@/lib/image-resolver";
 import { useToast } from "@/components/shared/Toast";
+import { explainOptimizeReason } from "@/lib/h3-context-ir";
 import { generateImage as jimengGenerate, explainError } from "@/lib/jimeng";
 import { buildAssetPayload, resolveFormat } from "@/lib/asset-payload";
 import { resolveImageUrl } from "@/lib/image-resolver";
@@ -371,6 +373,44 @@ export default function AssetDetailDialog({
               </button>
             </div>
           </div>
+          {asset.payload.video?.optimizedPrompt || asset.payload.video?.optimizationReason ? (
+            <details className="text-[11px] text-text-muted border border-border rounded p-2 bg-bg-hover/30">
+              <summary className="cursor-pointer flex items-center gap-1.5 select-none">
+                <Sparkles className="w-3 h-3 text-accent" />
+                <span>
+                  {asset.payload.video.optimizedPrompt
+                    ? "AI 增强提示词（点击展开对比）"
+                    : "AI 增强（未生效）"}
+                </span>
+                {asset.payload.video.optimizationReason &&
+                  asset.payload.video.optimizationReason !== "ok" &&
+                  asset.payload.video.optimizationReason !== "demo" && (
+                    <span className="text-accent-danger/80">
+                      · {explainOptimizeReason(asset.payload.video.optimizationReason) ??
+                        asset.payload.video.optimizationReason}
+                    </span>
+                  )}
+              </summary>
+              <div className="mt-2 space-y-2">
+                {asset.payload.video.originalPrompt && (
+                  <div>
+                    <div className="text-text-muted/80 mb-0.5">原文</div>
+                    <pre className="whitespace-pre-wrap break-words text-text-secondary leading-relaxed max-h-32 overflow-auto bg-bg-base/40 p-2 rounded">
+                      {asset.payload.video.originalPrompt}
+                    </pre>
+                  </div>
+                )}
+                {asset.payload.video.optimizedPrompt && (
+                  <div>
+                    <div className="text-accent mb-0.5">AI 增强后</div>
+                    <pre className="whitespace-pre-wrap break-words text-text-secondary leading-relaxed max-h-40 overflow-auto bg-bg-base/40 p-2 rounded">
+                      {asset.payload.video.optimizedPrompt}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            </details>
+          ) : null}
         </div>
       </div>
     );

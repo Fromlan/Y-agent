@@ -232,6 +232,27 @@ export interface VideoPayload {
   resolution: "768P" | "2K";
   /** MiniMax H3 返回的 task_id。UI 重连或排查时用。 */
   taskId: string;
+  /** P9: H3-Context-IR 实际发给 video_generation 的 prompt（增强后）。
+   *  与 originalPrompt 不一致时,说明真的被 AI 增强过。undefined = 老资产 / 未增强。 */
+  optimizedPrompt?: string;
+  /** P9: 用户在 UI 输入的原文（未增强）。undefined = 老资产 / 关闭了增强。
+   *  资产详情页对照 optimizedPrompt 一起展示,让用户能学到"AI 给它加了啥"。 */
+  originalPrompt?: string;
+  /** P9: 增强状态/原因。前端 UI 翻译。undefined = 老资产。
+   *  值域与 src/lib/h3-context-ir.ts 的 OptimizeReason 对齐,新加 skippable 用 'skipped' */
+  optimizationReason?:
+    | "ok"
+    | "demo"
+    | "skipped"
+    | "rate_limit"
+    | "auth"
+    | "insufficient_balance"
+    | "sensitive"
+    | "invalid_param"
+    | "timeout"
+    | "network"
+    | "parse"
+    | "empty_response";
 }
 
 export interface AssetPayload {
