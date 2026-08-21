@@ -2398,3 +2398,77 @@ fn cleanup_task_handle(app: &AppHandle, task_id: &str) {
         }
     }
 }
+
+
+// ============================================================================
+// P9: H3-Context-IR 视频提示词增强
+// ============================================================================
+//
+// 调用 MiniMax H3-Context-IR 异步任务,把用户原文增强为结构化、语义更丰富的
+// 视频 prompt,再用增强 prompt 调 video_generation。
+//
+// ## 端到端流程
+// 1. 前端在视频提交按钮点击后,先 invoke('jimeng_h3_optimize', { params, originalPrompt })
+// 2. 本命令同步执行 submit + poll 循环(最长 60s),返回 OptimizeResult
+// 3. 失败永远兜底为 { prompt: originalPrompt, is_optimized: false, reason }
+//    调用方按 is_optimized 决定是否 toast, 然后用 result.prompt 继续调 video_submit
+//
+// ## Demo 模式
+// 复用 KEY_VIDEO_KV(同一个视频 Key)。Key 以 'demo-' 开头时, 不调真实 API,
+// 直接返回合成增强 prompt,完整 UI 流程可在 demo 模式跑通。
+//
+// ## 为什么不在 state.rs 加 h3 任务句柄槽?
+// h3 优化是单次同步操作(没有"取消"语义), 不像 video_submit 需要后台 poll。
+// 所以不需要 video_tasks 那种 task handle 槽; 本命令直接 await optimize() 返回。
+
+use crate::h3_context_ir::{self, H3ContextIRReq, OptimizeResult};
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JsH3OptimizeParams {
+    pub model: String,
+    pub content: Vec<ContentItem>,
+    pub duration: u32,
+    #[serde(default)]
+    pub ratio: Option<String>,
+}
+
+/// 同步执行 H3-Context-IR submit + poll, 返回 OptimizeResult。
+///
+/// **永远不返回 Err**——失败通过 result.is_optimized=false 透传。
+/// 唯一会 Err 的情况: 视频 API Key 未设置(让前端能识别并打开设置面板)。
+#[tauri::command]
+pub async fn jimeng_h3_optimize(
+    params: JsH3OptimizeParams,
+    original_prompt: String,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<OptimizeResult, String> {
+    // 1. 读 + 解密 video api key
+    let api_key = {
+        let s = state.lock().map_err(map_err)?;
+        let enc = s
+            .storage
+            .get_kv(KEY_VIDEO_KV)
+            .map_err(map_err)?
+            .ok_or_else(|| "视频 API Key 未设置".to_string())?;
+        s.cipher.decrypt(&enc).map_err(map_err)?
+    };
+
+    // 2. 构造请求
+    let req = H3ContextIRReq {
+        model: params.model,
+        content: params.content,
+        duration: params.duration,
+        ratio: params.ratio,
+    };
+
+    // 3. 同步 submit + poll(永不 Err,失败都走 OptimizeResult)
+    let result = h3_context_ir::optimize(&api_key, req, &original_prompt).await;
+    log::info!(
+        "jimeng_h3_optimize done: is_optimized={}, reason={:?}, prompt_len={}",
+        result.is_optimized,
+        result.reason,
+        result.prompt.len()
+    );
+    Ok(result)
+}

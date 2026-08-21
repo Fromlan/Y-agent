@@ -1,5 +1,6 @@
 mod commands;
 mod crypto;
+mod h3_context_ir;
 mod jimeng;
 mod state;
 mod storage;
@@ -78,6 +79,7 @@ pub fn run() {
             commands::jimeng_video_submit,
             commands::jimeng_video_query,
             commands::jimeng_video_cancel,
+            commands::jimeng_h3_optimize,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
