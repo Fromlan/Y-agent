@@ -24,7 +24,9 @@ const EXPECTED_IDS = [
   "product-shot-pack",
   "scene-mood",
   "scene-mood-light-variants",
+  "ui-component-breakdown",
   "ui-icons",
+  "ui-page",
 ];
 
 describe("全部 13 个 builtin Skill 都能 parse", () => {
@@ -55,12 +57,12 @@ describe("全部 13 个 builtin Skill 都能 parse", () => {
   it("有占位符的 Skill 占位符语法合法", () => {
     // 至少 parse 阶段不抛错（其它模板格式问题由前端的 markdown 渲染兜底）
     for (const s of skills) {
-      const placeholders = s.template.match(/\{\{\s*([a-z_]+)\s*\}\}/g) ?? [];
+      const placeholders = s.template.match(/\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}/g) ?? [];
       for (const ph of placeholders) {
-        // 占位符只能是 user_xxx 或大写常量
-        const m = ph.match(/\{\{\s*([a-z_]+)\s*\}\}/);
+        // 占位符：user_xxx 开头（用户原话），或 snake_case 命名空间（结构化提示词字段）
+        const m = ph.match(/\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}/);
         const name = m?.[1] ?? "";
-        const valid = name.startsWith("user_") || /^[A-Z_]+$/.test(name);
+        const valid = name.startsWith("user_") || /^[a-z][a-z0-9_]*$/.test(name);
         // 容忍渲染阶段遗漏的占位符（已知限制），但语法必须合法
         expect(valid, `${s.id} 占位符 ${ph} 名字不合法`).toBe(true);
       }
