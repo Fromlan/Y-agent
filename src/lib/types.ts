@@ -235,6 +235,18 @@ export interface AssetPayload {
   layerLocalPaths?: string[];
   /** P5+：本地兜底失败时由后端标 true（24h URL 失效等），UI 显示"图已过期" */
   broken?: boolean;
+  /** 风格契约短哈希（8 字符）。本资产生成时所遵循的项目级 style-contract 标识。
+   *  P0 新增：为空表示"无契约"（早期数据 / demo 模式 / 首次进入未配置的项目）。 */
+  styleContractId?: string;
+  /** 生成此资产的 Skill id（如 `character-turnaround` / `ui-icons`）。
+   *  P0 新增：让资产库可以按 Skill 维度筛选/统计，也方便后续契约变更时定位受影响的 skill。 */
+  sourceSkillId?: string;
+  /** P1：资产状态机。pending-generation（生图失败/未跑完）、approved（生图成功，可信）、stale（契约已变，资产与现契约不一致） */
+  status?: "pending-generation" | "approved" | "stale";
+  /** P1：相关资产 id 列表。组件拆解时填源 page id；风格契约变更时反向关联等。 */
+  relatedAssetIds?: string[];
+  /** P1：组件契约 id（拆页面为组件时绑定 ui-component-breakdown 的产物）。 */
+  componentContractId?: string;
 }
 
 export interface Asset {

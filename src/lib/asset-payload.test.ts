@@ -75,6 +75,87 @@ describe("buildAssetPayload — 统一 payload 构造", () => {
     expect(p).toEqual({ urls: ["a"] });
   });
 
+  // P0：sourceSkillId / styleContractId 透传
+  it("sourceSkillId 写入 payload（用于按 Skill 维度筛选资产）", () => {
+    const p = buildAssetPayload(
+      { urls: ["a"], isTransparent: false, sourceSkillId: "character-turnaround" },
+      "png"
+    );
+    expect(p.sourceSkillId).toBe("character-turnaround");
+  });
+
+  it("styleContractId 写入 payload（项目级风格契约标识）", () => {
+    const p = buildAssetPayload(
+      { urls: ["a"], isTransparent: false, styleContractId: "a1b2c3d4" },
+      "png"
+    );
+    expect(p.styleContractId).toBe("a1b2c3d4");
+  });
+
+  it("sourceSkillId / styleContractId 缺省时 payload 不含这俩字段", () => {
+    const p = buildAssetPayload({ urls: ["a"], isTransparent: false }, "png");
+    expect("sourceSkillId" in p).toBe(false);
+    expect("styleContractId" in p).toBe(false);
+  });
+
+  it("sourceSkillId 空串 → 不写入（避免空值污染）", () => {
+    const p = buildAssetPayload(
+      { urls: ["a"], isTransparent: false, sourceSkillId: "" },
+      "png"
+    );
+    expect("sourceSkillId" in p).toBe(false);
+  });
+
+  // P1：状态机 / 关联资产 / 组件契约
+  it("P1: status='approved' 写入 payload", () => {
+    const p = buildAssetPayload(
+      { urls: ["a"], isTransparent: false, status: "approved" },
+      "png"
+    );
+    expect(p.status).toBe("approved");
+  });
+
+  it("P1: status='stale' 写入 payload（契约变更时标）", () => {
+    const p = buildAssetPayload(
+      { urls: ["a"], isTransparent: false, status: "stale" },
+      "png"
+    );
+    expect(p.status).toBe("stale");
+  });
+
+  it("P1: relatedAssetIds 非空数组才写入", () => {
+    const p = buildAssetPayload(
+      {
+        urls: ["a"],
+        isTransparent: false,
+        relatedAssetIds: ["page-1", "page-2"],
+      },
+      "png"
+    );
+    expect(p.relatedAssetIds).toEqual(["page-1", "page-2"]);
+  });
+
+  it("P1: relatedAssetIds 空数组不写（避免空值）", () => {
+    const p = buildAssetPayload(
+      { urls: ["a"], isTransparent: false, relatedAssetIds: [] },
+      "png"
+    );
+    expect("relatedAssetIds" in p).toBe(false);
+  });
+
+  it("P1: componentContractId 写入 payload（拆解时绑组件契约）", () => {
+    const p = buildAssetPayload(
+      { urls: ["a"], isTransparent: false, componentContractId: "comp-123" },
+      "png"
+    );
+    expect(p.componentContractId).toBe("comp-123");
+  });
+
+  it("P1: 状态缺省时 payload 不含 status（向后兼容老数据）", () => {
+    const p = buildAssetPayload({ urls: ["a"], isTransparent: false }, "png");
+    expect("status" in p).toBe(false);
+  });
+
   it("完整输入 → 全部字段都写入", () => {
     const usage: Usage = { generatedImages: 1 };
     const p = buildAssetPayload(

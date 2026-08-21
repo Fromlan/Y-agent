@@ -30,6 +30,16 @@ export interface PlanArgs {
   optimizePromptMode?: "standard" | "fast";
   background?: "transparent" | "opaque";
   layerDecomposition?: boolean;
+  /** P0：本次生成命中的 Skill id（写入 AssetPayload.sourceSkillId）。
+   *  未命中 Skill（直接"Generate"按钮、fallback 生图）时为 undefined。 */
+  sourceSkillId?: string;
+  /** P0：项目级风格契约短哈希（写入 AssetPayload.styleContractId）。
+   *  P0 阶段恒为 undefined（契约存储 P1 引入），保留字段方便调用方先接入。 */
+  styleContractId?: string;
+  /** P1：相关资产 id 列表（拆解时填源 page id）。透传到 AssetPayload.relatedAssetIds。 */
+  relatedAssetIds?: string[];
+  /** P1：组件契约 id（拆页面为组件时绑定）。透传到 AssetPayload.componentContractId。 */
+  componentContractId?: string;
 }
 
 export interface PlanResult {
@@ -111,6 +121,9 @@ export async function executePlanStream(
               {
                 urls: [url],
                 isTransparent,
+                sourceSkillId: plan.sourceSkillId,
+                styleContractId: plan.styleContractId,
+                // partial 阶段不写 status（单图场景它就是主资产，不能卡在 pending）
               },
               partialFormat
             ),
@@ -172,6 +185,11 @@ export async function executePlanStream(
                 localPaths: sortedPartials.map((p) => p.localPath ?? ""),
                 usage: info.usage,
                 isTransparent,
+                sourceSkillId: plan.sourceSkillId,
+                styleContractId: plan.styleContractId,
+                status: "approved",
+                relatedAssetIds: plan.relatedAssetIds,
+                componentContractId: plan.componentContractId,
               },
               actualFormat
             ),
@@ -246,6 +264,11 @@ export async function executePlan(
           usage: resp.usage,
           isTransparent,
           layerLocalPaths: localPaths,
+          sourceSkillId: plan.sourceSkillId,
+          styleContractId: plan.styleContractId,
+          status: "approved",
+          relatedAssetIds: plan.relatedAssetIds,
+          componentContractId: plan.componentContractId,
         },
         actualFormat
       )
@@ -255,6 +278,11 @@ export async function executePlan(
           usage: resp.usage,
           isTransparent,
           localPaths,
+          sourceSkillId: plan.sourceSkillId,
+          styleContractId: plan.styleContractId,
+          status: "approved",
+          relatedAssetIds: plan.relatedAssetIds,
+          componentContractId: plan.componentContractId,
         },
         actualFormat
       );

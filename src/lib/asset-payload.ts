@@ -40,6 +40,16 @@ export interface BuildAssetPayloadInput {
   localPaths?: string[];
   /** 图层拆分的图层本地路径（与 layers 平行） */
   layerLocalPaths?: string[];
+  /** 风格契约短哈希（8 字符）。P0 新增，可选。 */
+  styleContractId?: string;
+  /** 生成此资产的 Skill id。P0 新增，可选。 */
+  sourceSkillId?: string;
+  /** P1：资产状态机。approved 显式传；缺省时不在 payload 里写（保留 SQLite 旧数据兼容）。 */
+  status?: "pending-generation" | "approved" | "stale";
+  /** P1：相关资产 id 列表（拆解时填源 page id）。 */
+  relatedAssetIds?: string[];
+  /** P1：组件契约 id。 */
+  componentContractId?: string;
 }
 
 /**
@@ -116,6 +126,24 @@ export function buildAssetPayload(
   }
   if (input.layerLocalPaths && input.layerLocalPaths.length > 0) {
     payload.layerLocalPaths = input.layerLocalPaths;
+  }
+  // P0：风格契约短哈希（项目级视觉契约标识，无契约时缺省）
+  if (input.styleContractId) {
+    payload.styleContractId = input.styleContractId;
+  }
+  // P0：生成本资产时命中的 Skill id（便于按 Skill 维度筛选/统计）
+  if (input.sourceSkillId) {
+    payload.sourceSkillId = input.sourceSkillId;
+  }
+  // P1：资产状态机（显式传才写，老 SQLite 数据保留）
+  if (input.status) {
+    payload.status = input.status;
+  }
+  if (input.relatedAssetIds && input.relatedAssetIds.length > 0) {
+    payload.relatedAssetIds = input.relatedAssetIds;
+  }
+  if (input.componentContractId) {
+    payload.componentContractId = input.componentContractId;
   }
   return payload;
 }

@@ -38,6 +38,10 @@ export interface PendingPlan {
   maxImages?: number;
   /** P7：Skill 推荐但与 PromptBar 不同时的提示（仅展示，不影响执行） */
   suggestedModelName?: string;
+  /** P0：命中的 Skill id（写入 AssetPayload.sourceSkillId，便于按 Skill 维度筛选资产） */
+  sourceSkillId?: string;
+  /** P1：项目级风格契约短哈希（写入 AssetPayload.styleContractId） */
+  styleContractId?: string;
 }
 
 export interface ChatMessage {
