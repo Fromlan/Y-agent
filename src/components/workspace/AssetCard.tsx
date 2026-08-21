@@ -17,18 +17,68 @@ import { assetMainImage, assetVideoSource, flatAssetImages, imageInput } from "@
 import { resolveImageUrlSync } from "@/lib/image-resolver";
 import { useToast } from "@/components/shared/Toast";
 import SafeImage from "@/components/shared/SafeImage";
-import { layerRectNormalized, isNormalizedBboxValid } from "@/lib/layer-view";
+import {
+  layerRectNormalized,
+  isNormalizedBboxValid,
+  canCompositeAssetLayers,
+  pickMainLayer,
+} from "@/lib/layer-view";
 
 export type ViewMode = "masonry" | "grid" | "compact";
 
 /**
  * 图层拆分资产的合成缩略图。
- * - 底图作为背景铺满
- * - 每个有合法 bbox 的非底图层按 normalized 位置叠放，object-contain 保持比例
- * - 缺 bbox 的图层无法定位，暂时不渲染
+ * - 完整 `payload.layers`（有 bbox）→ 多层 bbox 叠放合成（保持比例）
+ * - 历史/不完整数据（无 `payload.layers` 或 bbox 全缺）→ 自动 fallback 到主图单图渲染
+ *
+ * 历史坑：早期 ToolsTab 的 `runToolSync` 只把 `urls` 存进 payload，丢掉了
+ * zIndex / boundingBox / size 等元数据。这种旧数据 flatAssetImages 会 fallback 到
+ * urls 数组，所有图被当成 zIndex=0 的「底图」叠在一起，url[0] 还经常是某个
+ * 透明 layer PNG —— 整张卡就是空白。fallback 走主图单图能保证至少有张可识别图。
+ *
  * 通过 className 控制尺寸：主卡用 absolute inset-0 铺满，mini 用 w-12 h-12。
  */
 function LayerCompositeThumb({
+  asset,
+  className = "",
+}: {
+  asset: Asset;
+  className?: string;
+}) {
+  // 完整 layers 数据 → 多层 bbox 合成（走原来的合成渲染）
+  if (canCompositeAssetLayers(asset)) {
+    return <LayerCompositeLayersView asset={asset} className={className} />;
+  }
+  // 降级：主图单图（无 layers 元数据 / bbox 缺失 / 非图层资产）
+  const main = assetMainImage(asset);
+  return (
+    <div className={`relative overflow-hidden bg-bg-base ${className}`}>
+      {main ? (
+        <SafeImage
+          src={main}
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover"
+          loading="lazy"
+        />
+      ) : (
+        <div className="absolute inset-0 flex items-center justify-center text-text-muted">
+          <ImageIcon className="w-10 h-10" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 多层 bbox 合成视图（`LayerCompositeThumb` 内部用，要求 `canCompositeAssetLayers` 为 true）。
+ * - 默认：底图作为背景铺满 + 全部非底图层按 normalized bbox 叠放合成（PS 风格）
+ * - 启发式 fallback：当底图明显只是「RGB 无 alpha 纯色背景」（5.0 Pro 把纯色
+ *   背景也当 zIndex=0 返回的常见情况），把它当背景铺底会让整张卡看上去
+ *   是一大块纯色 → 自动改用 `pickMainLayer` 选出的「主图层」作为主图，
+ *   其他层在主图层 bbox 坐标内继续叠放（同样 PS 风格）
+ * - 缺 bbox 的图层无法定位，静默不渲染
+ */
+function LayerCompositeLayersView({
   asset,
   className = "",
 }: {
@@ -42,9 +92,30 @@ function LayerCompositeThumb({
   if (!baseLayer) return null;
   const nonBaseLayers = layers.filter((l) => (l.zIndex ?? 0) !== 0);
 
+  // 启发式：5.0 Pro 经常把「纯色背景层」也当 zIndex=0 返回（base 是 RGB 纯色 + alpha=255），
+  // 同时把主体放在 zIndex>=1 的某层（带 bbox）。这种情况下如果照常把 base 当 object-cover
+  // 铺底，整张卡就是一大块纯色，主图几乎看不见。改为：检测「主图层 bbox 占画布 > 30% +
+  // 主图层可加载」时，把主图层当主图铺底，其它图层继续按 bbox 叠在上面。
+  const mainLayer = pickMainLayer(layers);
+  const mainLayerValid =
+    !!mainLayer &&
+    (mainLayer.zIndex ?? 0) !== 0 &&
+    isNormalizedBboxValid(mainLayer.boundingBox?.normalized) &&
+    !!imageInput(mainLayer);
+  const mainLayerBboxArea = mainLayerValid
+    ? (() => {
+        const n = mainLayer!.boundingBox!.normalized!;
+        return ((n[2] - n[0]) * (n[3] - n[1])) / 1_000_000;
+      })()
+    : 0;
+  const useMainAsPrimary = mainLayerValid && mainLayerBboxArea > 0.3;
+
+  const primaryLayer = useMainAsPrimary ? mainLayer! : baseLayer;
+  const primaryUrl = imageInput(primaryLayer);
+
   return (
     <div className={`relative overflow-hidden bg-bg-base ${className}`}>
-      {/* 透明棋盘背景：底图若有 alpha 也能看出来 */}
+      {/* 透明棋盘背景 */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
@@ -54,16 +125,16 @@ function LayerCompositeThumb({
           backgroundPosition: "0 0, 4px 4px",
         }}
       />
-      {/* 底图 */}
-      {imageInput(baseLayer) && (
+      {/* 主图（默认 = 底图；heuristic 触发时 = 主图层） */}
+      {primaryUrl && (
         <SafeImage
-          src={imageInput(baseLayer)}
+          src={primaryUrl}
           alt=""
           className="absolute inset-0 w-full h-full object-cover"
           loading="lazy"
         />
       )}
-      {/* 非底图层按 bbox 合成 */}
+      {/* 非底图层按 bbox 合成（heuristic 触发时，把底图作为"画布背景"也铺上） */}
       {nonBaseLayers.map((layer, i) => {
         if (!isNormalizedBboxValid(layer.boundingBox?.normalized)) return null;
         const n = layerRectNormalized(layer);
@@ -88,29 +159,49 @@ function LayerCompositeThumb({
           </div>
         );
       })}
+      {/* heuristic 触发时：在主图层之下再铺一层底图纯色，让周围（bbox 之外）有背景色，
+          避免主图层 object-cover 裁掉后边缘看起来很突兀 */}
+      {useMainAsPrimary && imageInput(baseLayer) && (
+        <SafeImage
+          src={imageInput(baseLayer)!}
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover -z-10"
+          loading="lazy"
+        />
+      )}
     </div>
   );
 }
 
 /**
  * 图层拆分资产的 mini 合成缩略图（48x48）。
- * 在 LayerCompositeThumb 基础上叠加图层数 / 缺位置信息角标。
+ * - 数据完整 → 复用 LayerCompositeThumb（多层合成 + 棋盘背景）
+ * - 数据不完整 → 主图单图 + 角标；角标保留 `layers.length` 计数（即便底层是 fallback）
+ *
+ * 角标的 `hasMissingBbox` 标志只在 canCompositeAssetLayers=true 时显示，
+ * fallback 分支永远不显示（因为 fallback 已经是降级到主图，不存在「缺位置」的概念）。
  */
 function LayerThumbnailMini({ asset }: { asset: Asset }) {
   const layers = flatAssetImages(asset);
   if (layers.length === 0) return null;
+  // fallback 分支：角标只显示图层数，不显示 bbox warning
+  const compositable = canCompositeAssetLayers(asset);
   const nonBaseLayers = layers.filter((l) => (l.zIndex ?? 0) !== 0);
-  const hasMissingBbox = nonBaseLayers.some(
-    (l) => !isNormalizedBboxValid(l.boundingBox?.normalized)
-  );
+  const hasMissingBbox = compositable
+    ? nonBaseLayers.some((l) => !isNormalizedBboxValid(l.boundingBox?.normalized))
+    : false;
 
   return (
     <div
       className="relative w-12 h-12 rounded overflow-hidden border border-accent/40
         bg-bg-base shadow-sm pointer-events-none"
-      title={`图层资产 · ${layers.length} 层${
-        hasMissingBbox ? "（部分图层缺位置信息）" : ""
-      }`}
+      title={
+        compositable
+          ? `图层资产 · ${layers.length} 层${
+              hasMissingBbox ? "（部分图层缺位置信息）" : ""
+            }`
+          : `图层资产 · ${layers.length} 层（数据不完整，按主图显示）`
+      }
     >
       <LayerCompositeThumb asset={asset} className="absolute inset-0" />
       {/* 角标：图层数 + bbox 状态（左下） */}
