@@ -84,15 +84,64 @@ pnpm lint
 pnpm test
 pnpm build
 
-# 4. Rust 端如果改了，额外跑一次
+# 4. 如果改了 src/skills/builtin/*/SKILL.md，额外跑一次 skill 校验
+pnpm run validate:skills         # 本地手跑，看到 warnings 也行
+# 或：
+pnpm run ci:test                 # vitest + skill 校验一把梭（CI 也用这个）
+
+# 5. Rust 端如果改了，额外跑一次
 cd src-tauri
 cargo check          # 至少；想稳一点 cargo clippy
 cd ..
 
-# 5. 桌面端冒烟（重要！自动化覆盖不到）
+# 6. 桌面端冒烟（重要！自动化覆盖不到）
 .\dev-with-msvc.cmd   # 启动 Tauri dev 窗口
 # 最小集：启动 → Demo 模式 → 跑一次生图 → 切资产 tab 看结果
 ```
+
+### 3.1 改 Skill 模板的强制约束（P0 起）
+
+每个 `src/skills/builtin/*/SKILL.md` 的 Markdown 正文末尾必须包含 **"反向限制"** 段，用于：
+- 防止乱码、错字、莫名符号
+- 防止商标 / 知名 IP 角色 / 受版权保护的形象
+- 防止画风 / 色调 / 构图漂移
+- 写明本 skill 专属的"不能要"清单
+
+校验脚本（CI 阻塞）：
+- Python 版：`scripts/validate_skills.py`（`pnpm run validate:skills`）
+- TS 版：`src/lib/skill.guardrails.test.ts`（自动跑进 `pnpm test`）
+
+反向限制的标准段示例（来自 `character-sheet`）：
+
+```markdown
+## 反向限制
+
+- 中文 / 英文乱码，错误文字，莫名符号
+- 商标 / 知名 IP 角色 / 受版权保护的形象
+- 违反本项目 style-contract 的色调、画风、构图
+- 角色 4 区块不可缺一（左上全身 / 右上半身 / 左下表情 / 右下道具）
+- 背景不可干扰主体（避免复杂纹理、人物剪影、强对比装饰）
+- 不可出现多个角色混在一格；表情 4 宫格必须是同一角色
+```
+
+如果新增 / 修改 skill 后忘记加"反向限制"段，`pnpm run validate:skills` 会报 error，CI 红。
+
+### 3.2 风格契约（Style Contract，P1）
+
+项目级视觉契约存 SQLite 的 `projects.style_contract` JSON 列（含 8 字符 SHA-256 前缀 `checksum`）。改契约时 Rust 端会**自动**把旧 checksum 的所有资产标 `status: "stale"`，资产卡显示「风格漂移」橙色徽章。
+
+TS 端 API：
+- `loadStyleContract(projectId)` —— 读
+- `saveStyleContract(projectId, contract)` —— 写（Rust 端做 checksum diff + 标 stale）
+- `buildStyleContract({ art_style, palette, ... })` —— 构造 + 自动算 checksum
+- `computeChecksum(contract)` —— 8 字符 hex
+- `renderStyleContract(contract)` —— 把契约拼成正向 prompt 末尾段
+
+契约样本校验脚本：`pnpm run validate:style-contract` 扫 `doc/contracts/*.json`（业务字段一致性 + checksum 重算）。`doc/contracts/example-rpg-project.json` 是模板。
+
+### 3.3 雪碧图切分（P2）
+
+`Tools → 雪碧图切分` 用本地 Rust 命令 `split_sprite_sheet`，不消耗 API 配额。算法：均匀网格切图（不做像素级 bounding box 检测，简单可靠）。Rust 端用 `image` crate + `zip` crate。
 
 ---
 
