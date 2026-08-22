@@ -1344,7 +1344,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
             </button>
           </div>
         )}
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-2 mb-3">
           <ModeSwitch mode={inputMode} onChange={setInputMode} disabled={generating} />
         </div>
         {inputMode === "video" ? (
