@@ -60,6 +60,12 @@ export interface SubmitVideoParams {
   duration: number; // 4..=15
   ratio?: VideoRatio;
   aigcWatermark?: boolean;
+  /** P9 增强元数据。提交时落库，跨重启找回 / H3 字段回填用。 */
+  meta?: {
+    optimizedPrompt?: string;
+    originalPrompt: string;
+    optimizationReason?: string;
+  };
 }
 
 /** 后端轮询返回的最小任务对象（前端兜底用，事件 payload 字段更多） */
@@ -72,6 +78,24 @@ export interface VideoTask {
   resolution?: VideoResolution;
   duration?: number;
   ratio?: VideoRatio;
+}
+
+/** M2：后端持久化的视频任务记录（`jimeng_video_list_tasks` 返回）。
+ *  content / meta 是 JSON 字符串，前端 parse 后重建任务卡。 */
+export interface VideoTaskRecord {
+  taskId: string;
+  projectId: string;
+  prompt: string;
+  content: string;
+  meta?: string | null;
+  resolution?: string;
+  duration?: number;
+  ratio?: string;
+  status: string;
+  url?: string | null;
+  error?: string | null;
+  createdAt: number;
+  updatedAt: number;
 }
 
 // ============================================================================
@@ -112,9 +136,17 @@ export async function submitVideo(
       duration: params.duration,
       ratio: params.ratio,
       aigcWatermark: params.aigcWatermark,
+      meta: params.meta,
     },
     projectId,
   });
+}
+
+/** M2：列出某项目已持久化的视频任务（跨重启找回用）。 */
+export async function listVideoTasks(
+  projectId: string
+): Promise<VideoTaskRecord[]> {
+  return await invoke<VideoTaskRecord[]>("jimeng_video_list_tasks", { projectId });
 }
 
 /** 手动查一次（前端兜底用，例如重连后想确认某 task_id 状态）。 */

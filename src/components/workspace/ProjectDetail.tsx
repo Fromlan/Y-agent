@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { ArrowLeft, Brain, KeyRound, Trash2 } from "lucide-react";
 import { useSession } from "@/lib/session";
 import { deleteAsset, backfillLocalAssets, createAsset } from "@/lib/assets";
@@ -10,12 +10,14 @@ import { useToast } from "@/components/shared/Toast";
 import { usePrompt } from "@/components/shared/PromptProvider";
 import { confirmDialog } from "@/lib/dialog";
 import VideoPromptBar from "@/components/workspace/VideoPromptBar";
+import VideoTaskCard, { type VideoTaskTrack } from "@/components/workspace/VideoTaskCard";
 import {
   submitVideo,
   cancelVideo,
   hasVideoApiKey,
   subscribeVideoEvents,
   validateAndFixParams,
+  listVideoTasks,
   type ContentItem,
   type VideoRatio,
   type VideoResolution,
@@ -109,16 +111,37 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   const [videoRatio, setVideoRatio] = useState<VideoRatio | "auto">("16:9");
   const [videoWatermark, setVideoWatermark] = useState(false);
   const [hasVideoKey, setHasVideoKey] = useState<boolean | null>(null);
-  const [videoTaskId, setVideoTaskId] = useState<string | null>(null);
   // P9: H3-Context-IR 提示词增强开关。默认 ON,用户在 VideoPromptBar 里改。
   const [optimizePrompt, setOptimizePrompt] = useState(true);
-  // P9: 任务级元数据 Map。submit 时塞 succeeded 回调用,任务结束清。
-  // 用 useRef 不触发 re-render;key 是 task_id。
-  const videoTaskMetaRef = useRef<Map<string, {
-    optimizedPrompt?: string;
-    originalPrompt: string;
-    optimizationReason?: OptimizeReason;
-  }>>(new Map());
+  // P10：视频任务队列（放开单项目单任务限制）。用 Record<task_id, track> 存。
+  // ref 给事件回调读最新值（闭包会过期），state 交给 React 渲染。
+  const [videoTasks, setVideoTasks] = useState<Record<string, VideoTaskTrack>>({});
+  const videoTasksRef = useRef<Record<string, VideoTaskTrack>>({});
+  // 「提交中」用于防重复点击，与「生成中」解耦：允许排队提交多个任务。
+  const [videoSubmitting, setVideoSubmitting] = useState(false);
+  // M3：视频任务中心的状态筛选（进行中 / 已失败 / 全部）。
+  const [videoTaskFilter, setVideoTaskFilter] = useState<"active" | "failed" | "all">("active");
+  // 订阅回调里用的最新值引用，避免订阅被频繁重建 / 闭包过期。
+  const currentProjectRef = useRef(currentProject);
+  currentProjectRef.current = currentProject;
+  const reloadRef = useRef(reload);
+  reloadRef.current = reload;
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+
+  const patchVideoTask = useCallback((taskId: string, patch: Partial<VideoTaskTrack>) => {
+    const next = {
+      ...videoTasksRef.current,
+      [taskId]: { ...videoTasksRef.current[taskId], ...patch },
+    };
+    videoTasksRef.current = next;
+    setVideoTasks(next);
+  }, []);
+  const addVideoTask = useCallback((track: VideoTaskTrack) => {
+    const next = { ...videoTasksRef.current, [track.taskId]: track };
+    videoTasksRef.current = next;
+    setVideoTasks(next);
+  }, []);
 
   // 输入模式：生图（M1 直调）/ 对话（Agent 路由）
   const [inputMode, setInputMode] = useState<InputMode>("chat");
@@ -160,33 +183,31 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   }, [inputMode]);
 
   // P8：订阅视频事件（progress / succeeded / failed / cancelled）
+  // P10：用 videoTasksRef 按 task_id 更新对应 track，故支持多任务并发。
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | null = null;
-    const t0 = Date.now();
     subscribeVideoEvents({
       onProgress: ({ taskId, status }) => {
-        if (taskId !== videoTaskId) return;
-        const sec = Math.round((Date.now() - t0) / 1000);
-        toast.info(`视频生成中… ${sec}s（${status}）`);
+        if (!videoTasksRef.current[taskId]) return;
+        patchVideoTask(taskId, { status });
       },
       onSucceeded: async ({ taskId, url, localPath, resolution, duration, ratio }) => {
-        if (taskId !== videoTaskId) return;
-        if (!currentProject) return;
+        const track = videoTasksRef.current[taskId];
+        if (!track) return;
+        const project = currentProjectRef.current;
+        if (!project) return;
         try {
           const t1 = Date.now();
-          // P9: 从 meta 拿增强状态(原 prompt / 增强 prompt / 原因)
-          const meta = videoTaskMetaRef.current.get(taskId);
-          videoTaskMetaRef.current.delete(taskId);
-          // 入库的 prompt 字段:优先用原 prompt(videoPrompt.trim() 即 originalPrompt)
-          // 这样资产卡 hover 显示的是用户视角的输入,与现有行为一致
-          await createAsset({
-            projectId: currentProject!.id,
-            prompt: meta?.originalPrompt ?? videoPrompt.trim(),
+          // P9: meta 里存着增强状态，任务入库时回填
+          const meta = track.meta;
+          const asset = await createAsset({
+            projectId: project.id,
+            prompt: meta?.originalPrompt ?? track.prompt,
             model: "MiniMax-H3",
             modelName: "MiniMax H3 (视频)",
-            size: resolution || videoResolution,
-            refCount: videoContent.filter(
+            size: resolution || track.resolution || "2K",
+            refCount: track.content.filter(
               (c) =>
                 c.type === "image_url" ||
                 c.type === "video_url" ||
@@ -202,9 +223,11 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
                 video: {
                   url,
                   localPath,
-                  duration: duration || videoDuration,
-                  ratio: ratio || videoRatio,
-                  resolution: (resolution || videoResolution) as "768P" | "2K",
+                  duration: duration || track.duration || 5,
+                  ratio: ratio || track.ratio || "16:9",
+                  resolution: (resolution ||
+                    track.resolution ||
+                    "2K") as "768P" | "2K",
                   taskId,
                   // P9: 三个 H3 增强字段(全 optional,老数据无)
                   ...(meta?.optimizedPrompt ? { optimizedPrompt: meta.optimizedPrompt } : {}),
@@ -216,32 +239,35 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
               undefined
             ),
           });
-          await reload({ silent: true });
-          toast.success("视频已生成，已入库到资产库");
+          patchVideoTask(taskId, {
+            status: "succeeded",
+            url,
+            localPath,
+            resolution: resolution || track.resolution,
+            duration: duration || track.duration,
+            ratio: ratio || track.ratio,
+            assetId: asset.id,
+          });
+          await reloadRef.current({ silent: true });
+          toastRef.current.success("视频已生成，已入库到资产库");
         } catch (e: any) {
           const raw = e?.message ?? String(e);
           const friendly = await explainError(raw).catch(() => raw);
-          toast.error(`视频入库失败：${friendly}`);
-        } finally {
-          setVideoTaskId(null);
-          setGenerating(false);
+          toastRef.current.error(`视频入库失败：${friendly}`);
+          patchVideoTask(taskId, { status: "failed", error: { message: friendly } });
         }
       },
       onFailed: async ({ taskId, code, message }) => {
-        if (taskId !== videoTaskId) return;
-        videoTaskMetaRef.current.delete(taskId);
+        if (!videoTasksRef.current[taskId]) return;
+        patchVideoTask(taskId, { status: "failed", error: { code, message } });
         const raw = `${code ? `(${code}) ` : ""}${message}`;
         const friendly = await explainError(raw).catch(() => raw);
-        toast.error(`视频生成失败：${friendly}`);
-        setVideoTaskId(null);
-        setGenerating(false);
+        toastRef.current.error(`视频生成失败：${friendly}`);
       },
       onCancelled: ({ taskId }) => {
-        if (taskId !== videoTaskId) return;
-        videoTaskMetaRef.current.delete(taskId);
-        toast.info("视频生成已取消");
-        setVideoTaskId(null);
-        setGenerating(false);
+        if (!videoTasksRef.current[taskId]) return;
+        patchVideoTask(taskId, { status: "cancelled" });
+        toastRef.current.info("视频生成已取消");
       },
     })
       .then((u) => {
@@ -253,7 +279,54 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
       cancelled = true;
       if (unlisten) unlisten();
     };
-  }, [videoTaskId, currentProject, videoPrompt, videoContent, videoResolution, videoDuration, videoRatio, toast, reload]);
+    // patchVideoTask 是 useCallback([]) 稳定引用，放 deps 只是满足 exhaustive-deps，不会重复订阅。
+  }, [currentProject?.id, patchVideoTask]);
+
+  // P10/M2：进入项目时从持久化库找回"未落定"的视频任务（跨重启恢复）。
+  // 后端启动时已对这些任务重新挂轮询；这里前端重建任务卡，好让 succeeded 时能入库 + 显示。
+  useEffect(() => {
+    const pid = currentProject?.id;
+    if (!pid) return;
+    let cancelled = false;
+    listVideoTasks(pid)
+      .then((records) => {
+        if (cancelled) return;
+        for (const rec of records) {
+          // 成功已作为资产入库，这里不重复显示；queued/running 恢复为进行中，
+          // failed/cancelled 留下来作为任务历史。
+          if (rec.status === "succeeded") continue;
+          let meta: VideoTaskTrack["meta"];
+          try {
+            meta = rec.meta ? (JSON.parse(rec.meta) as VideoTaskTrack["meta"]) : undefined;
+          } catch {
+            meta = undefined;
+          }
+          let content: ContentItem[] = [];
+          try {
+            content = JSON.parse(rec.content) as ContentItem[];
+          } catch {
+            content = [];
+          }
+          addVideoTask({
+            taskId: rec.taskId,
+            status: rec.status as VideoTaskTrack["status"],
+            createdAt: rec.createdAt,
+            prompt: rec.prompt,
+            content,
+            meta: meta ?? { originalPrompt: rec.prompt },
+            resolution: rec.resolution as VideoResolution | undefined,
+            duration: rec.duration ?? undefined,
+            ratio: rec.ratio as VideoRatio | undefined,
+          });
+        }
+      })
+      .catch(() => {
+        // 静默：最坏情况就是中断的任务不会自动恢复，不影响主流程。
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentProject?.id, addVideoTask]);
 
 
   // P5+：切项目时主动 backfill 一次，把历史"url 有但 localPath 缺"的资产补下本地。
@@ -910,10 +983,22 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     });
   };
 
-  // P8：生视频提交（异步任务模式）
-  const onSubmitVideo = async () => {
-    if (generating) return;
-    if (!videoPrompt.trim()) {
+  // P8：生视频提交（异步任务 + 队列）。override 用于「重试 / 再次提交」复用参数。
+  const onSubmitVideo = async (override?: {
+    prompt?: string;
+    content?: ContentItem[];
+    resolution?: VideoResolution;
+    duration?: number;
+    ratio?: VideoRatio | "auto";
+  }) => {
+    if (videoSubmitting) return;
+    const prompt = (override?.prompt ?? videoPrompt).trim();
+    const content = override?.content ?? videoContent;
+    const resolution = override?.resolution ?? videoResolution;
+    const duration = override?.duration ?? videoDuration;
+    const ratio = override?.ratio ?? videoRatio;
+    const watermark = videoWatermark;
+    if (!prompt) {
       toast.warn("请输入提示词");
       return;
     }
@@ -922,29 +1007,25 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
       onOpenSettings();
       return;
     }
-    // v1：单项目同时只允许 1 个视频任务
-    if (videoTaskId) {
-      toast.warn("上一个视频还没生成完");
-      return;
-    }
-    setGenerating(true);
+    // P10：放开单项目单任务限制，允许排队提交多个任务。
+    setVideoSubmitting(true);
     try {
-      const fixedRatio = videoRatio === "auto" ? undefined : videoRatio;
-      const originalText = videoPrompt.trim();
+      const fixedRatio = ratio === "auto" ? undefined : ratio;
+      const originalText = prompt;
       // H3-Context-IR 需要的内容数组（不含 text，由 optimize 自己拼）
-      const baseContent: ContentItem[] = videoContent;
+      const baseContent: ContentItem[] = content;
       // 第一步校验：场景 / ratio 规则（基于原 prompt）
       const preCheck = validateAndFixParams({
         model: "MiniMax-H3",
         content: [...baseContent, { type: "text", text: originalText }],
-        resolution: videoResolution,
-        duration: videoDuration,
+        resolution,
+        duration,
         ratio: fixedRatio,
-        aigcWatermark: videoWatermark || undefined,
+        aigcWatermark: watermark || undefined,
       });
       if (!preCheck.ok) {
         toast.warn(preCheck.reason);
-        setGenerating(false);
+        setVideoSubmitting(false);
         return;
       }
 
@@ -998,7 +1079,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
           if (/API Key/i.test(raw)) {
             toast.error("未配置视频 API Key，请到设置里填");
             onOpenSettings();
-            setGenerating(false);
+            setVideoSubmitting(false);
             return;
           }
           toast.warn("优化调用异常，用原提示词生成");
@@ -1013,45 +1094,67 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
       const check = validateAndFixParams({
         model: "MiniMax-H3",
         content: finalContent,
-        resolution: videoResolution,
-        duration: videoDuration,
+        resolution,
+        duration,
         ratio: fixedRatio,
-        aigcWatermark: videoWatermark || undefined,
+        aigcWatermark: watermark || undefined,
       });
       if (!check.ok) {
         toast.warn(check.reason);
-        setGenerating(false);
+        setVideoSubmitting(false);
         return;
       }
 
-      const taskId = await submitVideo(check.fixed, currentProject.id);
-      setVideoTaskId(taskId);
-      // P9: 把增强状态存到 taskId → meta,等 succeeded 时回填入库
-      videoTaskMetaRef.current.set(taskId, {
-        optimizedPrompt,
-        originalPrompt: originalText,
-        optimizationReason,
+      const taskId = await submitVideo(
+        { ...check.fixed, meta: { optimizedPrompt, originalPrompt: originalText, optimizationReason } },
+        currentProject.id
+      );
+      // P10: 入队生成一个新任务卡（多任务并发）
+      addVideoTask({
+        taskId,
+        status: "queued",
+        createdAt: Date.now(),
+        prompt: originalText,
+        content: baseContent,
+        meta: {
+          optimizedPrompt,
+          originalPrompt: originalText,
+          optimizationReason,
+        },
+        resolution,
+        duration,
+        ratio: check.fixed.ratio,
       });
       toast.info("视频已提交，异步生成中…");
       // 切到 assets tab 让用户看到结果
       if (tab !== "assets") setTab("assets");
-      // 清空 prompt（保留素材，让用户能快速重试微调）
-      setVideoPrompt("");
+      // 只有用户直接输入才清空 prompt；重试保留，方便微调
+      if (!override) setVideoPrompt("");
     } catch (e: any) {
       const raw = e?.message ?? String(e);
       const friendly = await explainError(raw).catch(() => raw);
       toast.error(friendly);
-      setGenerating(false);
+    } finally {
+      setVideoSubmitting(false);
     }
   };
 
-  const onCancelVideo = async () => {
-    if (!videoTaskId) return;
+  const onCancelVideo = async (taskId: string) => {
     try {
-      await cancelVideo(videoTaskId);
+      await cancelVideo(taskId);
     } catch (e: any) {
       console.warn("cancelVideo failed", e);
     }
+  };
+
+  const onRetryVideo = (task: VideoTaskTrack) => {
+    void onSubmitVideo({
+      prompt: task.prompt,
+      content: task.content,
+      resolution: task.resolution,
+      duration: task.duration,
+      ratio: task.ratio === undefined ? "auto" : task.ratio,
+    });
   };
 
   const onSubmit = inputMode === "chat" ? onSubmitChat : inputMode === "video" ? onSubmitVideo : onSubmitGenerate;
@@ -1250,6 +1353,62 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
         ) : (
           <div className="flex-1 overflow-y-auto">
             <div className="p-4">
+              {inputMode === "video" && Object.keys(videoTasks).length > 0 && (
+                <div className="mb-4 space-y-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-medium text-text-muted">视频任务</span>
+                    {(
+                      [
+                        ["active", "进行中"],
+                        ["failed", "失败"],
+                        ["all", "全部"],
+                      ] as const
+                    ).map(([key, label]) => {
+                      const n =
+                        key === "active"
+                          ? Object.values(videoTasks).filter(
+                              (t) => t.status === "queued" || t.status === "running"
+                            ).length
+                          : key === "failed"
+                          ? Object.values(videoTasks).filter((t) => t.status === "failed").length
+                          : Object.keys(videoTasks).length;
+                      const on = videoTaskFilter === key;
+                      return (
+                        <button
+                          key={key}
+                          onClick={() => setVideoTaskFilter(key)}
+                          className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors
+                            ${on
+                              ? "border-accent text-accent bg-accent/10"
+                              : "border-border text-text-secondary hover:border-border-strong"}`}
+                        >
+                          {label}
+                          <span className="ml-1 text-[10px] opacity-60">{n}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="space-y-3">
+                    {Object.values(videoTasks)
+                      .sort((a, b) => b.createdAt - a.createdAt)
+                      .filter((t) =>
+                        videoTaskFilter === "active"
+                          ? t.status === "queued" || t.status === "running"
+                          : videoTaskFilter === "failed"
+                          ? t.status === "failed"
+                          : true
+                      )
+                      .map((t) => (
+                        <VideoTaskCard
+                          key={t.taskId}
+                          task={t}
+                          onCancel={onCancelVideo}
+                          onRetry={onRetryVideo}
+                        />
+                      ))}
+                  </div>
+                </div>
+              )}
               {loading ? (
                 <p className="text-text-secondary text-sm text-center mt-12">加载中...</p>
               ) : (
@@ -1363,9 +1522,8 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
             setWatermark={setVideoWatermark}
             optimizePrompt={optimizePrompt}
             setOptimizePrompt={setOptimizePrompt}
-            generating={generating && !!videoTaskId}
+            generating={videoSubmitting}
             onSubmit={onSubmit}
-            onCancel={onCancelVideo}
           />
         ) : inputMode !== "tools" && (
         <PromptBar

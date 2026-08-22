@@ -38,6 +38,12 @@ pub fn run() {
                 commands::startup_backfill_assets(app_handle).await;
             });
 
+            // P10/M2：启动时恢复"未落定"的视频任务（queued/running）——重新挂轮询。
+            let app_handle_video = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                commands::startup_video_task_recovery(app_handle_video).await;
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -79,6 +85,7 @@ pub fn run() {
             commands::jimeng_video_submit,
             commands::jimeng_video_query,
             commands::jimeng_video_cancel,
+            commands::jimeng_video_list_tasks,
             commands::jimeng_h3_optimize,
         ])
         .run(tauri::generate_context!())

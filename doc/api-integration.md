@@ -1030,10 +1030,17 @@ try {
 - 超时 → 标记 timeout
 
 **前端事件**（`subscribeVideoEvents`）：
-- `progress` → toast 显示「视频生成中… Xs（status）」
+- `progress` → 更新任务卡状态（queued/running），卡片显示「已耗时」
 - `succeeded` → `createAsset({kind:"video", video:{url, localPath, duration, ratio, resolution, taskId}})` 入库
-- `failed` → toast + 清 pending 状态
-- `cancelled` → toast「视频生成已取消」
+- `failed` → 任务卡置红，显示 `code + message`，可一键重试
+- `cancelled` → 任务卡置灰「已取消」
+
+**P10/M2 队列 + 持久化 + 跨重启找回**：
+- 放开「单项目单任务」限制：`ProjectDetail` 用 `Record<task_id, VideoTaskTrack>` + `VideoTaskCard` 渲染多任务并发（按 task_id 各自更新）。
+- 提交时把任务落库到 `video_tasks`（SQLite，含 `prompt/content/meta/resolution/duration/ratio`），finial 态（succeeded/failed/cancelled/timeout/network）由 `poll_video_task` 写回 `status/url/error`。
+- 命令：`jimeng_video_list_tasks(projectId)` 列项目持久化任务；`startup_video_task_recovery` 启动时对 queued/running 重新挂轮询（走已验证的单任务 query 端点，跳过 `demo-*`）。
+- 前端进项目时 `listVideoTasks(projectId)` 找回非成功态任务（queued/running 恢复为进行中、failed/cancelled 留作历史）。
+- 「视频任务」区支持状态筛选（进行中 / 失败 / 全部）+ 计数。
 
 ### 7.6 错误码速查
 

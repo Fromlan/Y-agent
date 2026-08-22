@@ -65,6 +65,25 @@ impl Storage {
             );
             CREATE INDEX IF NOT EXISTS idx_chat_messages_session
                 ON chat_messages(session_id, created_at ASC);
+
+            CREATE TABLE IF NOT EXISTS video_tasks (
+                task_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                content TEXT NOT NULL,
+                meta TEXT,
+                resolution TEXT,
+                duration INTEGER,
+                ratio TEXT,
+                status TEXT NOT NULL,
+                url TEXT,
+                error TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_video_tasks_project
+                ON video_tasks(project_id, created_at DESC);
             "#,
         )?;
         let _ = KEY_RECORD_ID;
@@ -482,6 +501,124 @@ impl Storage {
         )?;
         Ok(())
     }
+
+    // ---------- Video task persistence (M2: 跨重启找回) ----------
+
+    /// 落库一条视频任务（提交时写入，或在恢复时用于重建）。
+    pub fn upsert_video_task(&self, r: &VideoTaskRecord) -> anyhow::Result<()> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        conn.execute(
+            "INSERT INTO video_tasks(task_id, project_id, prompt, content, meta, resolution,
+                                     duration, ratio, status, url, error, created_at, updated_at)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
+             ON CONFLICT(task_id) DO UPDATE SET
+               status=excluded.status, url=excluded.url, error=excluded.error,
+               updated_at=excluded.updated_at",
+            params![
+                r.task_id,
+                r.project_id,
+                r.prompt,
+                r.content,
+                r.meta,
+                r.resolution,
+                r.duration,
+                r.ratio,
+                r.status,
+                r.url,
+                r.error,
+                r.created_at,
+                r.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// 更新任务终态（succeeded/failed/cancelled/timeout/network）。url/error 传 None 则清空。
+    pub fn update_video_task_terminal(
+        &self,
+        task_id: &str,
+        status: &str,
+        url: Option<&str>,
+        error: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let now = chrono::Utc::now().timestamp_millis();
+        conn.execute(
+            "UPDATE video_tasks SET status=?1, url=?2, error=?3, updated_at=?4 WHERE task_id=?5",
+            params![status, url, error, now, task_id],
+        )?;
+        Ok(())
+    }
+
+    /// 列出某项目的所有持久化视频任务（按创建时间倒序）。
+    pub fn list_video_tasks(&self, project_id: &str) -> anyhow::Result<Vec<VideoTaskRecord>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let mut stmt = conn.prepare(
+            "SELECT task_id, project_id, prompt, content, meta, resolution, duration, ratio,
+                    status, url, error, created_at, updated_at
+             FROM video_tasks WHERE project_id = ?1 ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map(params![project_id], row_to_video_task)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// 列出所有"未落定"（queued/running）的视频任务，用于启动恢复重新挂轮询。
+    pub fn list_pending_video_tasks(&self) -> anyhow::Result<Vec<VideoTaskRecord>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let mut stmt = conn.prepare(
+            "SELECT task_id, project_id, prompt, content, meta, resolution, duration, ratio,
+                    status, url, error, created_at, updated_at
+             FROM video_tasks WHERE status IN ('queued','running') ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map([], row_to_video_task)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+}
+
+/// 持久化视频任务记录。content / meta 为 JSON 字符串。
+/// 前端 `jimeng_video_list_tasks` 直接透传，前端 parse 后重建任务卡。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoTaskRecord {
+    pub task_id: String,
+    pub project_id: String,
+    pub prompt: String,
+    pub content: String,
+    pub meta: Option<String>,
+    pub resolution: Option<String>,
+    pub duration: Option<i64>,
+    pub ratio: Option<String>,
+    pub status: String,
+    pub url: Option<String>,
+    pub error: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+fn row_to_video_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<VideoTaskRecord> {
+    Ok(VideoTaskRecord {
+        task_id: row.get(0)?,
+        project_id: row.get(1)?,
+        prompt: row.get(2)?,
+        content: row.get(3)?,
+        meta: row.get(4)?,
+        resolution: row.get(5)?,
+        duration: row.get(6)?,
+        ratio: row.get(7)?,
+        status: row.get(8)?,
+        url: row.get(9)?,
+        error: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
+    })
 }
 
 /// 写 style_contract 后返回的"被标 stale 的资产数"统计。

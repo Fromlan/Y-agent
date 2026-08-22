@@ -310,7 +310,7 @@ pub async fn jimeng_generate(
         .map_err(|e| format!("reqwest client build failed: {e}"))?;
     let mut images = result.images;
     for (i, img) in images.iter_mut().enumerate() {
-        if let Some(p) = jimeng::download_to_cache(&client, &img.url, &cache_dir, &batch_id, i).await {
+        if let Some(p) = jimeng::download_to_cache(&client, &img.url, &cache_dir, &batch_id, i, None).await {
             img.local_path = Some(p.to_string_lossy().to_string());
         }
     }
@@ -436,6 +436,7 @@ pub async fn jimeng_generate_stream(
                             &cache_for_dl,
                             &rid,
                             idx as usize,
+                            None,
                         )
                         .await
                         {
@@ -1082,7 +1083,7 @@ fn spawn_local_path_backfill(
             if existing[i].as_deref().is_some_and(|s| !s.is_empty()) {
                 continue;
             }
-            match jimeng::download_to_cache(&client, url, &cache_dir, &asset_id, i).await {
+            match jimeng::download_to_cache(&client, url, &cache_dir, &asset_id, i, None).await {
                 Some(p) => {
                     existing[i] = Some(p.to_string_lossy().to_string());
                     changed = true;
@@ -1381,7 +1382,7 @@ async fn download_and_write_candidates(
                     }
                 }
                 if let Some(p) =
-                    jimeng::download_to_cache(&client, url, &cache_dir, &asset_id, i).await
+                    jimeng::download_to_cache(&client, url, &cache_dir, &asset_id, i, None).await
                 {
                     existing[i] = Some(p.to_string_lossy().to_string());
                     changed = true;
@@ -2031,6 +2032,7 @@ pub fn split_sprite_sheet(
 // - Demo 模式（key 以 "demo-" 开头）走占位返回，不调真实 API
 
 use crate::state::VideoTaskHandle;
+use crate::storage::VideoTaskRecord;
 use crate::video::{
     self, ContentItem, VideoSubmitReq, VideoTask, VideoTaskError,
 };
@@ -2048,6 +2050,16 @@ const VIDEO_CACHE_DIR: &str = "videos";
 // JS 端传参 / 返回结构
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JsVideoMeta {
+    #[serde(default)]
+    pub optimized_prompt: Option<String>,
+    pub original_prompt: String,
+    #[serde(default)]
+    pub optimization_reason: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JsVideoSubmitParams {
@@ -2062,6 +2074,9 @@ pub struct JsVideoSubmitParams {
     /// v1 留空，预留
     #[serde(default)]
     pub callback_url: Option<String>,
+    /// P10/M2：任务级增强元数据，提交时落库（跨重启找回时重建任务卡用）。
+    #[serde(default)]
+    pub meta: Option<JsVideoMeta>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -2167,6 +2182,22 @@ pub async fn jimeng_video_submit(
 
     // 2. 构造请求（v1 假设前端传过来的 URL 都是 http(s) / data:，本地资源
     //    走 asset:// 的 v1 不支持；v2 再加 resolve_local_file 路径）
+    // P10/M2：先把要落库的字段克隆出来（params.content / model / resolution 等会被 move 进 req）
+    let rec_content_json = serde_json::to_string(&params.content).map_err(map_err)?;
+    let rec_meta_json = params
+        .meta
+        .as_ref()
+        .map(|m| serde_json::to_string(m))
+        .transpose()
+        .map_err(map_err)?;
+    let rec_prompt = params
+        .meta
+        .as_ref()
+        .map(|m| m.original_prompt.clone())
+        .unwrap_or_default();
+    let rec_resolution = params.resolution.clone();
+    let rec_duration = params.duration;
+    let rec_ratio = params.ratio.clone();
     let req = VideoSubmitReq {
         model: params.model,
         content: params.content,
@@ -2181,6 +2212,29 @@ pub async fn jimeng_video_submit(
     let task_id = video::submit(&api_key, req)
         .await
         .map_err(|e| format!("{e}"))?;
+
+    // 3.5 P10/M2：落库任务记录，供跨重启找回（状态先记 queued，终态由 poll 写回）
+    {
+        let s = state.lock().map_err(map_err)?;
+        let now = chrono::Utc::now().timestamp_millis();
+        s.storage
+            .upsert_video_task(&VideoTaskRecord {
+                task_id: task_id.clone(),
+                project_id: project_id.clone(),
+                prompt: rec_prompt,
+                content: rec_content_json,
+                meta: rec_meta_json,
+                resolution: Some(rec_resolution),
+                duration: Some(rec_duration as i64),
+                ratio: rec_ratio,
+                status: "queued".to_string(),
+                url: None,
+                error: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .map_err(map_err)?;
+    }
 
     // 4. 注册取消通道 + 启动后台轮询
     let (cancel_tx, cancel_rx) = oneshot::channel();
@@ -2261,16 +2315,19 @@ async fn poll_video_task(
         // 1. 检查取消信号
         if cancel_rx.try_recv().is_ok() {
             log::info!("video task {task_id} cancelled by user");
+            persist_video_terminal(&app, &task_id, "cancelled", None, None);
             cleanup_task_handle(&app, &task_id);
             return;
         }
         // 2. 检查超时
         if start.elapsed() > POLL_MAX_DURATION {
             log::warn!("video task {task_id} timed out after {:?}", POLL_MAX_DURATION);
+            let msg = format!("轮询超时（{} 分钟）", POLL_MAX_DURATION.as_secs() / 60);
+            persist_video_terminal(&app, &task_id, "failed", None, Some(&msg));
             JsVideoEvent::Failed {
                 task_id: task_id.clone(),
                 code: Some("timeout".into()),
-                message: format!("轮询超时（{} 分钟）", POLL_MAX_DURATION.as_secs() / 60),
+                message: msg,
             }
             .emit(&app);
             cleanup_task_handle(&app, &task_id);
@@ -2305,7 +2362,7 @@ async fn poll_video_task(
                                         .ok();
                                     if let Some(c) = client {
                                         let asset_id = task_id.replace("demo-", "video-");
-                                        jimeng::download_to_cache(&c, url, &dir, &asset_id, 0)
+                                        jimeng::download_to_cache(&c, url, &dir, &asset_id, 0, Some("mp4"))
                                             .await
                                             .map(|p| p.to_string_lossy().to_string())
                                     } else {
@@ -2317,6 +2374,8 @@ async fn poll_video_task(
                             }
                             _ => None,
                         };
+                        // P10/M2：成功 → 终态写库（url 存起来，给历史/资产恢复兜底）
+                        persist_video_terminal(&app, &task_id, "succeeded", task.url.as_deref(), None);
                         JsVideoEvent::Succeeded {
                             task_id: task_id.clone(),
                             url: task.url.clone().unwrap_or_default(),
@@ -2336,6 +2395,7 @@ async fn poll_video_task(
                             }
                             None => (None, "视频生成失败".into()),
                         };
+                        persist_video_terminal(&app, &task_id, "failed", None, Some(&message));
                         JsVideoEvent::Failed {
                             task_id: task_id.clone(),
                             code,
@@ -2346,6 +2406,7 @@ async fn poll_video_task(
                         return;
                     }
                     "cancelled" => {
+                        persist_video_terminal(&app, &task_id, "cancelled", None, None);
                         JsVideoEvent::Cancelled {
                             task_id: task_id.clone(),
                         }
@@ -2364,10 +2425,12 @@ async fn poll_video_task(
                     "video query failed ({consecutive_query_failures}/{POLL_QUERY_RETRIES}): {e}"
                 );
                 if consecutive_query_failures >= POLL_QUERY_RETRIES {
+                    let msg = format!("网络不稳定，连续 {consecutive_query_failures} 次查询失败");
+                    persist_video_terminal(&app, &task_id, "failed", None, Some(&msg));
                     JsVideoEvent::Failed {
                         task_id: task_id.clone(),
                         code: Some("network".into()),
-                        message: format!("网络不稳定，连续 {consecutive_query_failures} 次查询失败"),
+                        message: msg,
                     }
                     .emit(&app);
                     cleanup_task_handle(&app, &task_id);
@@ -2380,6 +2443,7 @@ async fn poll_video_task(
         tokio::select! {
             _ = &mut cancel_rx => {
                 log::info!("video task {task_id} cancelled during sleep");
+                persist_video_terminal(&app, &task_id, "cancelled", None, None);
                 cleanup_task_handle(&app, &task_id);
                 return;
             }
@@ -2396,6 +2460,102 @@ fn cleanup_task_handle(app: &AppHandle, task_id: &str) {
                 tasks.remove(task_id);
             }
         }
+    }
+}
+
+/// 把视频任务终态写回视频库（succeeded/failed/cancelled/timeout/network）。
+/// 失败仅 log，不阻断主流程。
+fn persist_video_terminal(
+    app: &AppHandle,
+    task_id: &str,
+    status: &str,
+    url: Option<&str>,
+    error: Option<&str>,
+) {
+    if let Some(state) = app.try_state::<Mutex<AppState>>() {
+        if let Ok(s) = state.lock() {
+            if let Err(e) = s.storage.update_video_task_terminal(task_id, status, url, error) {
+                log::warn!("persist video terminal {task_id} ({status}) failed: {e}");
+            }
+        }
+    }
+}
+
+/// M2：列出某项目已持久化的视频任务。前端进入项目时用它重建任务卡（跨重启找回）。
+#[tauri::command]
+pub fn jimeng_video_list_tasks(
+    project_id: String,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<Vec<VideoTaskRecord>, String> {
+    let s = state.lock().map_err(map_err)?;
+    s.storage.list_video_tasks(&project_id).map_err(map_err)
+}
+
+/// M2：应用启动时恢复"未落定"（queued/running）的视频任务——重新挂轮询。
+/// 只恢复真实任务（跳过 demo-*）。调 `jimeng_video_query` 走同一已验证的请求路径。
+pub async fn startup_video_task_recovery(app: AppHandle) {
+    // 1. 读视频 Key（没有 Key / 解密失败 → 无法恢复，安全退出）
+    let api_key = {
+        let s = match app.try_state::<Mutex<AppState>>() {
+            Some(st) => st,
+            None => return,
+        };
+        let Ok(g) = s.lock() else { return };
+        let Ok(enc) = g.storage.get_kv(KEY_VIDEO_KV) else { return };
+        let Some(enc) = enc else { return };
+        match g.cipher.decrypt(&enc) {
+            Ok(k) => k,
+            Err(_) => return,
+        }
+    };
+
+    // 2. 列出所有 pending 任务
+    let pending = {
+        let s = match app.try_state::<Mutex<AppState>>() {
+            Some(st) => st,
+            None => return,
+        };
+        let Ok(g) = s.lock() else { return };
+        match g.storage.list_pending_video_tasks() {
+            Ok(v) => v,
+            Err(_) => return,
+        }
+    };
+    if pending.is_empty() {
+        return;
+    }
+    log::info!(
+        "video task recovery: {} pending task(s) will be re-attached",
+        pending.len()
+    );
+
+    // 3. 逐个重新挂轮询
+    for r in pending {
+        if r.task_id.starts_with("demo-") {
+            // demo 任务本地立即返回，无需恢复
+            continue;
+        }
+        let (cancel_tx, cancel_rx) = oneshot::channel();
+        if let Some(s) = app.try_state::<Mutex<AppState>>() {
+            if let Ok(g) = s.lock() {
+                if let Ok(mut tasks) = g.video_tasks.lock() {
+                    tasks.insert(
+                        r.task_id.clone(),
+                        VideoTaskHandle {
+                            cancel_tx,
+                            project_id: r.project_id,
+                            submitted_at: Instant::now(),
+                        },
+                    );
+                }
+            }
+        }
+        let api_key = api_key.clone();
+        let task_id = r.task_id;
+        let app_for_poll = app.clone();
+        tauri::async_runtime::spawn(async move {
+            poll_video_task(api_key, task_id, cancel_rx, app_for_poll).await;
+        });
     }
 }
 

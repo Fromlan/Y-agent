@@ -5,19 +5,21 @@ use std::path::{Path, PathBuf};
 
 const ENDPOINT: &str = "https://ark.cn-beijing.volces.com/api/v3/images/generations";
 
-/// P5：把一个远程图片 URL 下载到 `cache_dir/<asset_id>/<n>.png`。
+/// P5：把一个远程图片/视频 URL 下载到 `cache_dir/<asset_id>/<n>.<ext>`。
 /// 成功返回绝对路径，失败返回 None（前端回退用 URL）。
 ///
 /// - 仅下载 http/https URL（data: / b64 跳过）
 /// - 用 reqwest::Client 复用 session
 /// - 30 秒超时，避免坏链接卡住批量生图
 /// - 父目录若不存在会自动创建
+/// - 扩展名默认取 URL 末尾（缺省 png）；调用方可用 `ext_override` 强制（例：视频 .mp4）
 pub async fn download_to_cache(
     client: &reqwest::Client,
     url: &str,
     cache_dir: &Path,
     asset_id: &str,
     index: usize,
+    ext_override: Option<&str>,
 ) -> Option<PathBuf> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return None;
@@ -27,13 +29,20 @@ pub async fn download_to_cache(
         log::warn!("create cache dir failed: {e}");
         return None;
     }
-    // 简单后缀：取 url 末尾扩展名；缺省 png
-    let ext = url
-        .rsplit('?')
-        .next()
-        .and_then(|s| s.rsplit('.').next())
-        .filter(|s| s.len() <= 5 && s.chars().all(|c| c.is_ascii_alphanumeric()))
-        .unwrap_or("png");
+    // 简单后缀：取 url 末尾扩展名；缺省 png。
+    // 调用方可传 ext_override 强制扩展名（例：视频固定 .mp4），因为视频 CDN URL
+    // 常常没有干净的扩展名，此时若沿用缺省 png，mp4 字节会被写成本地 .png，
+    // 浏览器按 MIME=image/png 处理导致 <video> 播不出来。
+    let ext = match ext_override {
+        Some(ext) => ext.to_string(),
+        None => url
+            .rsplit('?')
+            .next()
+            .and_then(|s| s.rsplit('.').next())
+            .filter(|s| s.len() <= 5 && s.chars().all(|c| c.is_ascii_alphanumeric()))
+            .unwrap_or("png")
+            .to_string(),
+    };
     let dst = dir.join(format!("{index}.{ext}"));
 
     let resp = client.get(url).timeout(std::time::Duration::from_secs(30)).send().await;
