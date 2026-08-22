@@ -37,6 +37,8 @@ export default function LayerCompositeStage({
   useEffect(() => { baseRef.current = base; }, [base]);
   const aspectW = base.w;
   const aspectH = base.h;
+  // 详情弹窗里同时限制宽度和高度：高度按 70vh 反推最大宽度，避免竖图把预览撑得过高。
+  const maxPreviewWidth = `min(640px, calc(70vh * ${(aspectW / aspectH).toFixed(4)}))`;
 
   // 切换资产 / 图层集合时重置
   useEffect(() => {
@@ -167,7 +169,7 @@ export default function LayerCompositeStage({
     <div
       className="relative w-full max-w-[640px] bg-bg-elev rounded-md
         overflow-hidden border border-border select-none"
-      style={{ aspectRatio: `${aspectW} / ${aspectH}` }}
+      style={{ aspectRatio: `${aspectW} / ${aspectH}`, maxWidth: maxPreviewWidth }}
     >
       {/* 透明棋盘背景：8px 网格，深浅交替，让 alpha 通道一眼可见 */}
       <div

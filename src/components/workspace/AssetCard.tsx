@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   Layers,
   Copy,
@@ -12,7 +12,7 @@ import {
   Loader2,
   Video as VideoIcon,
 } from "lucide-react";
-import type { Asset } from "@/lib/types";
+import type { Asset, GeneratedImage } from "@/lib/types";
 import { assetMainImage, assetVideoSource, flatAssetImages, imageInput } from "@/lib/types";
 import { resolveImageUrlSync } from "@/lib/image-resolver";
 import { useToast } from "@/components/shared/Toast";
@@ -23,13 +23,18 @@ import {
   canCompositeAssetLayers,
   pickMainLayer,
 } from "@/lib/layer-view";
+import {
+  getLayerCompositeDataUrl,
+  layerImagesForComposite,
+} from "@/lib/layer-composite";
 
 export type ViewMode = "masonry" | "grid" | "compact";
 
 /**
  * 图层拆分资产的合成缩略图。
- * - 完整 `payload.layers`（有 bbox）→ 多层 bbox 叠放合成（保持比例）
- * - 历史/不完整数据（无 `payload.layers` 或 bbox 全缺）→ 自动 fallback 到主图单图渲染
+ * - 优先使用 Canvas 扁平合成：把全部图层按 zIndex + bbox 画到一张缩略图上，卡片只挂 1 个 `<img>`。
+ * - Canvas 尚未生成 / 生成失败时，回退到 DOM 多层叠放（`LayerCompositeLayersView`）。
+ * - 历史/不完整数据（无 `payload.layers` 或 bbox 全缺且 Canvas 失败）→ 自动 fallback 到主图单图渲染。
  *
  * 历史坑：早期 ToolsTab 的 `runToolSync` 只把 `urls` 存进 payload，丢掉了
  * zIndex / boundingBox / size 等元数据。这种旧数据 flatAssetImages 会 fallback 到
@@ -45,14 +50,79 @@ function LayerCompositeThumb({
   asset: Asset;
   className?: string;
 }) {
-  // 完整 layers 数据 → 多层 bbox 合成（走原来的合成渲染）
+  const layers = useMemo(() => layerImagesForComposite(asset), [asset]);
+  const layerSources = useMemo(
+    () =>
+      layers
+        .map((l) => `${imageInput(l)}|${l.zIndex ?? 0}|${l.boundingBox?.normalized?.join(",") ?? ""}`)
+        .join("||"),
+    [layers]
+  );
+  const [compositeUrl, setCompositeUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!asset.isLayerDecomposition || layers.length === 0) return;
+    let cancelled = false;
+    setCompositeUrl(null);
+    getLayerCompositeDataUrl(asset, 320)
+      .then((u) => {
+        if (!cancelled) setCompositeUrl(u);
+      })
+      .catch(() => {
+        // 失败不缓存；下次同一资产再次进入视口时由 cache key 重新尝试。
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [asset, layerSources, layers.length]);
+
+  // Canvas 扁平合成成功：单张 img 展示完整合成结果。
+  // 注意：这里不能再加 `relative` —— 调用方会传 `absolute inset-0`，而 Tailwind 的
+  // `.relative` 在样式表里晚于 `.absolute`，两者同时存在会让缩略图塌陷成 0 高度。
+  if (compositeUrl) {
+    return (
+      <div className={`overflow-hidden bg-bg-base ${className}`}>
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            backgroundImage:
+              "linear-gradient(45deg, rgba(255,255,255,0.06) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.06) 75%), linear-gradient(45deg, rgba(255,255,255,0.06) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.06) 75%)",
+            backgroundSize: "8px 8px",
+            backgroundPosition: "0 0, 4px 4px",
+          }}
+        />
+        <img
+          src={compositeUrl}
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover"
+          loading="lazy"
+          draggable={false}
+        />
+      </div>
+    );
+  }
+
+  // Canvas 生成中：先走 DOM 多层合成，避免卡片空白等待。
   if (canCompositeAssetLayers(asset)) {
     return <LayerCompositeLayersView asset={asset} className={className} />;
+  }
+  // 历史 ToolsTab 数据：payload.layers 缺失但 urls 仍是一组分层图，按顺序叠放。
+  const legacyLayerAsset =
+    asset.isLayerDecomposition && !asset.payload.layers?.length && layers.length > 1;
+  if (legacyLayerAsset) {
+    return (
+      <LayerCompositeLayersView
+        asset={asset}
+        className={className}
+        layersOverride={layers}
+        legacy
+      />
+    );
   }
   // 降级：主图单图（无 layers 元数据 / bbox 缺失 / 非图层资产）
   const main = assetMainImage(asset);
   return (
-    <div className={`relative overflow-hidden bg-bg-base ${className}`}>
+    <div className={`overflow-hidden bg-bg-base ${className}`}>
       {main ? (
         <SafeImage
           src={main}
@@ -81,11 +151,17 @@ function LayerCompositeThumb({
 function LayerCompositeLayersView({
   asset,
   className = "",
+  layersOverride,
+  legacy = false,
 }: {
   asset: Asset;
   className?: string;
+  /** 历史数据（无 payload.layers）可从 urls/localPaths 重建的图层列表 */
+  layersOverride?: GeneratedImage[];
+  /** 历史数据兼容：缺 bbox 的非底图也按全画布叠放，避免只显示底图导致空白 */
+  legacy?: boolean;
 }) {
-  const layers = flatAssetImages(asset);
+  const layers = layersOverride ?? flatAssetImages(asset);
   if (layers.length === 0) return null;
   const baseLayer =
     layers.find((l) => (l.zIndex ?? 0) === 0) ?? layers[0];
@@ -114,7 +190,7 @@ function LayerCompositeLayersView({
   const primaryUrl = imageInput(primaryLayer);
 
   return (
-    <div className={`relative overflow-hidden bg-bg-base ${className}`}>
+    <div className={`overflow-hidden bg-bg-base ${className}`}>
       {/* 透明棋盘背景 */}
       <div
         className="absolute inset-0 pointer-events-none"
@@ -136,7 +212,7 @@ function LayerCompositeLayersView({
       )}
       {/* 非底图层按 bbox 合成（heuristic 触发时，把底图作为"画布背景"也铺上） */}
       {nonBaseLayers.map((layer, i) => {
-        if (!isNormalizedBboxValid(layer.boundingBox?.normalized)) return null;
+        if (!legacy && !isNormalizedBboxValid(layer.boundingBox?.normalized)) return null;
         const n = layerRectNormalized(layer);
         return (
           <div
@@ -200,7 +276,7 @@ function LayerThumbnailMini({ asset }: { asset: Asset }) {
           ? `图层资产 · ${layers.length} 层${
               hasMissingBbox ? "（部分图层缺位置信息）" : ""
             }`
-          : `图层资产 · ${layers.length} 层（数据不完整，按主图显示）`
+          : `图层资产 · ${layers.length} 层（bbox 不完整，按可用图层合成/主图显示）`
       }
     >
       <LayerCompositeThumb asset={asset} className="absolute inset-0" />

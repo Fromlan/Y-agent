@@ -720,7 +720,10 @@ export default function AssetDetailDialog({
                     label="详情"
                     value={
                       asset.isLayerDecomposition
-                        ? `图层拆分 · ${asset.payload.layers?.length ?? 0} 层${
+                        ? `图层拆分 · ${
+                            asset.payload.layers?.length ||
+                            (asset.payload.urls.length > 0 ? asset.payload.urls.length : 0)
+                          } 层${
                             asset.payload.transparent ? " · PNG(透明)" : ""
                           }`
                         : `普通生图 · ${asset.payload.urls?.length ?? 1} 张${

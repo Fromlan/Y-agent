@@ -296,14 +296,22 @@ buildAssetPayload({ layers, layerLocalPaths, ... })
 
 资产卡（`AssetCard`）的图层缩略图（`LayerCompositeThumb` 主图 + `LayerThumbnailMini` 右下角 48×48）和详情对话框的 `LayerCompositeStage` 是**两套独立渲染**，fallback 策略不同：
 
-- **资产卡**（`LayerCompositeThumb` / `LayerThumbnailMini`）调用统一判断 `canCompositeAssetLayers(asset)`：
-  - `true`（`isLayerDecomposition && payload.layers 非空 && 至少 1 个非底图层有合法 bbox.normalized`）→ 多层 bbox 合成（含棋盘背景 + 8px 透明层）
-  - `false` → 自动降级到 `assetMainImage(asset)` 单图 `object-cover` 渲染；主图也拿不到时显示 `ImageIcon` 占位
+- **资产卡**（`LayerCompositeThumb` / `LayerThumbnailMini`）：
+  1. 优先尝试 Canvas 扁平合成（`src/lib/layer-composite.ts::getLayerCompositeDataUrl`）：把全部图层按 zIndex + `boundingBox.normalized` 画到一张 320px 缩略图上，成功后卡片只渲染 1 个 `<img>`。
+  2. Canvas 生成中/失败时，回退到 DOM 多层叠放：调用统一判断 `canCompositeAssetLayers(asset)`：
+    - `true`（`isLayerDecomposition && payload.layers 非空 && 至少 1 个非底图层有合法 bbox.normalized`）→ 多层 bbox 合成（含棋盘背景 + 8px 透明层）
+    - `false` → 自动降级到 `assetMainImage(asset)` 单图 `object-cover` 渲染；主图也拿不到时显示 `ImageIcon` 占位
 - **详情对话框**（`LayerCompositeStage`）走原 `bboxHealth` 路径：所有非底图层都缺 bbox 时自动切单图层视图（已有行为，详见 §1.7.2 排错表）。
 
+Canvas 合成要点：
+- 本地图层文件优先走 `read_image_data_url`（Tauri IPC 转 data URL），避免 `asset://` 自定义协议在 Canvas 上被跨域策略污染；IPC 不可用时回退 `resolveImageUrl`。
+- 画布比例优先使用底图 `naturalWidth/Height`，缺失时用 `parseBaseSize` 的 `size` 字段/2048×2048 兜底。
+- 缩略图结果按 `asset.id + 图层源 + bbox + 输出宽度` 作内存缓存，同一资产不会重复 decode/合成。
+- **历史 ToolsTab 数据兼容**：`isLayerDecomposition=true` 但 `payload.layers` 缺失、只有 `payload.urls/localPaths` 时，由 `layerImagesForComposite` 按 url 顺序补 `zIndex`，让 Canvas 和 DOM fallback 也能叠出分层预览，不再只显示空白底图。
+
 fallback 触发场景：
-1. **历史 ToolsTab 数据**（修复前入库的）：`payload.layers` 缺失，只有 `urls` → 走单图 fallback
-2. **`payload.layers` 存在但 bbox 全缺**（5.0 Pro 偶发返 bbox 失败 / 用 Lite/4.5 强行调 layer_decomposition）→ 走单图 fallback
+1. **历史 ToolsTab 数据**（修复前入库的）：`payload.layers` 缺失，只有 `urls` → 由 `layerImagesForComposite` 按顺序重建分层并尝试 Canvas/DOM 合成；所有源都失败时才走单图 fallback
+2. **`payload.layers` 存在但 bbox 全缺**（5.0 Pro 偶发返 bbox 失败 / 用 Lite/4.5 强行调 layer_decomposition）→ Canvas 仍按全画布 flatten 兜底；只有 Canvas 也失败时才走单图 fallback
 3. **完全没图层**（仅底图单层）→ 走单图 fallback（视觉与单图相同，省一层）
 4. **图层 URL 24h 过期 + localPath 缺失** → 走占位图标
 
