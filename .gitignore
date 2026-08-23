@@ -3,9 +3,7 @@ logs
 *.log
 npm-debug.log*
 pnpm-debug.log*
-y-agent-stdout.log
-y-agent-stderr.log
-# Tauri dev 涓存椂杈撳嚭锛堝惎鍔?dev 鏃跺啓鍒?doc/ 鏍圭洰褰曚互淇濊瘉鏉冮檺鍙啓锛?
+# Tauri dev 临时输出（启动 dev 时写到 doc/ 根目录以保证权限可写）
 doc/.tmp-tauri-dev.*
 
 # ===== Process / build runtime artifacts =====
@@ -32,11 +30,13 @@ node_modules
 # ===== Backup directories =====
 *.bak/
 
+# ===== Soft-delete staging (PowerShell 禁用直接删除时改后缀) =====
+.trash/
+*.ps1.trash
+
 # ===== One-off scratch / debug scripts =====
 scratch-*.cjs
 msg-scratchpad.txt
-# 临时修复脚本（PowerShell 不允许直接删除时改后缀）
-*.ps1.trash
 
 # ===== TypeScript incremental build artifacts =====
 *.tsbuildinfo
@@ -49,8 +49,9 @@ src-tauri/gen/schemas
 src-tauri/WixTools
 
 # ===== Reference assets (kept locally, not in repo) =====
-# MiniMax Design 鏂版墜鎸囧崡 鈥?1.3GB 鏁欑▼绱犳潗,鍚崟鏂囦欢 > 100MB
-# (GitHub 纭檺鍒?100MB/鍗曟枃浠?銆傛湰鍦颁繚鐣?鐗堟湰绠＄悊璧扮綉鐩樸€?doc/MiniMax Design - 鏂版墜鎸囧崡/
+# MiniMax Design 新手指南 — 1.3GB 教程素材,含单文件 > 100MB
+# (GitHub 硬限制 100MB/单文件。本地保留,版本管理靠网盘)
+# doc/MiniMax Design - 新手指南/
 
 # ===== Local config & secrets =====
 .env
