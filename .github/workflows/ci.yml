@@ -24,6 +24,11 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
+      # Skill 模板与风格契约校验：AGENTS.md / doc/development.md 都要求
+      # 改 Skill 模板或 style-contract 必跑；CI 缺这两步等于漏洞。
+      # Python 已预装在 windows-latest。
+      - run: pnpm run validate:skills
+      - run: pnpm run validate:style-contract
 
   # Rust 后端 cargo check（需要 MSVC 工具链，Windows runner 自带）。
   # tauri::generate_context!() 宏需要 ../dist 存在（frontendDist 配置），
