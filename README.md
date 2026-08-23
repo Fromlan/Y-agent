@@ -15,7 +15,7 @@
   <a href="https://github.com/MiniMax/Y-agent/releases"><img alt="Windows" src="https://img.shields.io/badge/Windows-NSIS-0078D4?style=flat-square&logo=windows" /></a>
   <a href="#-快速试用"><img alt="pnpm" src="https://img.shields.io/badge/pnpm-9.x-F69220?style=flat-square&logo=pnpm" /></a>
   <a href="#-文档"><img alt="docs" src="https://img.shields.io/badge/看文档-doc%2F-FF5C4D?style=flat-square" /></a>
-  <img alt="Status" src="https://img.shields.io/badge/M2%20v0.4-shipped-5BC2A8?style=flat-square" />
+  <img alt="Status" src="https://img.shields.io/badge/M2%20v0.2.0-shipped-5BC2A8?style=flat-square" />
 </p>
 
 </div>
@@ -71,7 +71,7 @@ pnpm install
 ## 📈 路线图
 
 ```
-M0 原型 → M1 MVP → M2 v0.4（当前）→ M3 角色工坊 → M4 场景+UI → M5 图层 → M6 Skill 中心 → M7 打磨发布
+M0 原型 → M1 MVP → M2 v0.2.0（当前）→ M3 角色工坊 → M4 场景+UI → M5 图层 → M6 Skill 中心 → M7 打磨发布
  ✅        ✅          ✅                ⏳                ⏳            ⏳         ⏳                ⏳
 ```
 
@@ -81,11 +81,24 @@ M0 原型 → M1 MVP → M2 v0.4（当前）→ M3 角色工坊 → M4 场景+UI
 
 文档在 `doc/` 目录，按需看：
 
-- [`doc/plan.md`](./doc/plan.md) — 完整路线图 + 当前进度
-- [`doc/dev.md`](./doc/dev.md) — 开发指南（命令、架构、调试）
-- [`doc/api-integration-notes.md`](./doc/api-integration-notes.md) — API 接入踩坑笔记
-- [`doc/即梦提示词参考.md`](./doc/即梦提示词参考.md) — 提示词最佳实践
+- [`doc/plan-jimeng-full-integration.md`](./doc/plan-jimeng-full-integration.md) — 即梦 API 集成路线图 + 当前进度（P0~P6 阶段）
+- [`doc/development.md`](./doc/development.md) — 开发指南（命令、架构、调试、提交流程）
+- [`doc/api-integration.md`](./doc/api-integration.md) — API 接入踩坑笔记（即梦 / LLM / H3-Context-IR）
+- [`doc/release.md`](./doc/release.md) — 发版流程（按需发版时看）
+- [`doc/plan-video-generation-visualization.md`](./doc/plan-video-generation-visualization.md) — 视频生成可视化方案
+- [`doc/issues/`](./doc/issues/) — 已知 bug 与设计决策记录
 - [`brand/BRAND.md`](./brand/BRAND.md) — 品牌规范（颜色 / 字体 / 语气）
+
+### 仓库目录速查
+
+| 目录 | 作用 |
+|---|---|
+| `src/` | React 18 + TypeScript 前端（components / lib / hooks / skills） |
+| `src-tauri/` | Rust 后端（Tauri 2 + reqwest + rusqlite + aes-gcm） |
+| `src/skills/builtin/` | 15 个 M2 预置 Skill 模板 |
+| `doc/` | 项目文档（路线图 / API 笔记 / 已知问题） |
+| `scripts/` | 一次性 Python 脚本（`scripts/_legacy/` 是开发期存档） |
+| `brand/` | 品牌资产（logo / 配色 / 字体） |
 
 ---
 
@@ -93,7 +106,7 @@ M0 原型 → M1 MVP → M2 v0.4（当前）→ M3 角色工坊 → M4 场景+UI
 
 MIT
 
-## 生视频模式（v0.3 新增）
+## 生视频模式（M2 / v0.2.0）
 
 - 设置面板填入视频 API Key（MiniMax H3 平台，独立于生图 Key）
 - 切到「生视频」输入模式
@@ -103,7 +116,7 @@ MIT
 
 详见 `doc/api-integration.md` Part 7。
 
-## 视频提示词 AI 增强（v0.3 P9 新增）
+## 视频提示词 AI 增强（M2 / v0.2.0）
 
 - 视频栏自带「✨ AI 增强提示词」开关,默认开启
 - 调 MiniMax 官方 H3-Context-IR API,把你写的一句话 prompt 自动扩成:
