@@ -145,22 +145,32 @@ TS 端 API：
 
 ---
 
-## 4. Pull Request 流程
+## 4. 提交流程
 
-1. **Push 分支到 origin**
+> 单人项目，按 user_profile 偏好：**直接 `main` 工作**，不建 feature 分支、不开 PR。
+> 完整规范看 `AGENTS.md` 的"提交流程"段；这里是 dev 日常的 cheat sheet。
+
+1. **改代码 + 本地三件套 + skill 校验**（CI 必跑项）
    ```powershell
-   git push -u origin feature/my-thing
+   pnpm lint
+   pnpm test
+   pnpm build
+   pnpm run validate:skills          # 改了 Skill 模板时
+   pnpm run validate:style-contract  # 改了 style-contract 字段时
    ```
-2. **GitHub 上开 PR**（网页或 `gh pr create`），目标 = `main`。
-3. **CI 自动跑**（`ci.yml`）：
-   - `Frontend (lint + test + build)` — pnpm lint / test / build
+2. **一次性 commit**（一个 commit 一件事）
+   ```powershell
+   git add <files>
+   git commit -m "feat(ui): 加资产批量导出按钮"
+   ```
+3. **直接推 main**
+   ```powershell
+   git push origin main
+   ```
+4. **CI 自动跑**（`ci.yml`）——只是信号源，不是门禁
+   - `Frontend (lint + test + build + validate_skills + validate_style_contract)` — 见 `.github/workflows/ci.yml`
    - `Backend (cargo check)` — cargo check --locked
-   - 必须全绿才能 merge
-4. **Self-review**：一个人开发也要写 PR description，至少说明：
-   - 这个 PR 解决了什么 / 加了什么
-   - 测试方式（手动冒烟步骤 / 自动化覆盖）
-   - 是否动了 API 客户端或 Skill 模板 → 提醒自己更新 `doc/api-integration.md`
-5. **Merge**：用 "Squash and merge"（单人开发，PR 里 N 个 commit 合成 1 个进 main，main 历史上每个 commit 是一件事）。
+   - 接受 CI 偶发挂（网络 / cache / 临时依赖问题），本地通过即可
 
 ---
 
@@ -176,10 +186,9 @@ TS 端 API：
 
 ---
 
-## 6. 不要做的事
+## 6. 提交纪律
 
-- ❌ 直接 push 到 `main`（绕过 PR 和 CI）
 - ❌ `--force` push 到 `main`
-- ❌ 在 PR 里塞 "顺便改一下" 的无关变更（独立 commit，独立 PR）
+- ❌ 在 commit 里塞 "顺便改一下" 的无关变更（独立 commit）
 - ❌ 把 API Key / 凭据 commit 进代码（参见 `AGENTS.md` Security 段）
 - ❌ commit 体积 > 10MB 的单文件（参考素材在 `.gitignore` 里）

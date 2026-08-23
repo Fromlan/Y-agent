@@ -23,10 +23,13 @@ Y-agent — 游戏美术 AI 工作台。Tauri 2 桌面应用，封装即梦（�
 
 - `src/` — React 18 + TypeScript 前端
   - `src/components/` — UI 组件（layout / settings / shared / workspace）
-  - `src/lib/` — API 客户端、Agent 引擎、工具函数
+  - `src/lib/` — API 客户端、Agent 引擎、工具函数（30+ 个纯函数模块）
     - `src/lib/image-resolver.ts` — 本地路径 ↔ `asset://` URL 转换（前端零 IPC 直读本地图片）
     - `src/lib/asset-events.ts` — 后端 `assets://local-backfilled` 事件订阅单例
-  - `src/skills/builtin/` — M2 预置的 6 个 Skill 模板（character-sheet / character-turnaround / expression-grid / kv-poster / scene-mood / ui-icons）
+    - `src/lib/llm.ts` / `src/lib/jimeng.ts` / `src/lib/video.ts` — LLM / 即梦 / 视频三套 API 客户端
+    - `src/lib/agent-{event,flow,memory,router,tools}.ts` — Agent 对话引擎
+    - `src/lib/{asset-payload,asset-events,assets,image-*,layer-*,style-contract,chat-*}.ts` — 资产 / 图片 / 图层 / 风格契约 / 聊天工具
+  - `src/skills/builtin/` — M2 预置的 15 个 Skill 模板（character-consistency-set / character-sheet / character-turnaround / expression-grid / icon-pack-transparent / infographic-poster / kv-poster / layer-separation / local-edit-bbox / product-shot-pack / scene-mood / scene-mood-light-variants / ui-component-breakdown / ui-icons / ui-page）
 - `src-tauri/` — Rust 后端（Tauri 2 + reqwest + rusqlite + aes-gcm）
   - `src-tauri/capabilities/` — Tauri 权限声明
   - `src-tauri/icons/` — 应用图标（多平台）
@@ -45,7 +48,7 @@ Y-agent — 游戏美术 AI 工作台。Tauri 2 桌面应用，封装即梦（�
 
 ## Testing instructions
 
-- **有 Vitest 单测**（`src/**/*.test.ts`）。当前覆盖 agent-memory / agent-router / logger / asset-payload / image-resolver 五组纯函数模块。新增纯函数时配套加测试
+- **有 Vitest 单测**（`src/**/*.test.ts`）。当前 18 个测试文件、262 个用例，覆盖 agent-memory / agent-router / logger / asset-payload / image-resolver / image-alpha-patch / asset-events / h3-context-ir / layer-view / layer-composite / jimeng / video / skill.guardrails / skill.parseAll / style-contract / types / runTool × 2 等纯函数模块。新增纯函数时配套加测试
 - **没有 e2e 测试**。每个里程碑靠手动冒烟：见 `doc/plan-jimeng-full-integration.md`
 - 冒烟最小集：启动应用 → 选「Demo 模式」→ 跑一次生图 → 切到「资产」tab 看结果
 - 新功能必须：
@@ -56,59 +59,49 @@ Y-agent — 游戏美术 AI 工作台。Tauri 2 桌面应用，封装即梦（�
   5. 如果动了 API 客户端 / Skill 模板 / 资产库存读协议，**新增/修改要更新 `doc/api-integration.md`**
   6. 资产库相关改动需验证 CSP 放行 `asset:` 协议（`tauri.conf.json` 的 `app.security.csp.img-src`）
 
-## PR & commit conventions
+## 提交流程
 
-**分支**：从 `main` 拉 `<type>/<short-desc>`（如 `feature/asset-grid`、`fix/login-crash`），merge 回 `main`。
-不用 `develop` / `release/*` / `hotfix/*` 分支。
+单人项目，**直接 `main` 工作**，不建 feature 分支、不开 PR。
 
-**Commit**（conventional commits）：
+```bash
+# 1. 改完代码，本地三件套 + skill 校验（CI 必跑项）
+pnpm lint
+pnpm test
+pnpm build
+pnpm run validate:skills
+pnpm run validate:style-contract
+
+# 2. 一次性 commit（一件事一个 commit；commit message 见下）
+git add -A
+git commit -m "feat(ui): 加资产批量导出按钮"
+
+# 3. 直接推 main
+git push origin main
+```
+
+**commit 规范**（conventional commits，commit message 必读）：
 - type：`feat` / `fix` / `refactor` / `docs` / `chore` / `perf` / `test`
-- scope（项目约定）：`agent` / `ui` / `skill` / `jimeng` / `tauri` / `build` / `docs`
+- scope（项目约定）：`agent` / `ui` / `skill` / `jimeng` / `tauri` / `build` / `docs` / `cleanup` / `ci`
 - subject：中文，祈使句，≤50 字，不加句号。例：`feat(agent): P6.1 LLM 流式输出`
 - **一个 commit 一件事**。Skill 模板新增 = 一个 commit；API 客户端重构 = 一个 commit
 
-**PR 流程**：
-1. `git push -u origin feature/xxx`
-2. 开 PR → `main`，CI 自动跑 `ci.yml`（lint + test + build + cargo check），必须全绿
-3. Squash and merge
-4. **不要做的事**：直接 push main / `--force` push main / PR 里塞无关变更 / commit API key 或参考素材
+**注意事项**：
+- ✅ 接受"绕过 CI"风险（CI 仅作信号源，不是门禁）
+- ✅ 文档 / 配置文件改动可以单独一个 commit
+- ❌ **不要** `--force` push main
+- ❌ **不要** commit API key / 参考素材 / 100MB+ 单文件（已在 `.gitignore`）
+- ❌ **不要** 把"fix bug"和"顺手 refactor"塞同一个 commit
 
 完整版 + CI 失败处理 → `doc/development.md`
 
-## Release workflow
+## Release（按需）
 
-**版本号 SemVer** `vX.Y.Z`，三处必须同步：
-- `package.json` 的 `version`
-- `src-tauri/tauri.conf.json` 的 `version`
-- `src-tauri/Cargo.toml` 的 `[package] version`
+**默认不打 tag / 不发版**。需要发版时看 `doc/release.md` 完整流程（版本号同步、tag 写法、auto-updater 启用等）。
 
-**发版步骤**：
-```bash
-# 1. 三处版本号手动 bump（或 code 编辑器三件套一起改）
-# 2. 提交
-git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
-git commit -m "chore(build): bump version to 0.2.0"
-git push origin main
-# 3. 打 annotated tag + 推
-git tag -a v0.2.0 -m "Release 0.2.0
-## 新增
-- ...
-## 修复
-- ..."
-git push origin v0.2.0
-```
-
-推 tag 后 CI 自动：装工具链 → `tauri build --bundles nsis` → 上传 `Y-agent_0.2.0_x64-setup.exe` 到 GitHub Release（约 8-12 分钟）。
-
-**当前产物**：只出 Windows NSIS（`.exe`，~3 MB）。要加 macOS / Linux / MSI → `doc/release.md` § 5/§ 7
-
-**发版前必查**：
-- [ ] CI 全绿
-- [ ] 本地 `.\dev-with-msvc.cmd` 跑通冒烟最小集
-- [ ] `git status` 干净（没未提交密钥 / 参考素材）
-- [ ] SettingsPanel「关于」行版本号正确
-
-完整版（含 release notes 写法、删错发版、auto-updater 启用）→ `doc/release.md`
+发版简版（发版时再细看）：
+- 三处版本号同步 bump：`package.json` / `src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml`
+- 推 tag（`vX.Y.Z`）→ CI 自动 `tauri build --bundles nsis` → 上传 `.exe` 到 GitHub Release
+- 发版前必查：CI 全绿 / 冒烟最小集通过 / `git status` 干净 / SettingsPanel 关于行版本号正确
 ## Security
 
 - **API Key / 凭据**：Tauri Store 加密落盘（AES-GCM），**不要**写进代码或 `.env`
