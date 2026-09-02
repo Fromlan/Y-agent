@@ -22,7 +22,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 
-export interface SplitSpriteSheetParams {
+interface SplitSpriteSheetParams {
   /** 源 PNG/JPG 绝对路径 */
   inputPath: string;
   /** 行数（≥1） */
@@ -37,7 +37,7 @@ export interface SplitSpriteSheetParams {
   outputZip?: boolean;
 }
 
-export interface SplitTile {
+interface SplitTile {
   index: number;
   row: number;
   col: number;

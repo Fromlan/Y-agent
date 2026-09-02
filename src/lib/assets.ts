@@ -30,7 +30,7 @@ export async function deleteAsset(id: string): Promise<void> {
  * - 失败/部分失败的资产会被后端标 `payload.broken = true`，UI 可据此给"图已过期"提示
  * - 建议在"打开项目"时调一次，自动修复历史数据
  */
-export interface BackfillReport {
+interface BackfillReport {
   scanned: number;
   downloaded: number;
   failed: number;

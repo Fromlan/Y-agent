@@ -262,7 +262,7 @@ export function route(
 
   // 3) fallback
   const contractBlock = styleContract && styleContract.checksum
-    ? renderStyleContractText(styleContract)
+    ? renderStyleContract(styleContract)
     : "";
   const fallbackPrompt = contractBlock
     ? `${text}\n\n${contractBlock}`
@@ -275,13 +275,6 @@ export function route(
     triggerType: "fallback",
     reasoning: "未命中 Skill，走当前模型默认生图",
   };
-}
-
-/** fallback 路径的契约块渲染（避免循环 import，这里 inline 一下） */
-function renderStyleContractText(contract: StyleContract): string {
-  // 与 src/lib/style-contract.ts 的 renderStyleContract 保持同步；
-  // inline 是为了不让 route() 多一个 import 依赖
-  return renderStyleContract(contract);
 }
 
 

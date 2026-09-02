@@ -9,7 +9,6 @@ import pkg from "../../package.json";
 
 export const APP_VERSION: string = pkg.version;
 export const APP_NAME: string = pkg.name;
-export const APP_DESCRIPTION: string = pkg.description;
 
 const env = (import.meta as unknown as { env: Record<string, string | undefined> }).env;
 export const GIT_SHA: string = env.VITE_GIT_SHA ?? "dev";

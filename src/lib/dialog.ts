@@ -8,7 +8,7 @@
  * - 部分 WebView 禁用 window.prompt
  * - 无法设置标题 / 警告级别
  */
-import { ask as tauriAsk, confirm as tauriConfirm } from "@tauri-apps/plugin-dialog";
+import { ask as tauriAsk } from "@tauri-apps/plugin-dialog";
 
 /** 是否运行在 Tauri 桌面端。SSR / 纯浏览器调试时为 false。 */
 export const isTauri = (): boolean =>
@@ -38,18 +38,3 @@ export async function confirmDialog(message: string, options: ConfirmOptions = {
   return window.confirm(message);
 }
 
-/** 同 confirmDialog，但 UI 用 Ok/Cancel 文本。语义上更偏"执行操作"而非"问问题"。 */
-export async function okCancelDialog(
-  message: string,
-  options: ConfirmOptions = {}
-): Promise<boolean> {
-  if (isTauri()) {
-    return await tauriConfirm(message, {
-      title: options.title ?? "Y-agent",
-      kind: options.kind ?? "warning",
-      okLabel: options.okLabel ?? "确定",
-      cancelLabel: options.cancelLabel ?? "取消",
-    });
-  }
-  return window.confirm(message);
-}

@@ -26,9 +26,8 @@ interface Props extends Omit<React.ImgHTMLAttributes<HTMLImageElement>, "src"> {
  * 短暂回退到"天然宽高"作为布局占位 — 当父 div 的 `width: 100%; height: 100%`
  * 还没生效、或者图层 PNG 天然尺寸(如 287×1351)远大于父容器(如 27.9%×87.9%)
  * 时，图片会按天然尺寸渲染，溢出后被外层 `overflow-hidden` 裁掉，视觉上变成
- * "图层被放大到撑满"。LayerCompositeStage / LayerBboxMini / AssetThumbnailMini
- * 都靠父 div 的百分比定位 + objectFit 缩放，必须保证 `<img>` 完全被父 div
- * 约束住。
+ * "图层被放大到撑满"。LayerCompositeStage 内的多层合成视图都靠父 div 的
+ * 百分比定位 + objectFit 缩放，必须保证 `<img>` 完全被父 div 约束住。
  *
  * 调用方如果传了 `className` 会跟 `block` 合并；如果传了 `style` 也会保留。
  * 唯一例外：调用方主动想 inline 排版时，可以传 `unconstrained: true` 关闭默认 block。
