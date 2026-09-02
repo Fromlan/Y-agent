@@ -440,11 +440,11 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
       toast.warn("请输入提示词");
       return;
     }
-    if (model.supportsLayerDecomposition && layerDecomp && refs.length === 0) {
+    if (model.capabilities.layerDecomposition && layerDecomp && refs.length === 0) {
       toast.warn("图层拆分模式必须先上传一张参考图");
       return;
     }
-    if (model.supportsLayerDecomposition && layerDecomp && groupCount > 1) {
+    if (model.capabilities.layerDecomposition && layerDecomp && groupCount > 1) {
       toast.warn("图层拆分模式只支持单图输出");
       return;
     }
@@ -464,7 +464,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
           size,
           images: refs.length > 0 ? refs : undefined,
           maxImages: groupCount > 1 ? groupCount : undefined,
-          layerDecomposition: model.supportsLayerDecomposition && layerDecomp ? true : undefined,
+          layerDecomposition: model.capabilities.layerDecomposition && layerDecomp ? true : undefined,
           outputFormat: outputFormat || undefined,
           tools: webSearch ? ["web_search"] : undefined,
           optimizePromptMode: fastMode ? "fast" : undefined,

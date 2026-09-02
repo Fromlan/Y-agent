@@ -37,10 +37,6 @@ export interface ModelCapabilities {
 export interface ModelOption {
   id: string;
   name: string;
-  /** 旧字段保留，新代码请用 `capabilities.layerDecomposition` */
-  supportsLayerDecomposition: boolean;
-  /** 旧字段保留，新代码请用 `capabilities.groupGeneration` */
-  supportsGroupGeneration: boolean;
   hint?: string;
   /** 模型能力矩阵（P0 起统一用这个做 UI 显隐和参数校验） */
   capabilities: ModelCapabilities;
@@ -127,39 +123,29 @@ export const MODEL_OPTIONS: ModelOption[] = [
   {
     id: "doubao-seedream-5-0-lite-260128",
     name: "Seedream 5.0 Lite（默认）",
-    supportsLayerDecomposition: false,
-    supportsGroupGeneration: true,
     hint: "支持组图、联网搜索、流式，多数账号默认开通",
     capabilities: CAPABILITIES_5_0_LITE,
   },
   {
     id: "doubao-seedream-4-5-251128",
     name: "Seedream 4.5",
-    supportsLayerDecomposition: false,
-    supportsGroupGeneration: true,
     capabilities: CAPABILITIES_4_5,
   },
   {
     id: "doubao-seedream-4-0-250828",
     name: "Seedream 4.0",
-    supportsLayerDecomposition: false,
-    supportsGroupGeneration: true,
     hint: "支持极速模式（fast）和 1K",
     capabilities: CAPABILITIES_4_0,
   },
   {
     id: "doubao-seedream-5-0-pro-260628",
     name: "Seedream 5.0 Pro（需开通）",
-    supportsLayerDecomposition: true,
-    supportsGroupGeneration: false,
     hint: "支持图层拆分、交互编辑、背景透明——需在方舟控制台开通",
     capabilities: CAPABILITIES_5_0_PRO,
   },
   {
     id: "CUSTOM",
     name: "自定义 ID…",
-    supportsLayerDecomposition: false,
-    supportsGroupGeneration: true,
     hint: "按 5.0 Lite 能力兜底（PNG/JPEG、联网搜索、组图）",
     capabilities: CAPABILITIES_CUSTOM,
   },

@@ -13,8 +13,6 @@ function buildCustomOption(id: string): ModelOption {
   return {
     id,
     name: id ? `自定义: ${id}` : "自定义",
-    supportsLayerDecomposition: modelCapabilities(id).layerDecomposition,
-    supportsGroupGeneration: modelCapabilities(id).groupGeneration,
     capabilities: modelCapabilities(id),
   };
 }
