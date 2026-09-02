@@ -71,11 +71,12 @@ export function useProjectBootstrap(projectId: string | undefined): ProjectBoots
       if (!opts.silent) setLoading(true);
       try {
         setAssets(await listAssets(projectId));
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (opts.silent) {
           log.error("project-bootstrap", "silent reload failed:", e);
         } else {
-          toast.error(`加载资产失败：${e?.message ?? e}`);
+          const msg = e instanceof Error ? e.message : String(e);
+          toast.error(`加载资产失败：${msg}`);
         }
       } finally {
         if (!opts.silent) setLoading(false);

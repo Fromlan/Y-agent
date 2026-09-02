@@ -335,14 +335,14 @@ export function persistGenerationResult(
   messageId: string,
   args: {
     finalContent: string;
-    events: unknown[];
+    events: object[];
     skillLog: object | null;
     assets: Asset[];
   }
 ): void {
   persistUpdate(messageId, {
     content: args.finalContent,
-    events: args.events as never,
+    events: args.events,
     skillLog: args.skillLog ?? undefined,
     assetIds: args.assets.length > 0 ? dbAssetIds(args.assets) : null,
   });
