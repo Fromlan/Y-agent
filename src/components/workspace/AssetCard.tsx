@@ -423,10 +423,18 @@ export default function AssetCard({
         onClick={onClick}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
+        draggable
+        onDragStart={(e) => {
+          // M3.1.4 + 缺失 #1:把 asset id 写到 dataTransfer,
+          // CharacterReferenceGrid 的 onDrop 可读 text/plain 接住。
+          e.dataTransfer.setData("text/plain", asset.id);
+          e.dataTransfer.setData("asset-id", asset.id);
+          e.dataTransfer.effectAllowed = "copy";
+        }}
         className={`relative cursor-pointer break-inside-avoid group ${
           selected ? "ring-2 ring-accent" : ""
         }`}
-        title={asset.prompt}
+        title={`${asset.prompt}（可拖到角色档案）`}
       >
         <div className="relative aspect-square bg-bg-elev rounded overflow-hidden border border-border">
           {isVideo ? (
@@ -481,6 +489,12 @@ export default function AssetCard({
         onClick={onClick}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData("text/plain", asset.id);
+          e.dataTransfer.setData("asset-id", asset.id);
+          e.dataTransfer.effectAllowed = "copy";
+        }}
         className={`panel overflow-hidden cursor-pointer transition-all
           ${selected ? "ring-2 ring-accent border-accent" : "hover:border-border-strong"}
         `}
@@ -603,6 +617,12 @@ export default function AssetCard({
       onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/plain", asset.id);
+        e.dataTransfer.setData("asset-id", asset.id);
+        e.dataTransfer.effectAllowed = "copy";
+      }}
       className={`relative panel overflow-hidden cursor-pointer transition-all
         ${selected ? "ring-2 ring-accent border-accent" : "hover:border-border-strong"}
       `}
