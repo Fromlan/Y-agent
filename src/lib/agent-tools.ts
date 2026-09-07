@@ -182,11 +182,19 @@ export const AGENT_TOOLS: ToolDefinition[] = [
  * - 注入游戏美术师角色 + 可用 Skill 列表 + 项目级风格偏好
  * - 让 LLM 主动反问而不是瞎猜
  * - P7：把"用户在 PromptBar 选定的模型"作为强偏好，避免 LLM 私自切换
+ * - M3：注入项目 + 全局角色档案列表，让 LLM 知道有哪些可用档案
  */
 export function renderSystemPrompt(opts: {
   styleHints?: string[];
   recentModels?: string[];
   userModelName?: string;
+  characterArchives?: Array<{
+    id: string;
+    name: string;
+    description: string;
+    scope: "project" | "global";
+    referenceImageAssetIds: string[];
+  }>;
 }): string {
   const styleLine = opts.styleHints && opts.styleHints.length > 0
     ? `\n\n项目画风偏好（自动学到，用户没明确改的话可以参考）：${opts.styleHints.join("、")}`
@@ -198,6 +206,16 @@ export function renderSystemPrompt(opts: {
   // 除非用户消息里明确要求切换。如果没传 userModelName（防御性）就降级为旧版"默认 5.0 Lite"。
   const userModelLine = opts.userModelName
     ? `\n\n## P7 模型选择硬规则\n\n用户在 PromptBar 选定的模型是「${opts.userModelName}」，是本次会话的默认生图模型。\n\n- **调 jimeng_generate_image 时不要传 model 字段**，由前端用 PromptBar 选定的模型执行。\n- **只有用户消息里明确写"换成 X 模型"/"用 Pro 重新画"**时，才传 model 字段。\n- 不要主动判断升级到 5.0 Pro——用户没要求就别换。`
+    : "";
+  // M3：角色档案列表（项目 + 全局合并，最多 20 条；空则隐藏整段）
+  const characterLine = opts.characterArchives && opts.characterArchives.length > 0
+    ? `\n\n## M3 角色档案\n\n当前项目可见的角色档案（project = 本项目私有，global = 跨项目共享）：\n\n${opts.characterArchives
+        .slice(0, 20)
+        .map(
+          (a) =>
+            `- ${a.id} | ${a.scope === "global" ? "🌐" : "📁"} | ${a.name}${a.description ? ` — ${a.description.slice(0, 80)}` : ""}${a.referenceImageAssetIds.length > 0 ? ` (${a.referenceImageAssetIds.length} 张参考图)` : ""}`,
+        )
+        .join("\n")}\n\n- **用户消息明确提到角色名（如"用小红做表情包"/"用这个角色"）时**：先调 \`character_use_archive\`（参数 archiveId 必填）→ 再调 \`jimeng_generate_image\`，prompt 会自动包含 [角色档案] 段。\n- **用户消息没提角色**：不要调 character_use_archive。直接调 jimeng_generate_image 即可。\n- 没在列表里的 archiveId 是非法的，调用会失败。`
     : "";
 
   return `你是 Y-agent，一个游戏美术师 AI 助手，正在帮独立游戏美术师完成一张美术资产。
@@ -281,5 +299,5 @@ export function renderSystemPrompt(opts: {
 - 工具调用不要超过 5 轮。
 - 不要生成违规内容。
 - 用中文回复。
-${userModelLine}${styleLine}${modelsLine}`;
+${userModelLine}${styleLine}${modelsLine}${characterLine}`;
 }

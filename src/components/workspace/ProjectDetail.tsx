@@ -653,6 +653,14 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
           recentModels: agentCtx?.recentModels,
           // P7：把 PromptBar 选定的模型注入 system prompt，作为 LLM 默认生图模型的强偏好
           userModelName: model.name,
+          // M3：注入项目 + 全局角色档案，让 LLM 知道有哪些可选
+          characterArchives: characterArchives.map((a) => ({
+            id: a.id,
+            name: a.name,
+            description: a.description,
+            scope: a.scope,
+            referenceImageAssetIds: a.referenceImageAssetIds,
+          })),
         }),
       },
       ...messages
