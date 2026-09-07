@@ -50,6 +50,15 @@ REF_KEYWORDS = ("参考图", "上传", "reference", "Reference", "upload")
 # group_count > 1 触发词（模板里必须提到多图/组图）
 GROUP_KEYWORDS = ("多图", "组图", "group", "Group", "多张", "4 张", "3-4 张", "6-9", "9 宫格", "8 表情", "3 套", "3 张")
 
+# 允许的占位符（用 {{...}} 形式，前后空格也允许）。
+# - user_input  : 用户在 PromptBar 输入的 prompt（M2 唯一已实现替换的）
+# - style_contract : 项目风格契约（renderStyleContract 输出，M2 P1 拼接）
+# - character_archive : M3 角色档案（renderCharacterArchive 输出，M3.2 拼接）
+# 注意：模板里还可以出现 `{{user_palette}}` / `{{component_count}}` 等"已声明但未实现"
+# 的占位符（M2 时代的兼容性遗留），不视为错误，只是不出现在运行时替换里。
+# renderSkill 实际只替换 user_input + style_contract（M2），character_archive 由 M3.2 加。
+ALLOWED_PLACEHOLDERS = {"user_input", "style_contract", "character_archive"}
+
 # frontmatter 解析（极简：仅支持 `key: value` 与 `key: [a, b]`）
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n(.*)$", re.DOTALL)
 KV_RE = re.compile(r"^([a-zA-Z_]+)\s*:\s*(.*)$")
