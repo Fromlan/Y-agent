@@ -87,6 +87,13 @@ pub fn run() {
             commands::jimeng_video_cancel,
             commands::jimeng_video_list_tasks,
             commands::jimeng_h3_optimize,
+            commands::character_archive_upsert,
+            commands::character_archive_list,
+            commands::character_archive_get,
+            commands::character_archive_delete,
+            commands::character_archive_attach_reference_image,
+            commands::character_archive_detach_reference_image,
+            commands::character_archive_increment_agent_use_count,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -84,6 +84,29 @@ impl Storage {
             );
             CREATE INDEX IF NOT EXISTS idx_video_tasks_project
                 ON video_tasks(project_id, created_at DESC);
+
+            -- M3.1 角色档案：跨项目可复用的"角色档案"，支持全局 scope
+            -- reference_image_asset_ids / tags 是 JSON 字符串数组
+            -- agent_use_count 由 M3.4 Agent 工具触发时自增
+            CREATE TABLE IF NOT EXISTS character_archives (
+                id TEXT PRIMARY KEY,
+                scope TEXT NOT NULL CHECK(scope IN ('project','global')),
+                project_id TEXT,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                reference_image_asset_ids TEXT NOT NULL DEFAULT '[]',
+                style_contract_id TEXT,
+                prompt_snippet TEXT NOT NULL DEFAULT '',
+                tags TEXT NOT NULL DEFAULT '[]',
+                agent_use_count INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_character_archives_project
+                ON character_archives(project_id, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_character_archives_scope
+                ON character_archives(scope, updated_at DESC);
             "#,
         )?;
         let _ = KEY_RECORD_ID;
@@ -581,6 +604,219 @@ impl Storage {
         }
         Ok(out)
     }
+
+    // ---------- Character Archives (M3.1) ----------
+    // 跨项目可复用的"角色档案"。每条记录可挂在单个 project (scope=project)
+    // 或全局可见 (scope=global)。reference_image_asset_ids / tags 是 JSON 字符串数组。
+    //
+    // 设计：完全靠 storage.rs 暴露 6 个方法 + 1 个结构体，commands.rs 负责 Tauri 绑定 + 鉴权。
+    // 列表查询：list_character_archives(project_id) 同时返回 project + global 两类，
+    //           scope / tag / name 过滤放在 TS 层做（更灵活 + 单元测试更直观）。
+
+    /// 创建或更新（upsert by id）。如果 id 已存在则覆盖，否则新建。
+    /// timestamp 由 Rust 端自动写，调用方不需要传 createdAt/updatedAt。
+    /// 注意：upsert 不会保留旧的 agent_use_count —— 调用方需要在新 archive 里回填。
+    pub fn upsert_character_archive(
+        &self,
+        archive: &CharacterArchiveRow,
+    ) -> anyhow::Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let now = chrono::Utc::now().timestamp_millis();
+        conn.execute(
+            r#"
+            INSERT INTO character_archives(
+                id, scope, project_id, name, description,
+                reference_image_asset_ids, style_contract_id, prompt_snippet, tags,
+                agent_use_count, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)
+            ON CONFLICT(id) DO UPDATE SET
+                scope=excluded.scope,
+                project_id=excluded.project_id,
+                name=excluded.name,
+                description=excluded.description,
+                reference_image_asset_ids=excluded.reference_image_asset_ids,
+                style_contract_id=excluded.style_contract_id,
+                prompt_snippet=excluded.prompt_snippet,
+                tags=excluded.tags,
+                updated_at=excluded.updated_at
+            "#,
+            params![
+                archive.id,
+                archive.scope,
+                archive.project_id,
+                archive.name,
+                archive.description,
+                archive.reference_image_asset_ids_json,
+                archive.style_contract_id,
+                archive.prompt_snippet,
+                archive.tags_json,
+                archive.agent_use_count,
+                now,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// 读取单条。返回 None 表示不存在。
+    pub fn get_character_archive(&self, id: &str) -> anyhow::Result<Option<CharacterArchiveRow>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, scope, project_id, name, description, reference_image_asset_ids,
+                    style_contract_id, prompt_snippet, tags, agent_use_count,
+                    created_at, updated_at
+             FROM character_archives WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query(params![id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row_to_character_archive(row)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// 列出某项目可见的档案：scope=project 且 project_id 匹配 + scope=global。
+    /// 按 updated_at DESC 排序。tag / name 过滤在 TS 层做。
+    pub fn list_character_archives(
+        &self,
+        project_id: &str,
+    ) -> anyhow::Result<Vec<CharacterArchiveRow>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, scope, project_id, name, description, reference_image_asset_ids,
+                    style_contract_id, prompt_snippet, tags, agent_use_count,
+                    created_at, updated_at
+             FROM character_archives
+             WHERE scope = 'global' OR (scope = 'project' AND project_id = ?1)
+             ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map(params![project_id], row_to_character_archive)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// 删除。返回影响的行数（0 = 不存在）。
+    pub fn delete_character_archive(&self, id: &str) -> anyhow::Result<i64> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let changed = conn.execute(
+            "DELETE FROM character_archives WHERE id = ?1",
+            params![id],
+        )?;
+        Ok(changed as i64)
+    }
+
+    /// 增量追加 1 个参考图 asset id 到档案（自动去重 + 维护顺序）。
+    /// 如果 asset id 已存在则 no-op。返回追加后的数组长度。
+    /// 失败原因（asset id 已被删除等）由调用方决定如何处理——本方法不做资产存在性校验。
+    pub fn attach_reference_image(
+        &self,
+        archive_id: &str,
+        asset_id: &str,
+    ) -> anyhow::Result<usize> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let tx = conn.transaction()?;
+        let raw: Option<String> = tx
+            .query_row(
+                "SELECT reference_image_asset_ids FROM character_archives WHERE id = ?1",
+                params![archive_id],
+                |r| r.get(0),
+            )
+            .ok();
+        let mut ids: Vec<String> = raw
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default();
+        if !ids.iter().any(|x| x == asset_id) {
+            ids.push(asset_id.to_string());
+        }
+        let new_json = serde_json::to_string(&ids)?;
+        let now = chrono::Utc::now().timestamp_millis();
+        let changed = tx.execute(
+            "UPDATE character_archives SET reference_image_asset_ids = ?1, updated_at = ?2 WHERE id = ?3",
+            params![new_json, now, archive_id],
+        )?;
+        if changed == 0 {
+            anyhow::bail!("角色档案不存在：{archive_id}");
+        }
+        tx.commit()?;
+        Ok(ids.len())
+    }
+
+    /// 移除 1 个参考图 asset id。返回移除后的数组长度。
+    pub fn detach_reference_image(
+        &self,
+        archive_id: &str,
+        asset_id: &str,
+    ) -> anyhow::Result<usize> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let tx = conn.transaction()?;
+        let raw: Option<String> = tx
+            .query_row(
+                "SELECT reference_image_asset_ids FROM character_archives WHERE id = ?1",
+                params![archive_id],
+                |r| r.get(0),
+            )
+            .ok();
+        let mut ids: Vec<String> = raw
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default();
+        ids.retain(|x| x != asset_id);
+        let new_json = serde_json::to_string(&ids)?;
+        let now = chrono::Utc::now().timestamp_millis();
+        let changed = tx.execute(
+            "UPDATE character_archives SET reference_image_asset_ids = ?1, updated_at = ?2 WHERE id = ?3",
+            params![new_json, now, archive_id],
+        )?;
+        if changed == 0 {
+            anyhow::bail!("角色档案不存在：{archive_id}");
+        }
+        tx.commit()?;
+        Ok(ids.len())
+    }
+
+    /// Agent 引用计数器 +1。M3.4 触发。仅在 archive 存在时返回新值，否则返回 None。
+    pub fn increment_agent_use_count(&self, archive_id: &str) -> anyhow::Result<Option<i64>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let now = chrono::Utc::now().timestamp_millis();
+        let changed = conn.execute(
+            "UPDATE character_archives SET agent_use_count = agent_use_count + 1, updated_at = ?1
+             WHERE id = ?2",
+            params![now, archive_id],
+        )?;
+        if changed == 0 {
+            return Ok(None);
+        }
+        let new_count: i64 = conn.query_row(
+            "SELECT agent_use_count FROM character_archives WHERE id = ?1",
+            params![archive_id],
+            |r| r.get(0),
+        )?;
+        Ok(Some(new_count))
+    }
 }
 
 /// 持久化视频任务记录。content / meta 为 JSON 字符串。
@@ -618,6 +854,45 @@ fn row_to_video_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<VideoTaskRecor
         error: row.get(10)?,
         created_at: row.get(11)?,
         updated_at: row.get(12)?,
+    })
+}
+
+/// M3.1 角色档案行。对应 character_archives 表。
+/// - reference_image_asset_ids_json / tags_json 是 JSON 字符串数组（前端用 serde 解析）
+/// - project_id 在 scope=global 时为 None，scope=project 时必填
+/// - agent_use_count 由 M3.4 Agent 工具触发时自增，upsert 不覆盖（前端回填）
+/// - timestamp 字段在 storage 层自动写，调用方不需要传
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CharacterArchiveRow {
+    pub id: String,
+    pub scope: String, // "project" | "global"
+    pub project_id: Option<String>,
+    pub name: String,
+    pub description: String,
+    pub reference_image_asset_ids_json: String,
+    pub style_contract_id: Option<String>,
+    pub prompt_snippet: String,
+    pub tags_json: String,
+    pub agent_use_count: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+fn row_to_character_archive(row: &rusqlite::Row<'_>) -> rusqlite::Result<CharacterArchiveRow> {
+    Ok(CharacterArchiveRow {
+        id: row.get(0)?,
+        scope: row.get(1)?,
+        project_id: row.get(2)?,
+        name: row.get(3)?,
+        description: row.get(4)?,
+        reference_image_asset_ids_json: row.get(5)?,
+        style_contract_id: row.get(6)?,
+        prompt_snippet: row.get(7)?,
+        tags_json: row.get(8)?,
+        agent_use_count: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
     })
 }
 

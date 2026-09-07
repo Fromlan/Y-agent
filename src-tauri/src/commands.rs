@@ -2125,6 +2125,199 @@ impl JsVideoEvent {
 }
 
 // ---------------------------------------------------------------------------
+// M3.1 Character Archives（角色档案）
+// ---------------------------------------------------------------------------
+// 6 个 command：create / list / get / update / delete / attachReferenceImage
+// + 1 个 detachReferenceImage（前端"从档案移除此图"用）+ 1 个 incrementAgentUseCount（M3.4 用）
+// TS 端类型在 src/lib/types.ts 的 CharacterArchive 接口里，IPC 走 camelCase 序列化。
+
+use crate::storage::CharacterArchiveRow;
+
+/// 前端 create / update 共用：除 id 之外全字段必填。id 为空时 Rust 端生成 UUID。
+/// timestamp / agent_use_count 由 Rust 端写，调用方不需要传。
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JsCharacterArchiveUpsert {
+    pub id: Option<String>,
+    pub scope: String, // "project" | "global"
+    pub project_id: Option<String>,
+    pub name: String,
+    pub description: String,
+    pub reference_image_asset_ids: Vec<String>,
+    pub style_contract_id: Option<String>,
+    pub prompt_snippet: String,
+    pub tags: Vec<String>,
+    /// M3.4 用：M3.1 阶段前端写 0 即可；M3.4 增量更新由 Rust 端负责。
+    pub agent_use_count: Option<i64>,
+}
+
+fn validate_archive_input(input: &JsCharacterArchiveUpsert) -> Result<String, String> {
+    // 1. name 必填 + 长度限制
+    let name = input.name.trim();
+    if name.is_empty() {
+        return Err("档案名不能为空".to_string());
+    }
+    if name.len() > 100 {
+        return Err("档案名不能超过 100 字符".to_string());
+    }
+    // 2. scope 必须合法
+    if input.scope != "project" && input.scope != "global" {
+        return Err(format!("scope 必须是 'project' 或 'global'，收到 '{}'", input.scope));
+    }
+    // 3. scope=project 必须有 projectId，scope=global 必须没有 projectId
+    match input.scope.as_str() {
+        "project" => {
+            if input.project_id.as_deref().unwrap_or("").is_empty() {
+                return Err("scope=project 时必须提供 projectId".to_string());
+            }
+        }
+        "global" => {
+            if input.project_id.is_some() {
+                return Err("scope=global 时 projectId 必须为空".to_string());
+            }
+        }
+        _ => unreachable!(),
+    }
+    // 4. 参考图数量上限（M3.1 默认 6 张）
+    const MAX_REFS: usize = 6;
+    if input.reference_image_asset_ids.len() > MAX_REFS {
+        return Err(format!(
+            "参考图最多 {} 张（当前 {} 张）",
+            MAX_REFS,
+            input.reference_image_asset_ids.len()
+        ));
+    }
+    // 5. tags 数量上限
+    const MAX_TAGS: usize = 16;
+    if input.tags.len() > MAX_TAGS {
+        return Err(format!("标签最多 {} 个", MAX_TAGS));
+    }
+    // 6. 重复 asset id 检测
+    let mut seen = std::collections::HashSet::new();
+    for id in &input.reference_image_asset_ids {
+        if !seen.insert(id.clone()) {
+            return Err(format!("参考图 ID 重复：{id}"));
+        }
+    }
+    // 7. name 全局唯一性（同一 project 内 / 全局范围内）
+    Ok(name.to_string())
+}
+
+fn archive_input_to_row(
+    input: JsCharacterArchiveUpsert,
+    generated_id: String,
+) -> CharacterArchiveRow {
+    let reference_image_asset_ids_json =
+        serde_json::to_string(&input.reference_image_asset_ids).unwrap_or_else(|_| "[]".to_string());
+    let tags_json = serde_json::to_string(&input.tags).unwrap_or_else(|_| "[]".to_string());
+    let project_id = if input.scope == "global" {
+        None
+    } else {
+        input.project_id
+    };
+    CharacterArchiveRow {
+        id: generated_id,
+        scope: input.scope,
+        project_id,
+        name: input.name.trim().to_string(),
+        description: input.description,
+        reference_image_asset_ids_json,
+        style_contract_id: input.style_contract_id,
+        prompt_snippet: input.prompt_snippet,
+        tags_json,
+        agent_use_count: input.agent_use_count.unwrap_or(0).max(0),
+        created_at: 0, // 由 storage 层在 INSERT 时自动写
+        updated_at: 0,
+    }
+}
+
+#[tauri::command]
+pub fn character_archive_upsert(
+    input: JsCharacterArchiveUpsert,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<CharacterArchiveRow, String> {
+    validate_archive_input(&input)?;
+    let s = state.lock().map_err(map_err)?;
+    // id 优先用前端的（保持引用稳定）；空时才生成 UUID
+    let id = input
+        .id
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let row = archive_input_to_row(input, id);
+    s.storage.upsert_character_archive(&row).map_err(map_err)?;
+    // upsert 后再读一次，把 createdAt / updatedAt 拿回来给前端
+    s.storage
+        .get_character_archive(&row.id)
+        .map_err(map_err)?
+        .ok_or_else(|| "档案 upsert 后读取失败".to_string())
+}
+
+#[tauri::command]
+pub fn character_archive_list(
+    project_id: String,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<Vec<CharacterArchiveRow>, String> {
+    let s = state.lock().map_err(map_err)?;
+    s.storage
+        .list_character_archives(&project_id)
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn character_archive_get(
+    id: String,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<Option<CharacterArchiveRow>, String> {
+    let s = state.lock().map_err(map_err)?;
+    s.storage.get_character_archive(&id).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn character_archive_delete(
+    id: String,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<i64, String> {
+    let s = state.lock().map_err(map_err)?;
+    s.storage.delete_character_archive(&id).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn character_archive_attach_reference_image(
+    archive_id: String,
+    asset_id: String,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<usize, String> {
+    let s = state.lock().map_err(map_err)?;
+    s.storage
+        .attach_reference_image(&archive_id, &asset_id)
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn character_archive_detach_reference_image(
+    archive_id: String,
+    asset_id: String,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<usize, String> {
+    let s = state.lock().map_err(map_err)?;
+    s.storage
+        .detach_reference_image(&archive_id, &asset_id)
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn character_archive_increment_agent_use_count(
+    archive_id: String,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<Option<i64>, String> {
+    let s = state.lock().map_err(map_err)?;
+    s.storage
+        .increment_agent_use_count(&archive_id)
+        .map_err(map_err)
+}
+
+// ---------------------------------------------------------------------------
 // 视频 API Key 三件套
 // ---------------------------------------------------------------------------
 
