@@ -1463,12 +1463,24 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
             projectId={currentProject.id}
             assets={assets}
             onApplyToPromptBar={(id) => {
-              // M3.2.4 才会真正接到 PromptBar；M3.1.4 仅 toast 占位
-              toast.info(
-                id
-                  ? `已选择档案 ${id.slice(0, 8)}…（M3.2.4 接入 PromptBar）`
-                  : "已清除档案选择",
-              );
+              // M3.2.4: 角色工坊"应用"按钮真正接到 PromptBar
+              // - 写 selectedArchiveId 让 CharacterArchivePicker 同步高亮
+              // - 切到 chat tab + chat 输入模式让用户立刻能 prompt
+              // - toast 提示而不是弹窗,保持轻量
+              if (id) {
+                setSelectedArchiveId(id);
+                setInputMode("chat");
+                setTab("chat");
+                const archive = characterArchives.find((a) => a.id === id);
+                toast.success(
+                  archive
+                    ? `已应用「${archive.name}」到 PromptBar（请到对话 tab 生图）`
+                    : `已应用档案到 PromptBar`,
+                );
+              } else {
+                setSelectedArchiveId(null);
+                toast.info("已清除档案选择");
+              }
             }}
           />
         ) : (
