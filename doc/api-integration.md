@@ -1244,3 +1244,120 @@ type OptimizeReason =
 | `src/components/workspace/ProjectDetail.tsx:911-1010` | `onSubmitVideo` 改造：H3 预优化 → 替换 text → `submitVideo` |
 | `src/components/workspace/ProjectDetail.tsx:158-208` | `onSucceeded` 回填 3 字段到 `payload.video` |
 | `src/components/workspace/AssetDetailDialog.tsx:374-407` | 视频资产下的「AI 增强」collapsible 面板 |
+
+
+## Part 8. 角色档案 CharacterArchive（M3 · 跨项目一致性）
+
+> 数据源：`src/lib/character-archive.ts`（前端纯函数层 + IPC） + `src/lib/types.ts:316-371`（类型） + `src-tauri/src/commands.rs:2234-2400`（7 个 Tauri command）。
+> 角色档案是「跨项目可复用的角色一致性资产」：同一角色多视角 / 表情 / 动作 / 场景矩阵都自动一致。
+
+### 8.1 数据模型
+
+`CharacterArchive` 字段（`src/lib/types.ts:316-371`）：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` | `string` (UUID) | 档案主键 |
+| `scope` | `"project" \| "global"` | 可见范围；global 跨项目共享 |
+| `projectId` | `string \| null` | scope=project 必填；scope=global 必须为 null |
+| `name` | `string` | 档案名（M3.1 限制 100 字符） |
+| `description` | `string` | 描述（限制 4000 字符） |
+| `referenceImageAssetIds` | `string[]` | 引用的资产 id 列表（M3.1 上限 6 张） |
+| `styleContractId` | `string \| null` | 绑定的风格契约 checksum（可选） |
+| `promptSnippet` | `string` | 用户补充的 prompt 片段（限制 2000 字符） |
+| `tags` | `string[]` | 标签（上限 16 个，单个 24 字符） |
+| `agentUseCount` | `number` | 被 Agent 工具引用次数（M3.4 由 Rust 端自增） |
+| `createdAt` / `updatedAt` | `number` (ms) | 由 Rust 端在 upsert 时自动写 |
+
+### 8.2 持久化（SQLite）
+
+`character_archives` 表（`src-tauri/src/storage.rs:91-109`）：
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `id` | TEXT PRIMARY KEY | UUID |
+| `scope` | TEXT CHECK | 'project' 或 'global' |
+| `project_id` | TEXT | 外键，project scope 必填；global 必须 NULL；`ON DELETE CASCADE` |
+| `name` | TEXT NOT NULL | |
+| `description` | TEXT NOT NULL DEFAULT '' | |
+| `reference_image_asset_ids` | TEXT NOT NULL DEFAULT '[]' | JSON 字符串数组 |
+| `style_contract_id` | TEXT | 可空 |
+| `prompt_snippet` | TEXT NOT NULL DEFAULT '' | |
+| `tags` | TEXT NOT NULL DEFAULT '[]' | JSON 字符串数组 |
+| `agent_use_count` | INTEGER NOT NULL DEFAULT 0 | |
+| `created_at` / `updated_at` | INTEGER | ms 时间戳 |
+
+索引：`idx_character_archives_project`（project_id, updated_at DESC）+ `idx_character_archives_scope`（scope, updated_at DESC）。
+
+### 8.3 IPC 协议（7 个 Tauri command）
+
+| Command | 说明 | 返回 |
+|---|---|---|
+| `character_archive_upsert(input)` | 创建或更新；id 缺省时 Rust 端生成 UUID | 完整 row（含 createdAt/updatedAt） |
+| `character_archive_list(projectId)` | 列项目可见的档案（project + scope=global） | `CharacterArchive[]` |
+| `character_archive_get(id)` | 单条；不存在返回 null | `CharacterArchive \| null` |
+| `character_archive_delete(id)` | 删除 | 影响行数（0 = 不存在） |
+| `character_archive_attach_reference_image(archiveId, assetId)` | 追加 1 个 ref asset id | 新 ref 数组长度 |
+| `character_archive_detach_reference_image(archiveId, assetId)` | 移除 1 个 ref asset id | 新 ref 数组长度 |
+| `character_archive_increment_agent_use_count(archiveId)` | Agent 工具触发；自增 1 | 新计数值（档案不存在时返回 null） |
+
+`upset` 的 `JsCharacterArchiveUpsert` payload（`src-tauri/src/commands.rs:2138-2152`）：除 `id` 外全字段必填；`scope` 必须是 'project' / 'global'；`scope=project` 必须有 `projectId`；`scope=global` 必须 `projectId` 为空。
+
+校验：Rust 端 `validate_archive_input` 与 TS 端 `validateArchiveUpsert` 是同一份逻辑的双实现（先在 TS 端预检，再在 Rust 端二次校验，超长 / 重复 ref id / 重复 tag 等都会拒）。
+
+### 8.4 Prompt 注入顺序
+
+`renderSkill`（`src/lib/skill.ts:117-153`）的拼接顺序：
+
+```
+{{user_input}}  →  {{character_archive}}  →  [项目风格契约]  /  [项目画风偏好]
+```
+
+- 角色档案段（`renderCharacterArchive`）只在 `referenceImageAssetIds` 实际被 Agent 调用 `character_use_archive` 工具后才追加（一次性消费，写到下次 `jimeng_generate_image` 的 prompt 里），不在 PromptBar 选档案时自动注入。
+- 「应用到 PromptBar」按钮（M3.2.4 完整接入）：CharacterWorkshop 内点"应用"→ `setSelectedArchiveId(id) + setInputMode("chat") + setTab("chat")` → 用户立刻在对话 tab 写 prompt → LLM 调 `character_use_archive` 工具（`src/lib/agent-tools.ts:89-109`）→ 下一轮 `jimeng_generate_image` 把档案拼进 prompt。
+
+### 8.5 .json 导入导出（M3.5）
+
+Schema v1（`src/lib/character-archive.ts:362-376`）：
+
+```ts
+{
+  schemaVersion: 1,
+  exportedAt: number,
+  archives: Array<{
+    originalId: string,        // 人类可读；导入时不用
+    name: string,
+    description: string,
+    tags: string[],
+    promptSnippet: string,
+    scope: "project" | "global",
+    sourceProjectName?: string  // 仅人类可读
+  }>
+}
+```
+
+**不含 `referenceImageAssetIds`**：资产是本地 SQLite 资源，跨机器无意义。导入时 Rust 端重新生成 UUID（避免冲突），`referenceImageAssetIds` 留空，用户在目标项目里手动重新附加。
+
+校验：schemaVersion 必须 === 1（拒未来版本）；`archives` 必须是数组；逐项校验 name 非空 + scope 合法。
+
+### 8.6 关键文件索引
+
+| 文件 | 职责 |
+|---|---|
+| `src/lib/character-archive.ts` | 7 个 IPC + 纯函数层（`queryCharacterArchives` / `validateArchiveUpsert` / `aggregateAllTags` / `renderCharacterArchive` / 导入导出 schema） + 45 个 vitest |
+| `src/lib/types.ts:316-371` | `CharacterArchive` / `CharacterArchiveQuery` / `CharacterArchiveUpsert` 类型 |
+| `src-tauri/src/storage.rs:91-109, 619-820` | `character_archives` 表 + 7 个持久化方法 + JSON 字段编码 |
+| `src-tauri/src/commands.rs:2128-2400` | 7 个 Tauri command + `JsCharacterArchiveUpsert` + `validate_archive_input` |
+| `src/lib/agent-tools.ts:89-109` | `character_use_archive` 工具 schema |
+| `src/lib/skill.ts:117-153` | `renderSkill` 把档案段拼到 prompt |
+| `src/components/workspace/CharacterWorkshop.tsx` | 角色工坊主页（双栏 + 500ms 防抖落盘 + 导入导出按钮） |
+| `src/components/workspace/CharacterArchiveEditor.tsx` | 字段编辑 + 实时校验 + tags chips + 6 格 ref 网格 |
+| `src/components/workspace/CharacterArchivePicker.tsx` | PromptBar 内的 pill 弹窗（搜索 / 新建全局档案 / 跳工坊） |
+| `src/components/workspace/CharacterArchiveList.tsx` | 列表 + 搜索 + 标签多选（AND）+ scope 过滤 |
+| `src/components/workspace/CharacterReferenceGrid.tsx` | 6 格 ref 图网格 + AssetPicker 选图 + HTML5 drop 占位 |
+
+### 8.7 与已有协议的关系
+
+- **风格契约**（Part 4 + Part 5 之前章节）：角色档案可绑定一个 `styleContractId`，但 prompt 拼接顺序是「user_input → character_archive → style_contract」（档案在风格契约**之前**被拼上，因为档案决定"是什么角色"，风格契约决定"画成什么风格"）。
+- **Agent 工具**（Part 2 + Part 2.5）：`character_use_archive` 是 4 个 Agent 工具之一（`jimeng_generate_image` / `jimeng_decompose_layers` / `jimeng_local_edit` / `character_use_archive`）。它**不直接生成图**，只把档案上下文塞到下次 `jimeng_generate_image` 的 prompt 末尾。
+- **资产**（Part 1）：档案里的 `referenceImageAssetIds` 是 `Asset.id`（不是路径）。资产被删除时，引用它的档案里那一项会变成"已删除"占位，**档案本身不级联删**。
