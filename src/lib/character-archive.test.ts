@@ -12,6 +12,7 @@ import {
   isReferencedAsReference,
   findArchivesReferencingAsset,
   summarizeArchivesForPrompt,
+  renderCharacterArchive,
   CHARACTER_ARCHIVE_LIMITS,
   DEFAULT_SCOPE_QUERY,
 } from "@/lib/character-archive";
@@ -354,5 +355,88 @@ describe("CHARACTER_ARCHIVE_LIMITS", () => {
     expect(CHARACTER_ARCHIVE_LIMITS.MAX_NAME_LENGTH).toBe(100);
     expect(CHARACTER_ARCHIVE_LIMITS.MAX_REFERENCE_IMAGES).toBe(6);
     expect(CHARACTER_ARCHIVE_LIMITS.MAX_TAGS).toBe(16);
+  });
+});
+
+describe("renderCharacterArchive", () => {
+  it("全空档案返回空串（不污染 prompt）", () => {
+    const a = makeArchive({
+      name: "",
+      description: "",
+      referenceImageAssetIds: [],
+      promptSnippet: "",
+    });
+    expect(renderCharacterArchive(a)).toBe("");
+  });
+
+  it("有 name 时输出 [角色档案] 段", () => {
+    const a = makeArchive({
+      name: "红发火焰法师",
+      description: "",
+      referenceImageAssetIds: [],
+      promptSnippet: "",
+    });
+    const out = renderCharacterArchive(a);
+    expect(out).toContain("[角色档案]");
+    expect(out).toContain("名称：红发火焰法师");
+    expect(out).not.toContain("描述：");
+  });
+
+  it("name + description 完整输出", () => {
+    const a = makeArchive({
+      name: "红发火焰法师",
+      description: "20 岁女性，火焰系魔法",
+    });
+    const out = renderCharacterArchive(a);
+    expect(out).toContain("名称：红发火焰法师");
+    expect(out).toContain("描述：20 岁女性，火焰系魔法");
+  });
+
+  it("参考图 N 张走单行说明", () => {
+    const a = makeArchive({
+      name: "X",
+      referenceImageAssetIds: ["a", "b", "c"],
+    });
+    const out = renderCharacterArchive(a);
+    expect(out).toContain("参考图：3 张");
+    expect(out).toContain("image[] 数组里");
+  });
+
+  it("promptSnippet 单独成段，加 [用户补充] 前缀", () => {
+    const a = makeArchive({
+      name: "X",
+      description: "desc",
+      promptSnippet: "表情要夸张",
+    });
+    const out = renderCharacterArchive(a);
+    expect(out).toContain("[用户补充] 表情要夸张");
+    // snippet 应该是最后一段
+    const lines = out.split("\n");
+    expect(lines[lines.length - 1]).toBe("[用户补充] 表情要夸张");
+  });
+
+  it("空 name / description 字段不输出该行", () => {
+    const a = makeArchive({
+      name: "  ",
+      description: "",
+      referenceImageAssetIds: ["a"],
+    });
+    const out = renderCharacterArchive(a);
+    expect(out).not.toContain("名称：");
+    expect(out).not.toContain("描述：");
+    expect(out).toContain("参考图：1 张");
+  });
+
+  it("空格-only name + 空格-only snippet 视为空", () => {
+    const a = makeArchive({
+      name: "   ",
+      description: "desc",
+      referenceImageAssetIds: [],
+      promptSnippet: "  \n  ",
+    });
+    const out = renderCharacterArchive(a);
+    expect(out).not.toContain("名称：");
+    expect(out).not.toContain("[用户补充]");
+    expect(out).toContain("描述：desc");
   });
 });

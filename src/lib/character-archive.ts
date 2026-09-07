@@ -221,6 +221,38 @@ export function summarizeArchivesForPrompt(
   return lines.join("\n");
 }
 
+/**
+ * 把 CharacterArchive 转成正向 prompt 末尾追加的"角色档案"段。
+ * - 没有档案名 + 没有描述 + 没有参考图 + 没有 promptSnippet → 返回空串（不污染 prompt）
+ * - 输出格式与 [项目风格契约] 对称，便于阅读和后续 LLM 解析
+ * - 参考图数量走"档案 N 张参考图"（不描述具体内容；具体内容由用户在 description 里写）
+ *   真正视觉一致性靠 jimeng image[] 数组（同 plan § 3.2 链路）
+ *
+ * 拼接到 prompt 末尾时位置：{{user_input}} → {{character_archive}} → {{style_contract}} → 反向限制
+ *   见 doc/plan-m3-character-workshop.md § 3.2
+ */
+export function renderCharacterArchive(archive: CharacterArchive): string {
+  // 全空判断：name + description + promptSnippet + 参考图 都没就跳过
+  const name = (archive.name ?? "").trim();
+  const desc = (archive.description ?? "").trim();
+  const snippet = (archive.promptSnippet ?? "").trim();
+  const refCount = archive.referenceImageAssetIds?.length ?? 0;
+  if (!name && !desc && !snippet && refCount === 0) return "";
+
+  const lines: string[] = ["[角色档案]"];
+  if (name) lines.push(`- 名称：${name}`);
+  if (desc) lines.push(`- 描述：${desc}`);
+  if (refCount > 0) {
+    lines.push(`- 参考图：${refCount} 张（已附在 image[] 数组里）`);
+  }
+  if (snippet) {
+    // 用户补充的 prompt 片段，独占一段
+    lines.push("");
+    lines.push(`[用户补充] ${snippet}`);
+  }
+  return lines.join("\n");
+}
+
 // ============================================================================
 // IPC 层（仅在 Tauri runtime 里有意义；纯函数单测不需要这部分）
 // ============================================================================
