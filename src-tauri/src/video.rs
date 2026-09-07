@@ -389,3 +389,199 @@ pub fn parse_data_url(data_url: &str) -> Option<(&str, Vec<u8>)> {
     let bytes = B64.decode(b64).ok()?;
     Some((mime, bytes))
 }
+
+// ============================================================================
+// 单元测试
+// ============================================================================
+//
+// 圈定纯函数（不依赖 reqwest / tauri runtime），可以裸 `cargo test --lib` 跑。
+// 跑法：`cd src-tauri && cargo test --lib video`
+//
+// 覆盖范围：
+// - is_demo_key:前端「试用 Demo 模式」按钮写入 demo-{random} 形式
+// - validate_submit_params:5 条护栏（model / resolution / duration / text 必填 / 场景 ratio）
+// - detect_scenario:t2va / i2va / r2va 互斥判定
+// - fix_ratio_for_scenario:三场景 ratio 修正规则
+// - parse_data_url:data URL 解析
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn text(s: &str) -> ContentItem {
+        ContentItem::Text { text: s.to_string() }
+    }
+    fn image_url(url: &str, role: Option<&str>) -> ContentItem {
+        ContentItem::ImageUrl {
+            image_url: ImageUrlRef { url: url.to_string() },
+            role: role.map(|s| s.to_string()),
+        }
+    }
+
+    // ---------- is_demo_key ----------
+
+    #[test]
+    fn is_demo_key_accepts_demo_prefix() {
+        assert!(is_demo_key("demo-abc123"));
+        assert!(is_demo_key("demo-"));
+    }
+
+    #[test]
+    fn is_demo_key_rejects_real_key() {
+        assert!(!is_demo_key("eyJ-real-jwt"));
+        assert!(!is_demo_key(""));
+        // 大小写敏感:DEMO- 不算 demo key(避免 "demo mode" 误触发)
+        assert!(!is_demo_key("DEMO-abc"));
+    }
+
+    // ---------- validate_submit_params ----------
+
+    fn req(model: &str, resolution: &str, duration: u32, content: Vec<ContentItem>, ratio: Option<&str>) -> VideoSubmitReq {
+        VideoSubmitReq {
+            model: model.to_string(),
+            content,
+            resolution: resolution.to_string(),
+            duration,
+            ratio: ratio.map(|s| s.to_string()),
+            aigc_watermark: None,
+            callback_url: None,
+        }
+    }
+
+    #[test]
+    fn validate_rejects_wrong_model() {
+        let r = req("GPT-4", "2K", 5, vec![text("hi")], Some("16:9"));
+        let err = validate_submit_params(&r).unwrap_err();
+        assert!(err.contains("InvalidParameter"), "实际错误: {err}");
+        assert!(err.contains("GPT-4"), "应包含拒绝的 model id: {err}");
+    }
+
+    #[test]
+    fn validate_rejects_bad_resolution() {
+        let r = req(VIDEO_MODEL, "4K", 5, vec![text("hi")], Some("16:9"));
+        let err = validate_submit_params(&r).unwrap_err();
+        assert!(err.contains("768P") && err.contains("2K"), "实际: {err}");
+    }
+
+    #[test]
+    fn validate_rejects_duration_out_of_range() {
+        for d in [0u32, 3, 16, 100] {
+            let r = req(VIDEO_MODEL, "2K", d, vec![text("hi")], Some("16:9"));
+            assert!(validate_submit_params(&r).is_err(), "duration={d} 应被拒");
+        }
+    }
+
+    #[test]
+    fn validate_accepts_duration_boundary() {
+        for d in [4u32, 5, 10, 15] {
+            let r = req(VIDEO_MODEL, "2K", d, vec![text("hi")], Some("16:9"));
+            assert!(validate_submit_params(&r).is_ok(), "duration={d} 应通过");
+        }
+    }
+
+    #[test]
+    fn validate_rejects_empty_text() {
+        let r = req(VIDEO_MODEL, "2K", 5, vec![text("   ")], Some("16:9"));
+        let err = validate_submit_params(&r).unwrap_err();
+        assert!(err.contains("prompt is required"), "实际: {err}");
+    }
+
+    #[test]
+    fn validate_rejects_no_text_at_all() {
+        let r = req(
+            VIDEO_MODEL,
+            "2K",
+            5,
+            vec![image_url("https://e/x.png", Some("first_frame"))],
+            Some("16:9"),
+        );
+        assert!(validate_submit_params(&r).is_err());
+    }
+
+    #[test]
+    fn validate_t2va_requires_explicit_ratio() {
+        // t2va 场景（无 first_frame / ref）传 adaptive 必须拒
+        let r = req(VIDEO_MODEL, "2K", 5, vec![text("hi")], Some("adaptive"));
+        let err = validate_submit_params(&r).unwrap_err();
+        assert!(err.contains("t2va"), "实际: {err}");
+    }
+
+    #[test]
+    fn validate_t2va_accepts_real_ratio() {
+        for ratio in ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"] {
+            let r = req(VIDEO_MODEL, "2K", 5, vec![text("hi")], Some(ratio));
+            assert!(validate_submit_params(&r).is_ok(), "ratio={ratio} 应通过");
+        }
+    }
+
+    // ---------- detect_scenario ----------
+
+    #[test]
+    fn detect_t2va_when_only_text() {
+        assert_eq!(detect_scenario(&[text("hi")]).unwrap(), "t2va");
+    }
+
+    #[test]
+    fn detect_i2va_with_first_frame() {
+        let c = vec![text("hi"), image_url("https://e/x.png", Some("first_frame"))];
+        assert_eq!(detect_scenario(&c).unwrap(), "i2va");
+    }
+
+    #[test]
+    fn detect_i2va_with_last_frame() {
+        let c = vec![text("hi"), image_url("https://e/x.png", Some("last_frame"))];
+        assert_eq!(detect_scenario(&c).unwrap(), "i2va");
+    }
+
+    #[test]
+    fn detect_r2va_with_reference_image() {
+        let c = vec![text("hi"), image_url("https://e/x.png", Some("reference_image"))];
+        assert_eq!(detect_scenario(&c).unwrap(), "r2va");
+    }
+
+    #[test]
+    fn detect_rejects_mixed_frame_and_ref() {
+        let c = vec![
+            text("hi"),
+            image_url("https://e/x.png", Some("first_frame")),
+            image_url("https://e/y.png", Some("reference_image")),
+        ];
+        let err = detect_scenario(&c).unwrap_err();
+        assert!(err.contains("互斥"), "实际: {err}");
+    }
+
+    // ---------- fix_ratio_for_scenario ----------
+
+    #[test]
+    fn fix_i2va_always_adaptive() {
+        assert_eq!(fix_ratio_for_scenario("i2va", Some("16:9".into())), Some("adaptive".into()));
+        assert_eq!(fix_ratio_for_scenario("i2va", None), Some("adaptive".into()));
+    }
+
+    #[test]
+    fn fix_r2va_defaults_adaptive() {
+        assert_eq!(fix_ratio_for_scenario("r2va", None), Some("adaptive".into()));
+        assert_eq!(fix_ratio_for_scenario("r2va", Some("16:9".into())), Some("16:9".into()));
+    }
+
+    #[test]
+    fn fix_t2va_preserves_ratio() {
+        assert_eq!(fix_ratio_for_scenario("t2va", Some("9:16".into())), Some("9:16".into()));
+    }
+
+    // ---------- parse_data_url ----------
+
+    #[test]
+    fn parse_data_url_decodes_base64() {
+        // "hi" base64 = "aGk="
+        let (mime, bytes) = parse_data_url("data:text/plain;base64,aGk=").unwrap();
+        assert_eq!(mime, "text/plain");
+        assert_eq!(bytes, b"hi");
+    }
+
+    #[test]
+    fn parse_data_url_rejects_malformed() {
+        assert!(parse_data_url("not a data url").is_none());
+        assert!(parse_data_url("data:text/plain,no-base64-marker").is_none());
+        assert!(parse_data_url("").is_none());
+    }
+}
