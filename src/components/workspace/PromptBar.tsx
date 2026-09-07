@@ -49,7 +49,7 @@ interface Props {
   setTransparent: (b: boolean) => void;
   generating: boolean;
   /** 当前输入模式：决定底部 "正在..." 提示文案 */
-  inputMode?: "chat" | "generate" | "tools";
+  inputMode?: "chat" | "generate" | "tools" | "characters";
   onSubmit: () => void;
 }
 

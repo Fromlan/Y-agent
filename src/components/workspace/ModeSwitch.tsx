@@ -1,6 +1,6 @@
-import { Image as ImageIcon, MessageSquare, Video, Wrench } from "lucide-react";
+import { Image as ImageIcon, MessageSquare, Video, Wrench, Users } from "lucide-react";
 
-export type InputMode = "generate" | "chat" | "tools" | "video";
+export type InputMode = "generate" | "chat" | "tools" | "video" | "characters";
 
 interface Props {
   mode: InputMode;
@@ -14,6 +14,7 @@ interface Props {
  * - 生图：M1 直调即梦（基础生图 + 资产看板）
  * - 生视频：直接调 MiniMax H3（异步轮询，资产入库）
  * - 工具：高级能力工作台（批量组图 / 联网 / 去背 / 图层 / 局部编辑）
+ * - 角色：M3 角色工坊（角色档案 CRUD / 跨项目 / 一致性注入）
  */
 export default function ModeSwitch({ mode, onChange, disabled }: Props) {
   const items: { id: InputMode; label: string; icon: typeof ImageIcon; title: string }[] = [
@@ -40,6 +41,12 @@ export default function ModeSwitch({ mode, onChange, disabled }: Props) {
       label: "工具",
       icon: Wrench,
       title: "高级能力：批量组图 / 联网 / 去背 / 图层 / 局部编辑",
+    },
+    {
+      id: "characters",
+      label: "角色",
+      icon: Users,
+      title: "M3 角色工坊：建档 / 编辑 / 应用到 PromptBar",
     },
   ];
   return (

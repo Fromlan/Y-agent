@@ -43,6 +43,7 @@ import ChatMessageList from "@/components/workspace/ChatMessageList";
 import ModeSwitch, { type InputMode } from "@/components/workspace/ModeSwitch";
 import ToolsTab from "@/components/workspace/ToolsTab";
 import AgentMemoryPanel from "@/components/workspace/AgentMemoryPanel";
+import CharacterWorkshop from "@/components/workspace/CharacterWorkshop";
 import { agentEvents, type ChatMessage, type AgentEvent, type ToolCallRecord } from "@/lib/agent-event";
 import { route } from "@/lib/agent-router";
 import { loadLlmConfig } from "@/lib/llm-config";
@@ -57,7 +58,7 @@ interface Props {
   onOpenSettings: () => void;
 }
 
-type ViewTab = "chat" | "assets" | "tools";
+type ViewTab = "chat" | "assets" | "tools" | "characters";
 
 export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   const { currentProject, setCurrentProject } = useSession();
@@ -375,6 +376,8 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     setTab(
       inputMode === "tools"
         ? "tools"
+        : inputMode === "characters"
+        ? "characters"
         : inputMode === "generate" || inputMode === "video"
         ? "assets"
         : "chat"
@@ -1348,6 +1351,18 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
             onAssetCreated={() => {
               // 工具生成完后 reload，让 AssetBoard 拿到新资产
               reload({ silent: true });
+            }}
+          />
+        ) : tab === "characters" ? (
+          <CharacterWorkshop
+            projectId={currentProject.id}
+            onApplyToPromptBar={(id) => {
+              // M3.2.4 才会真正接到 PromptBar；M3.1.3 仅 toast 占位
+              toast.info(
+                id
+                  ? `已选择档案 ${id.slice(0, 8)}…（M3.2.4 接入 PromptBar）`
+                  : "已清除档案选择",
+              );
             }}
           />
         ) : (
