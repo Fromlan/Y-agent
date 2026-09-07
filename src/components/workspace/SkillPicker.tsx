@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from "react";
-import { Wand2, Layers, ImagePlus, Sparkles } from "lucide-react";
+import { Wand2, Layers, ImagePlus, Sparkles, User } from "lucide-react";
 import type { Skill, SkillGroup } from "@/lib/skill";
 import { loadBuiltinSkills } from "@/lib/skill";
 
@@ -10,7 +10,17 @@ interface Props {
   onSelect: (skill: Skill) => void;
   /** 关闭 picker */
   onClose: () => void;
+  /** M3：当前是否已选角色档案（影响"需要档案"标记） */
+  hasSelectedArchive?: boolean;
 }
+
+// M3：4 个角色类 skill 标记"需要角色档案"
+const REQUIRES_CHARACTER_ARCHIVE = new Set<string>([
+  "character-sheet",
+  "character-turnaround",
+  "expression-grid",
+  "character-consistency-set",
+]);
 
 const GROUP_ORDER: SkillGroup[] = ["基础生图", "组图", "5.0 Pro 专属", "高级"];
 const GROUP_ICON: Record<SkillGroup, typeof Wand2> = {
@@ -24,7 +34,7 @@ const GROUP_ICON: Record<SkillGroup, typeof Wand2> = {
  * / 命令面板：键盘上下选 + Enter 确认 + Esc 关闭
  * 显示 Skill 列表（按 query 过滤 name / triggers + 按 group 分组）
  */
-export default function SkillPicker({ query, onSelect, onClose }: Props) {
+export default function SkillPicker({ query, onSelect, onClose, hasSelectedArchive = false }: Props) {
   const all = loadBuiltinSkills();
   const filtered = useMemo(
     () =>
@@ -114,6 +124,8 @@ export default function SkillPicker({ query, onSelect, onClose }: Props) {
             </div>
             {skills.map((s) => {
               const i = runningIdx++;
+              const needsArchive = REQUIRES_CHARACTER_ARCHIVE.has(s.id);
+              const archiveMissing = needsArchive && !hasSelectedArchive;
               return (
                 <button
                   key={s.id}
@@ -126,8 +138,27 @@ export default function SkillPicker({ query, onSelect, onClose }: Props) {
                 >
                   <Wand2 className="w-4 h-4 text-accent flex-shrink-0 mt-0.5" />
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm text-text-primary font-medium truncate">
-                      /{s.id}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm text-text-primary font-medium truncate">
+                        /{s.id}
+                      </span>
+                      {needsArchive && (
+                        <span
+                          className={`inline-flex items-center gap-0.5 text-[9px] px-1 py-0.5 rounded flex-shrink-0 ${
+                            archiveMissing
+                              ? "bg-amber-500/20 text-amber-400"
+                              : "bg-accent/10 text-accent"
+                          }`}
+                          title={
+                            archiveMissing
+                              ? "需要先在 PromptBar 选一个角色档案"
+                              : "已选角色档案，将注入 prompt"
+                          }
+                        >
+                          <User className="w-2.5 h-2.5" />
+                          档案
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs text-text-muted truncate">
                       {s.name} — {s.description}

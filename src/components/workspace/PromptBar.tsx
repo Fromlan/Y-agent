@@ -179,6 +179,7 @@ export default function PromptBar({
           query={pickerQuery}
           onSelect={onSkillSelect}
           onClose={() => setShowSkillPicker(false)}
+          hasSelectedArchive={!!selectedArchiveId}
         />
       )}
 
