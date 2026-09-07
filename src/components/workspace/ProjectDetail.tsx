@@ -1356,8 +1356,9 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
         ) : tab === "characters" ? (
           <CharacterWorkshop
             projectId={currentProject.id}
+            assets={assets}
             onApplyToPromptBar={(id) => {
-              // M3.2.4 才会真正接到 PromptBar；M3.1.3 仅 toast 占位
+              // M3.2.4 才会真正接到 PromptBar；M3.1.4 仅 toast 占位
               toast.info(
                 id
                   ? `已选择档案 ${id.slice(0, 8)}…（M3.2.4 接入 PromptBar）`

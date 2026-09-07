@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { X, Trash2, Copy, Check, ArrowRight, Plus, Globe, FolderOpen } from "lucide-react";
 import type {
+  Asset,
   CharacterArchive,
   CharacterArchiveUpsert,
 } from "@/lib/types";
@@ -18,20 +19,27 @@ import {
   CHARACTER_ARCHIVE_LIMITS,
   validateArchiveUpsert,
 } from "@/lib/character-archive";
+import CharacterReferenceGrid from "@/components/workspace/CharacterReferenceGrid";
 
 interface Props {
   archive: CharacterArchive;
+  /** 项目下所有资产（reference grid 用） */
+  assets: Asset[];
   /** 草稿模式：onChange 每次改动都触发，外部自己决定何时落盘 */
   onChange: (patch: Partial<CharacterArchiveUpsert>) => void;
   onDelete: () => void;
   onApply: () => void;
+  /** reference 改动后通知上层 reload（拿新 referenceImageAssetIds） */
+  onReferencesChanged: () => void;
 }
 
 export default function CharacterArchiveEditor({
   archive,
+  assets,
   onChange,
   onDelete,
   onApply,
+  onReferencesChanged,
 }: Props) {
   // 本地草稿态：编辑时实时显示 + onChange 透传
   const [name, setName] = useState(archive.name);
@@ -286,18 +294,12 @@ export default function CharacterArchiveEditor({
           />
         </div>
 
-        {/* 参考图（占位 — M3.1.4 实现拖拽上传） */}
-        <div>
-          <label className="text-[11px] font-medium text-text-secondary mb-1 block">
-            参考图（资产库）
-            <span className="ml-1 text-text-muted">
-              {archive.referenceImageAssetIds.length}/{CHARACTER_ARCHIVE_LIMITS.MAX_REFERENCE_IMAGES}
-            </span>
-          </label>
-          <div className="text-[10px] text-text-muted px-2 py-3 border border-dashed border-border rounded text-center">
-            M3.1.4 将支持从「资产」tab 拖入图片作为参考图
-          </div>
-        </div>
+        {/* 参考图（CharacterReferenceGrid — M3.1.4 接 attach/detach IPC） */}
+        <CharacterReferenceGrid
+          archive={archive}
+          assets={assets}
+          onChanged={onReferencesChanged}
+        />
 
         {/* 校验错误 */}
         {validation && (

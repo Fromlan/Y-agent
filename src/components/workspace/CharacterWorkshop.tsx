@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/shared/Toast";
 import type {
+  Asset,
   CharacterArchive,
   CharacterArchiveUpsert,
 } from "@/lib/types";
@@ -36,12 +37,15 @@ import CharacterArchiveEditor from "@/components/workspace/CharacterArchiveEdito
 
 interface Props {
   projectId: string;
+  /** 项目下所有资产（reference grid 用） */
+  assets: Asset[];
   /** "应用到 PromptBar" 时把 id 写回；上层负责写入 PromptBar 状态 */
   onApplyToPromptBar?: (archiveId: string | null) => void;
 }
 
 export default function CharacterWorkshop({
   projectId,
+  assets,
   onApplyToPromptBar,
 }: Props) {
   const toast = useToast();
@@ -188,9 +192,11 @@ export default function CharacterWorkshop({
           <CharacterArchiveEditor
             key={selected.id}
             archive={selected}
+            assets={assets}
             onChange={onChange}
             onDelete={onDelete}
             onApply={onApply}
+            onReferencesChanged={() => void reload()}
           />
         ) : (
           <div className="flex items-center justify-center h-full text-xs text-text-muted p-8 text-center">
