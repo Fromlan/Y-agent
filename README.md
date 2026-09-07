@@ -75,6 +75,8 @@ M0 原型 → M1 MVP → M2 v0.2.0（当前）→ M3 角色工坊 → M4 场景+
  ✅        ✅          ✅                ⏳                ⏳            ⏳         ⏳                ⏳
 ```
 
+> 各 M 的详细路线见 [`doc/plan-m3-character-workshop.md`](./doc/plan-m3-character-workshop.md) / [`doc/plan-m4-scene-ui.md`](./doc/plan-m4-scene-ui.md) / [`doc/plan-m5-layer-pro.md`](./doc/plan-m5-layer-pro.md) / [`doc/plan-m6-skill-hub.md`](./doc/plan-m6-skill-hub.md) / [`doc/plan-m7-polish-release.md`](./doc/plan-m7-polish-release.md)。实施前可调整。
+
 ---
 
 ## 📚 文档
@@ -82,10 +84,16 @@ M0 原型 → M1 MVP → M2 v0.2.0（当前）→ M3 角色工坊 → M4 场景+
 文档在 `doc/` 目录，按需看：
 
 - [`doc/plan-jimeng-full-integration.md`](./doc/plan-jimeng-full-integration.md) — 即梦 API 集成路线图 + 当前进度（P0~P6 阶段）
+- [`doc/plan-video-generation-visualization.md`](./doc/plan-video-generation-visualization.md) — 视频生成可视化方案
+- [`doc/plan-m3-character-workshop.md`](./doc/plan-m3-character-workshop.md) — M3 角色工坊路线图
+- [`doc/plan-m4-scene-ui.md`](./doc/plan-m4-scene-ui.md) — M4 场景+UI 模板路线图
+- [`doc/plan-m5-layer-pro.md`](./doc/plan-m5-layer-pro.md) — M5 图层增强路线图
+- [`doc/plan-m6-skill-hub.md`](./doc/plan-m6-skill-hub.md) — M6 Skill 中心路线图
+- [`doc/plan-m7-polish-release.md`](./doc/plan-m7-polish-release.md) — M7 打磨发布路线图
+- [`doc/plan-multi-platform-release.md`](./doc/plan-multi-platform-release.md) — 多平台出包(Linux/macOS)启用决策
 - [`doc/development.md`](./doc/development.md) — 开发指南（命令、架构、调试、提交流程）
 - [`doc/api-integration.md`](./doc/api-integration.md) — API 接入踩坑笔记（即梦 / LLM / H3-Context-IR）
 - [`doc/release.md`](./doc/release.md) — 发版流程（按需发版时看）
-- [`doc/plan-video-generation-visualization.md`](./doc/plan-video-generation-visualization.md) — 视频生成可视化方案
 - [`doc/issues/`](./doc/issues/) — 已知 bug 与设计决策记录
 - [`brand/BRAND.md`](./brand/BRAND.md) — 品牌规范（颜色 / 字体 / 语气）
 
