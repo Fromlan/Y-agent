@@ -1401,23 +1401,23 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* 顶部条 */}
-      <div className="h-12 flex items-center gap-3 px-4 border-b border-border bg-bg-panel flex-shrink-0">
+      {/* 顶部条：flex-wrap 让窄屏不溢出；左侧整块都可点击改名（不再是只 300px 文字区） */}
+      <div className="min-h-12 py-2 flex items-center gap-3 px-4 border-b border-border bg-bg-panel flex-shrink-0 flex-wrap">
         <button onClick={onBack} className="btn-icon" title="返回项目库">
           <ArrowLeft className="w-4 h-4" />
         </button>
-        <div className="flex-1 min-w-0">
-          <button
-            onClick={onRename}
-            className="text-sm font-medium text-text-primary hover:text-accent truncate max-w-[300px] text-left"
-            title="点击重命名"
-          >
+        <button
+          onClick={onRename}
+          className="flex-1 min-w-[200px] text-left group"
+          title="点击重命名"
+        >
+          <div className="text-sm font-medium text-text-primary group-hover:text-accent truncate">
             {currentProject.name}
-          </button>
+          </div>
           <div className="text-[11px] text-text-muted">
             {assets.length} 个资产
           </div>
-        </div>
+        </button>
         <button
           onClick={() => setMemoryOpen(true)}
           className="btn text-xs h-7 px-2.5"
