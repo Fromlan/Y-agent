@@ -92,6 +92,36 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   // 视图 tab：对话 / 资产
   const [tab, setTab] = useState<ViewTab>("chat");
 
+  // M3：当前项目下的角色档案（含 scope=global），PromptBar picker 用
+  const [characterArchives, setCharacterArchives] = useState<
+    import("@/lib/types").CharacterArchive[]
+  >([]);
+  const [selectedArchiveId, setSelectedArchiveId] = useState<string | null>(null);
+
+  // 切项目 / 进项目时 reload 角色档案（M3.1 list_character_archives）
+  useEffect(() => {
+    if (!currentProject) return;
+    let cancelled = false;
+    import("@/lib/character-archive")
+      .then(({ listCharacterArchives }) =>
+        listCharacterArchives(currentProject.id),
+      )
+      .then((rows) => {
+        if (!cancelled) setCharacterArchives(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setCharacterArchives([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentProject]);
+
+  // 切项目时清掉选中的档案
+  useEffect(() => {
+    setSelectedArchiveId(null);
+  }, [currentProject?.id]);
+
   // 共享输入态
   const [prompt, setPrompt] = useState("");
   const [refs, setRefs] = useState<string[]>([]);
@@ -1565,6 +1595,13 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
           setTransparent={setTransparent}
           generating={generating}
           inputMode={inputMode}
+          archives={characterArchives}
+          selectedArchiveId={selectedArchiveId}
+          setSelectedArchiveId={setSelectedArchiveId}
+          onOpenCharacterWorkshop={() => {
+            setInputMode("characters");
+            setTab("characters");
+          }}
           onSubmit={onSubmit}
         />
         )}

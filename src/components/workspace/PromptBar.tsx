@@ -10,11 +10,12 @@ import {
   Loader2,
 } from "lucide-react";
 import { useToast } from "@/components/shared/Toast";
-import { MODEL_OPTIONS, modelCapabilities, type ModelOption } from "@/lib/types";
+import { MODEL_OPTIONS, modelCapabilities, type CharacterArchive, type ModelOption } from "@/lib/types";
 import SizeSelect from "@/components/workspace/SizeSelect";
 import ModelSelect from "@/components/workspace/ModelSelect";
 import { pickImageAsDataUrl } from "@/lib/image-file";
 import SkillPicker from "@/components/workspace/SkillPicker";
+import CharacterArchivePicker from "@/components/workspace/CharacterArchivePicker";
 import type { Skill } from "@/lib/skill";
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import {
@@ -50,6 +51,13 @@ interface Props {
   generating: boolean;
   /** 当前输入模式：决定底部 "正在..." 提示文案 */
   inputMode?: "chat" | "generate" | "tools" | "characters";
+  /** M3：当前项目下可见的角色档案（含 scope=global），由上层 ProjectDetail 持有 */
+  archives: CharacterArchive[];
+  /** M3：当前选中的角色档案 id（null = 未选） */
+  selectedArchiveId: string | null;
+  setSelectedArchiveId: (id: string | null) => void;
+  /** M3：点 picker 底部"去角色工坊"时切到 characters tab */
+  onOpenCharacterWorkshop?: () => void;
   onSubmit: () => void;
 }
 
@@ -76,6 +84,10 @@ export default function PromptBar({
   setTransparent,
   generating,
   inputMode = "generate",
+  archives,
+  selectedArchiveId,
+  setSelectedArchiveId,
+  onOpenCharacterWorkshop,
   onSubmit,
 }: Props) {
   const toast = useToast();
@@ -200,6 +212,17 @@ export default function PromptBar({
                 <span className="ml-1 text-[10px] tabular-nums">{refs.length}</span>
               )}
             </CompactButton>
+
+            <ToolbarDivider />
+
+            {/* M3：角色档案下拉（在模型/尺寸前，跟"输入内容"分组） */}
+            <CharacterArchivePicker
+              projectId={"" /* Picker 内部按 archives 过滤，projectId 仅用于 query 函数 */}
+              archives={archives}
+              selectedId={selectedArchiveId}
+              onSelect={setSelectedArchiveId}
+              onOpenWorkshop={onOpenCharacterWorkshop}
+            />
 
             <ToolbarDivider />
 
