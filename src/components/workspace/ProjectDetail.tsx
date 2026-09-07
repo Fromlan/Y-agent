@@ -661,6 +661,8 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
             scope: a.scope,
             referenceImageAssetIds: a.referenceImageAssetIds,
           })),
+          // M3: 项目级风格契约（AgentMemoryPanel 折叠 section 可编辑）
+          styleContract: styleContract ?? undefined,
         }),
       },
       ...messages
@@ -1700,6 +1702,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
         onClose={() => setMemoryOpen(false)}
         projectId={currentProject.id}
         onContextChange={setAgentCtx}
+        onStyleContractChange={setStyleContract}
       />
     </div>
   );

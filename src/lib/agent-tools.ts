@@ -6,6 +6,7 @@
  */
 
 import type { ToolDefinition } from "@/lib/llm";
+import { renderStyleContract } from "@/lib/style-contract";
 
 export const AGENT_TOOLS: ToolDefinition[] = [
   {
@@ -195,6 +196,8 @@ export function renderSystemPrompt(opts: {
     scope: "project" | "global";
     referenceImageAssetIds: string[];
   }>;
+  /** M3: 项目级风格契约（user 在 AgentMemoryPanel 折叠 section 编辑） */
+  styleContract?: import("@/lib/style-contract").StyleContract;
 }): string {
   const styleLine = opts.styleHints && opts.styleHints.length > 0
     ? `\n\n项目画风偏好（自动学到，用户没明确改的话可以参考）：${opts.styleHints.join("、")}`
@@ -216,6 +219,11 @@ export function renderSystemPrompt(opts: {
             `- ${a.id} | ${a.scope === "global" ? "🌐" : "📁"} | ${a.name}${a.description ? ` — ${a.description.slice(0, 80)}` : ""}${a.referenceImageAssetIds.length > 0 ? ` (${a.referenceImageAssetIds.length} 张参考图)` : ""}`,
         )
         .join("\n")}\n\n- **用户消息明确提到角色名（如"用小红做表情包"/"用这个角色"）时**：先调 \`character_use_archive\`（参数 archiveId 必填）→ 再调 \`jimeng_generate_image\`，prompt 会自动包含 [角色档案] 段。\n- **用户消息没提角色**：不要调 character_use_archive。直接调 jimeng_generate_image 即可。\n- 没在列表里的 archiveId 是非法的，调用会失败。`
+    : "";
+  // M3: 风格契约段（与 agent-router renderStyleContract 同源）。Agent 路径下,LLM
+  // 看到契约就知道画风 / 主色 / 线宽 / 光向,会严格按契约生成。
+  const contractLine = opts.styleContract && opts.styleContract.checksum
+    ? `\n\n## 项目风格契约（严格遵守）\n\n${renderStyleContract(opts.styleContract)}\n\n- 这是项目级视觉契约,所有生图必须按契约执行(画风 / 主色 / 线宽 / 光向)。\n- 改契约时(checksum 变了)会触发所有旧资产标 stale,让用户知道哪些图与新契约不一致。`
     : "";
 
   return `你是 Y-agent，一个游戏美术师 AI 助手，正在帮独立游戏美术师完成一张美术资产。
@@ -299,5 +307,5 @@ export function renderSystemPrompt(opts: {
 - 工具调用不要超过 5 轮。
 - 不要生成违规内容。
 - 用中文回复。
-${userModelLine}${styleLine}${modelsLine}${characterLine}`;
+${userModelLine}${styleLine}${modelsLine}${characterLine}${contractLine}`;
 }
