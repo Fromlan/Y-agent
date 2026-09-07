@@ -8,8 +8,8 @@
  * - 每行档案卡：name + scope badge + tags + agentUseCount + updatedAt
  * - "新建档案"按钮
  */
-import { useMemo } from "react";
-import { Search, Plus, Globe, FolderOpen, User } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Search, Plus, Globe, FolderOpen, User, ChevronDown } from "lucide-react";
 import type { CharacterArchive } from "@/lib/types";
 import { aggregateAllTags, queryCharacterArchives } from "@/lib/character-archive";
 
@@ -17,12 +17,16 @@ interface Props {
   archives: CharacterArchive[];
   selectedId: string | null;
   onSelect: (id: string) => void;
-  onCreate: () => void;
+  /** M3.3：scope 参数决定是项目还是全局档案 */
+  onCreate: (scope: "project" | "global") => void;
   searchName: string;
   onSearchNameChange: (s: string) => void;
   tagFilter: string[];
   onTagFilterChange: (tags: string[]) => void;
   projectId: string;
+  /** M3.3：是否只看本项目档案（默认 false = 含全局） */
+  onlyProject?: boolean;
+  onOnlyProjectChange?: (v: boolean) => void;
 }
 
 function formatUpdated(ms: number): string {
@@ -45,7 +49,10 @@ export default function CharacterArchiveList({
   tagFilter,
   onTagFilterChange,
   projectId,
+  onlyProject = false,
+  onOnlyProjectChange,
 }: Props) {
+  const [showCreateMenu, setShowCreateMenu] = useState(false);
   const allTags = useMemo(() => aggregateAllTags(archives), [archives]);
 
   const filtered = useMemo(
@@ -54,8 +61,9 @@ export default function CharacterArchiveList({
         projectId,
         searchName,
         tagFilter,
+        scope: onlyProject ? ["project"] : ["project", "global"],
       }),
-    [archives, projectId, searchName, tagFilter],
+    [archives, projectId, searchName, tagFilter, onlyProject],
   );
 
   const toggleTag = (tag: string) => {
@@ -70,14 +78,58 @@ export default function CharacterArchiveList({
     <div className="flex flex-col h-full bg-bg-panel border-r border-border">
       {/* 顶部：搜索 + 新建 */}
       <div className="p-3 border-b border-border space-y-2">
-        <button
-          type="button"
-          onClick={onCreate}
-          className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-accent text-white hover:opacity-90 transition"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          新建档案
-        </button>
+        {/* 新建按钮：分裂成"项目 / 全局"两选项 */}
+        <div className="relative">
+          <div className="flex">
+            <button
+              type="button"
+              onClick={() => onCreate("project")}
+              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-l text-xs font-medium bg-accent text-white hover:opacity-90 transition"
+              title="在本项目内可见的角色档案"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              新建项目档案
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowCreateMenu((v) => !v)}
+              className="px-2 py-1.5 rounded-r border-l border-white/20 bg-accent text-white hover:opacity-90 transition"
+              title="更多新建选项"
+            >
+              <ChevronDown className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          {showCreateMenu && (
+            <div className="absolute left-0 right-0 top-full mt-1 z-10 bg-bg-panel border border-border rounded shadow-lg overflow-hidden">
+              <button
+                type="button"
+                onClick={() => {
+                  onCreate("global");
+                  setShowCreateMenu(false);
+                }}
+                className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs hover:bg-bg-hover text-left"
+              >
+                <Globe className="w-3 h-3 text-accent" />
+                新建全局档案
+                <span className="text-[10px] text-text-muted ml-auto">
+                  跨项目可见
+                </span>
+              </button>
+            </div>
+          )}
+        </div>
+        {/* 只看本项目 toggle */}
+        {onOnlyProjectChange && (
+          <label className="flex items-center gap-1.5 text-[10px] text-text-muted cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={onlyProject}
+              onChange={(e) => onOnlyProjectChange(e.target.checked)}
+              className="rounded border-border"
+            />
+            只看本项目档案
+          </label>
+        )}
         <div className="relative">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted" />
           <input

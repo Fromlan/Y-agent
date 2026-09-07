@@ -54,6 +54,8 @@ export default function CharacterWorkshop({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchName, setSearchName] = useState("");
   const [tagFilter, setTagFilter] = useState<string[]>([]);
+  // M3.3：是否只看本项目档案
+  const [onlyProject, setOnlyProject] = useState(false);
 
   // 防抖落盘：onChange 触发后 500ms 合并 + 调 upsert_character_archive
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -83,14 +85,19 @@ export default function CharacterWorkshop({
 
   const selected = archives.find((a) => a.id === selectedId) ?? null;
 
-  // 新建
-  const onCreate = async () => {
-    const draft = makeEmptyArchive("project", projectId);
+  // 新建（scope 由参数决定：project / global）
+  const onCreate = async (scope: "project" | "global") => {
+    const draft = makeEmptyArchive(
+      scope,
+      scope === "project" ? projectId : null,
+    );
     try {
       const row = await upsertCharacterArchive(draft);
       await reload();
       setSelectedId(row.id);
-      toast.success("档案已创建");
+      toast.success(
+        scope === "global" ? "全局档案已创建（跨项目可见）" : "档案已创建",
+      );
     } catch (e: any) {
       toast.error(`新建失败：${e?.message ?? e}`);
     }
@@ -185,6 +192,8 @@ export default function CharacterWorkshop({
           tagFilter={tagFilter}
           onTagFilterChange={setTagFilter}
           projectId={projectId}
+          onlyProject={onlyProject}
+          onOnlyProjectChange={setOnlyProject}
         />
       </div>
       <div className="flex-1 min-w-0">

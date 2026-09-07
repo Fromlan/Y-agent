@@ -12,9 +12,10 @@
  * 状态归属：archives 列表由上层 ProjectDetail 持有 + 缓存（避免每次开 popover 都打 IPC）。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, X, Globe, FolderOpen, Search, User } from "lucide-react";
+import { ChevronDown, X, Globe, FolderOpen, Search, User, Plus } from "lucide-react";
 import type { CharacterArchive } from "@/lib/types";
-import { queryCharacterArchives } from "@/lib/character-archive";
+import { makeEmptyArchive, queryCharacterArchives, upsertCharacterArchive } from "@/lib/character-archive";
+import { useToast } from "@/components/shared/Toast";
 
 interface Props {
   projectId: string;
@@ -23,6 +24,8 @@ interface Props {
   onSelect: (id: string | null) => void;
   /** "去角色工坊" 链接（上层可挂在切换 tab 逻辑上） */
   onOpenWorkshop?: () => void;
+  /** M3.3：新建档案后回调（让上层 reload archives 列表） */
+  onArchiveChanged?: () => void;
 }
 
 export default function CharacterArchivePicker({
@@ -31,7 +34,9 @@ export default function CharacterArchivePicker({
   selectedId,
   onSelect,
   onOpenWorkshop,
+  onArchiveChanged,
 }: Props) {
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -40,6 +45,20 @@ export default function CharacterArchivePicker({
     () => archives.find((a) => a.id === selectedId) ?? null,
     [archives, selectedId],
   );
+
+  // M3.3：点 popover 底部"新建全局档案"
+  const onCreateGlobal = async () => {
+    try {
+      const draft = makeEmptyArchive("global", null);
+      const row = await upsertCharacterArchive(draft);
+      toast.success("全局档案已创建（跨项目可见）");
+      onArchiveChanged?.();
+      onSelect(row.id);
+      setOpen(false);
+    } catch (e: any) {
+      toast.error(`新建失败：${e?.message ?? e}`);
+    }
+  };
 
   // 点击外部关闭
   useEffect(() => {
@@ -174,9 +193,21 @@ export default function CharacterArchivePicker({
               </ul>
             )}
           </div>
-          {/* 底部：管理链接 */}
-          {onOpenWorkshop && (
-            <div className="border-t border-border p-1.5">
+          {/* 底部：新建全局档案 + 管理链接 */}
+          <div className="border-t border-border p-1.5 space-y-0.5">
+            <button
+              type="button"
+              onClick={onCreateGlobal}
+              className="w-full flex items-center gap-1.5 px-2 py-1 text-[11px] text-text-secondary hover:text-accent hover:bg-bg-hover rounded text-left"
+              title="新建一个全局档案（跨所有项目可见）"
+            >
+              <Plus className="w-3 h-3" />
+              新建全局档案
+              <span className="text-[10px] text-text-muted ml-auto">
+                <Globe className="w-2.5 h-2.5 inline-block" />
+              </span>
+            </button>
+            {onOpenWorkshop && (
               <button
                 type="button"
                 onClick={() => {
@@ -187,8 +218,8 @@ export default function CharacterArchivePicker({
               >
                 去角色工坊管理 →
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
     </div>

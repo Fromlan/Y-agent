@@ -98,24 +98,22 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   >([]);
   const [selectedArchiveId, setSelectedArchiveId] = useState<string | null>(null);
 
+  // 共享 reload 入口（useEffect + picker 内部新建/删除 都用）
+  const reloadCharacterArchives = useCallback(async () => {
+    if (!currentProject) return;
+    try {
+      const { listCharacterArchives } = await import("@/lib/character-archive");
+      const rows = await listCharacterArchives(currentProject.id);
+      setCharacterArchives(rows);
+    } catch {
+      setCharacterArchives([]);
+    }
+  }, [currentProject]);
+
   // 切项目 / 进项目时 reload 角色档案（M3.1 list_character_archives）
   useEffect(() => {
-    if (!currentProject) return;
-    let cancelled = false;
-    import("@/lib/character-archive")
-      .then(({ listCharacterArchives }) =>
-        listCharacterArchives(currentProject.id),
-      )
-      .then((rows) => {
-        if (!cancelled) setCharacterArchives(rows);
-      })
-      .catch(() => {
-        if (!cancelled) setCharacterArchives([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [currentProject]);
+    void reloadCharacterArchives();
+  }, [reloadCharacterArchives]);
 
   // 切项目时清掉选中的档案
   useEffect(() => {
@@ -1602,6 +1600,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
             setInputMode("characters");
             setTab("characters");
           }}
+          onArchivesChanged={() => void reloadCharacterArchives()}
           onSubmit={onSubmit}
         />
         )}

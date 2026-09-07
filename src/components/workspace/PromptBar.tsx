@@ -58,6 +58,8 @@ interface Props {
   setSelectedArchiveId: (id: string | null) => void;
   /** M3：点 picker 底部"去角色工坊"时切到 characters tab */
   onOpenCharacterWorkshop?: () => void;
+  /** M3：picker 内新建/删除档案后回调（让上层 reload archives） */
+  onArchivesChanged?: () => void;
   onSubmit: () => void;
 }
 
@@ -88,6 +90,7 @@ export default function PromptBar({
   selectedArchiveId,
   setSelectedArchiveId,
   onOpenCharacterWorkshop,
+  onArchivesChanged,
   onSubmit,
 }: Props) {
   const toast = useToast();
@@ -223,6 +226,7 @@ export default function PromptBar({
               selectedId={selectedArchiveId}
               onSelect={setSelectedArchiveId}
               onOpenWorkshop={onOpenCharacterWorkshop}
+              onArchiveChanged={onArchivesChanged}
             />
 
             <ToolbarDivider />
