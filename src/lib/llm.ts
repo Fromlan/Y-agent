@@ -356,10 +356,12 @@ export function llmChatStream(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 120_000);
 
-  // final 元数据（最后一个 chunk 解析后 resolve）
+  // final 元数据（最后一个 chunk 解析后 resolve；异常路径走 reject 让上层 catch）
   let resolveFinal!: (v: StreamFinal) => void;
-  const finalPromise = new Promise<StreamFinal>((res) => {
+  let rejectFinal!: (e: unknown) => void;
+  const finalPromise = new Promise<StreamFinal>((res, rej) => {
     resolveFinal = res;
+    rejectFinal = rej;
   });
 
   // tool_calls 累积（OpenAI 流式 tool_calls 是分段发来的，需要按 index 合并）
@@ -502,7 +504,10 @@ export function llmChatStream(
       } catch (e) {
         log.warn("llm-stream", "pump error:", e);
         if (!streamClosed) {
-          resolveFinal({});
+          // 🔴 P0 修复：pump 报错时必须 reject finalPromise，让调用方 catch 后走 fallback。
+          // 旧实现 resolveFinal({}) 把错误吞了，调用方拿到空 final 后继续走"成功"路径，
+          // 导致 buf 不完整 / 为空时 UI 看到流式没出文字、消息入库错位。
+          rejectFinal(e);
           streamClosed = true;
         }
       } finally {
