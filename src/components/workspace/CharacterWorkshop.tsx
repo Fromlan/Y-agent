@@ -20,15 +20,20 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/shared/Toast";
+import { Download, Upload } from "lucide-react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
   Asset,
   CharacterArchive,
   CharacterArchiveUpsert,
 } from "@/lib/types";
 import {
+  buildArchiveExportJson,
   deleteCharacterArchive,
+  downloadArchiveJson,
   listCharacterArchives,
   makeEmptyArchive,
+  parseArchiveExportJson,
   upsertCharacterArchive,
   validateArchiveUpsert,
 } from "@/lib/character-archive";
@@ -160,6 +165,68 @@ export default function CharacterWorkshop({
     toast.success(`已应用「${selected.name}」到 PromptBar`);
   };
 
+  // M3.5：导出全部档案为 .json
+  const onExportAll = () => {
+    if (archives.length === 0) {
+      toast.info("没有档案可导出");
+      return;
+    }
+    const json = buildArchiveExportJson(archives);
+    const ts = new Date().toISOString().slice(0, 10);
+    downloadArchiveJson(`y-agent-archives-${ts}.json`, json);
+    toast.success(`已导出 ${archives.length} 个档案到下载目录`);
+  };
+
+  // M3.5：导入 .json
+  const onImportJson = async () => {
+    try {
+      const picked = await openDialog({
+        multiple: false,
+        directory: false,
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!picked || typeof picked !== "string") return;
+      // 读文件
+      const { readTextFile } = await import("@tauri-apps/plugin-fs");
+      const raw = await readTextFile(picked);
+      const result = parseArchiveExportJson(raw);
+      if ("error" in result) {
+        toast.error(`导入失败：${result.error}`);
+        return;
+      }
+      const { archives: items } = result.payload;
+      if (items.length === 0) {
+        toast.info("JSON 里没有档案");
+        return;
+      }
+      // 逐项 upsert（id 留空 → Rust 端生成新 UUID）
+      let okCount = 0;
+      for (const a of items) {
+        try {
+          await upsertCharacterArchive({
+            id: undefined,
+            scope: a.scope,
+            projectId: a.scope === "project" ? projectId : null,
+            name: a.name,
+            description: a.description,
+            referenceImageAssetIds: [], // 导入不携带资产图（跨机器无意义）
+            styleContractId: null,
+            promptSnippet: a.promptSnippet,
+            tags: a.tags,
+            agentUseCount: 0,
+          });
+          okCount++;
+        } catch {
+          // 静默：单个失败不阻塞其他
+        }
+      }
+      await reload();
+      toast.success(`导入完成（${okCount}/${items.length}）`);
+    } catch (e: any) {
+      toast.error(`导入失败：${e?.message ?? e}`);
+    }
+  };
+
   // 卸载时清理
   useEffect(() => {
     return () => {
@@ -196,31 +263,54 @@ export default function CharacterWorkshop({
           onOnlyProjectChange={setOnlyProject}
         />
       </div>
-      <div className="flex-1 min-w-0">
-        {selected ? (
-          <CharacterArchiveEditor
-            key={selected.id}
-            archive={selected}
-            assets={assets}
-            onChange={onChange}
-            onDelete={onDelete}
-            onApply={onApply}
-            onReferencesChanged={() => void reload()}
-          />
-        ) : (
-          <div className="flex items-center justify-center h-full text-xs text-text-muted p-8 text-center">
-            {archives.length === 0 ? (
-              <>
-                <div>
-                  <p className="mb-2">还没有角色档案</p>
-                  <p className="text-[10px]">点左侧"新建档案"开始</p>
-                </div>
-              </>
-            ) : (
-              <p>从左侧选一个档案查看详情</p>
-            )}
-          </div>
-        )}
+      <div className="flex-1 min-w-0 flex flex-col">
+        {/* M3.5：工具栏（导出 / 导入） */}
+        <div className="px-4 py-1.5 border-b border-border bg-bg-panel flex items-center justify-end gap-1.5">
+          <button
+            type="button"
+            onClick={onImportJson}
+            className="text-[10px] flex items-center gap-0.5 px-2 py-0.5 rounded text-text-muted hover:text-text-primary hover:bg-bg-hover"
+            title="从 .json 文件导入档案（不含参考图）"
+          >
+            <Upload className="w-3 h-3" />
+            导入
+          </button>
+          <button
+            type="button"
+            onClick={onExportAll}
+            className="text-[10px] flex items-center gap-0.5 px-2 py-0.5 rounded text-text-muted hover:text-text-primary hover:bg-bg-hover"
+            title="把所有可见档案导出为 .json"
+          >
+            <Download className="w-3 h-3" />
+            导出全部
+          </button>
+        </div>
+        <div className="flex-1 min-w-0">
+          {selected ? (
+            <CharacterArchiveEditor
+              key={selected.id}
+              archive={selected}
+              assets={assets}
+              onChange={onChange}
+              onDelete={onDelete}
+              onApply={onApply}
+              onReferencesChanged={() => void reload()}
+            />
+          ) : (
+            <div className="flex items-center justify-center h-full text-xs text-text-muted p-8 text-center">
+              {archives.length === 0 ? (
+                <>
+                  <div>
+                    <p className="mb-2">还没有角色档案</p>
+                    <p className="text-[10px]">点左侧"新建档案"开始</p>
+                  </div>
+                </>
+              ) : (
+                <p>从左侧选一个档案查看详情</p>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

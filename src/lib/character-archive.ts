@@ -347,3 +347,100 @@ export async function incrementAgentUseCount(
     { archiveId },
   );
 }
+
+// ============================================================================
+// M3.5 .json 导入导出
+// ============================================================================
+//
+// 档案在 .json 文件里只带元数据（id / name / description / tags / etc.）。
+// **不含 referenceImageAssetIds 的内容** — 资产图是本地 SQLite 资源，跨机器
+// 共享靠 ReferenceImage 路径或重新生成。导入时用新 id 避免冲突。
+//
+// schemaVersion: 1 起始。后续字段变化时 bump，导入端拒绝不识别的版本。
+
+/** 导出 / 导入 .json 顶层 schema */
+export interface CharacterArchiveExportV1 {
+  schemaVersion: 1;
+  exportedAt: number;
+  archives: Array<{
+    // 原始 id（导出时记录，仅作人类可读，导入时重新生成）
+    originalId: string;
+    name: string;
+    description: string;
+    tags: string[];
+    promptSnippet: string;
+    scope: "project" | "global";
+    /** scope=project 时，导出档案的项目名（导入端用来提示，不绑定 id） */
+    sourceProjectName?: string;
+  }>;
+}
+
+/** 把档案列表打包成 .json 字符串。空档案返回带空数组的合法 schema。 */
+export function buildArchiveExportJson(
+  archives: CharacterArchive[],
+  projectName?: string,
+): string {
+  const payload: CharacterArchiveExportV1 = {
+    schemaVersion: 1,
+    exportedAt: Date.now(),
+    archives: archives.map((a) => ({
+      originalId: a.id,
+      name: a.name,
+      description: a.description,
+      tags: a.tags,
+      promptSnippet: a.promptSnippet,
+      scope: a.scope,
+      // scope=project 时记录项目名（仅供人类可读）
+      sourceProjectName: a.scope === "project" ? projectName : undefined,
+    })),
+  };
+  return JSON.stringify(payload, null, 2);
+}
+
+/** 解析 .json 字符串。返回 (payload, 错误消息)。错误时 payload 为 null。 */
+export function parseArchiveExportJson(
+  raw: string,
+): { payload: CharacterArchiveExportV1 } | { error: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e: any) {
+    return { error: `JSON 解析失败：${e?.message ?? e}` };
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return { error: "JSON 顶层必须是对象" };
+  }
+  const obj = parsed as Record<string, unknown>;
+  if (obj.schemaVersion !== 1) {
+    return {
+      error: `不支持的 schemaVersion：${obj.schemaVersion}（当前实现支持 1）`,
+    };
+  }
+  if (!Array.isArray(obj.archives)) {
+    return { error: "archives 字段必须是数组" };
+  }
+  // 简单逐项校验
+  for (let i = 0; i < obj.archives.length; i++) {
+    const a = obj.archives[i] as Record<string, unknown>;
+    if (typeof a?.name !== "string" || !(a.name as string).trim()) {
+      return { error: `第 ${i + 1} 项 name 缺失或为空` };
+    }
+    if (a.scope !== "project" && a.scope !== "global") {
+      return { error: `第 ${i + 1} 项 scope 必须是 'project' 或 'global'` };
+    }
+  }
+  return { payload: obj as unknown as CharacterArchiveExportV1 };
+}
+
+/** 在浏览器里下载 .json 文件 */
+export function downloadArchiveJson(filename: string, json: string): void {
+  const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
