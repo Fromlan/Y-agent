@@ -294,6 +294,78 @@ export interface Asset {
   createdAt: number;
 }
 
+// ============================================================================
+// M3 Character Archive（角色档案）
+// ============================================================================
+//
+// 跨项目可复用的"角色档案"：同一角色多视角 / 表情 / 动作 / 场景矩阵都自动一致。
+//
+// 数据流：
+//   1. 用户在角色工坊（CharacterWorkshop）建档 + 拖入参考图（资产库里的 Asset）
+//   2. 生图时 PromptBar 选档案 → renderSkill 拼到 prompt 末尾（"{{character_archive}}"）
+//   3. Agent 也可主动调 character_use_archive 工具注入
+//
+// scope 字段：
+//   - "project" = 单项目可见，projectId 必填
+//   - "global"   = 全局可见（跨项目复用），projectId 必须为 null
+//   M3.1 默认都创建 project scope，M3.3 放开 global 入口。
+
+/** 角色档案在 prompt / 注入层的完整数据结构 */
+export interface CharacterArchive {
+  id: string;
+  scope: "project" | "global";
+  /** scope=project 时必填，scope=global 时为 null（前端用空字符串表示 null） */
+  projectId: string | null;
+  name: string;
+  description: string;
+  /** 引用的资产库 Asset.id 列表。渲染时通过 image-resolver 拿 localPaths / urls */
+  referenceImageAssetIds: string[];
+  /** 绑定的 style-contract checksum（可选，为空则不绑定） */
+  styleContractId: string | null;
+  /** 用户补充的 prompt 片段，会拼到 [风格契约] 之后 */
+  promptSnippet: string;
+  /** 标签（如 ['火焰', '法师', '女性']）。用于过滤 + 搜索 */
+  tags: string[];
+  /** 被 Agent 工具引用的次数（M3.4 触发） */
+  agentUseCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** 前端用的查询参数（不通过 IPC，仅本地纯函数） */
+export interface CharacterArchiveQuery {
+  /** 默认 ['project', 'global'] 合并；要只看本项目传 ['project'] */
+  scope?: ("project" | "global")[];
+  projectId?: string;
+  /** 标签过滤（AND 语义：档案必须包含所有指定标签） */
+  tagFilter?: string[];
+  /** name 模糊匹配（不区分大小写） */
+  searchName?: string;
+}
+
+/** 角色档案对单个 skill 的"是否需要档案"标注 */
+export interface CharacterArchiveSkillMeta {
+  skillId: string;
+  /** 此 skill 是否必须配合角色档案才能跑（character-sheet / character-turnaround /
+   *  expression-grid / character-consistency-set 都是 true） */
+  requiresArchive: boolean;
+}
+
+/** 前端 upsert 时用的输入类型（id / timestamp 字段由 Rust 端处理） */
+export interface CharacterArchiveUpsert {
+  id?: string;
+  scope: "project" | "global";
+  projectId?: string | null;
+  name: string;
+  description: string;
+  referenceImageAssetIds: string[];
+  styleContractId?: string | null;
+  promptSnippet: string;
+  tags: string[];
+  /** M3.1 阶段写 0；M3.4 增量由 Rust 端负责 */
+  agentUseCount?: number;
+}
+
 /**
  * 工具函数：合并普通生成的 urls 和图层拆分的 layers 为统一的展示列表
  * - 非图层拆分：返回 payload.urls
