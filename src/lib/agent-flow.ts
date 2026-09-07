@@ -40,6 +40,8 @@ export interface PlanArgs {
   relatedAssetIds?: string[];
   /** P1：组件契约 id（拆页面为组件时绑定）。透传到 AssetPayload.componentContractId。 */
   componentContractId?: string;
+  /** M3：Agent 调 character_use_archive 后传入的角色档案（拼到 prompt 的 [角色档案] 段） */
+  characterArchive?: import("@/lib/types").CharacterArchive;
 }
 
 export interface PlanResult {
@@ -123,6 +125,7 @@ export async function executePlanStream(
                 isTransparent,
                 sourceSkillId: plan.sourceSkillId,
                 styleContractId: plan.styleContractId,
+                characterArchiveId: plan.characterArchive?.id,
                 // partial 阶段不写 status（单图场景它就是主资产，不能卡在 pending）
               },
               partialFormat
@@ -187,6 +190,7 @@ export async function executePlanStream(
                 isTransparent,
                 sourceSkillId: plan.sourceSkillId,
                 styleContractId: plan.styleContractId,
+                characterArchiveId: plan.characterArchive?.id,
                 status: "approved",
                 relatedAssetIds: plan.relatedAssetIds,
                 componentContractId: plan.componentContractId,

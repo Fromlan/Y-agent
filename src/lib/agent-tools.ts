@@ -83,6 +83,30 @@ export const AGENT_TOOLS: ToolDefinition[] = [
       },
     },
   },
+  // M3：角色档案工具。LLM 主动调 character_use_archive 后,agent-flow
+  // 走 executePlanStream 时会把档案的 description / reference image 自动
+  // 拼到 prompt(走 renderSkill 的 {{character_archive}} 占位符)。
+  {
+    type: "function",
+    function: {
+      name: "character_use_archive",
+      description:
+        "使用指定角色档案做后续生图（注入档案描述 + 参考图）。" +
+        "**仅当用户消息明确提到角色名（如「用小红做表情包」/「用这个角色」）时调用**，" +
+        "调后必须接 jimeng_generate_image。系统已自动注入 system prompt 中的档案列表，" +
+        "archiveId 必须从列表里选；如未指定角色或角色未找到，不要调这个工具。",
+      parameters: {
+        type: "object",
+        properties: {
+          archiveId: {
+            type: "string",
+            description: "角色档案 ID（从 system prompt 注入的档案列表里选）",
+          },
+        },
+        required: ["archiveId"],
+      },
+    },
+  },
   {
     type: "function",
     function: {

@@ -268,6 +268,9 @@ export interface AssetPayload {
   /** 生成此资产的 Skill id（如 `character-turnaround` / `ui-icons`）。
    *  P0 新增：让资产库可以按 Skill 维度筛选/统计，也方便后续契约变更时定位受影响的 skill。 */
   sourceSkillId?: string;
+  /** M3：生成此资产时引用的角色档案 id。便于按角色维度筛选/统计。
+   *  PromptBar / character_use_archive Agent 工具都会写。 */
+  characterArchiveId?: string;
   /** P1：资产状态机。pending-generation（生图失败/未跑完）、approved（生图成功，可信）、stale（契约已变，资产与现契约不一致） */
   status?: "pending-generation" | "approved" | "stale";
   /** P1：相关资产 id 列表。组件拆解时填源 page id；风格契约变更时反向关联等。 */

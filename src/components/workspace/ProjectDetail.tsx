@@ -157,6 +157,10 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   reloadRef.current = reload;
   const toastRef = useRef(toast);
   toastRef.current = toast;
+  // M3：Agent 调 character_use_archive 后存到这里，下一次 jimeng_generate_image 会自动注入 prompt
+  // - 用 ref 而非 state：避免 tool handler 内 setState 触发额外 re-render
+  // - 用完即清（executePlanStream 内消费后置 null），避免下次生图仍被注入
+  const pendingCharacterArchiveRef = useRef<import("@/lib/types").CharacterArchive | null>(null);
 
   const patchVideoTask = useCallback((taskId: string, patch: Partial<VideoTaskTrack>) => {
     const next = {
@@ -728,10 +732,71 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
         llmHistory,
         AGENT_TOOLS,
         async (name, args) => {
+          // M3：Agent 调 character_use_archive 后的处理
+          // - 校验 archiveId 存在
+          // - 把档案存到 pendingCharacterArchiveRef，next jimeng_generate_image 会拼到 prompt
+          // - 自增 agentUseCount 计数
+          if (name === "character_use_archive") {
+            const archiveId = String(args.archiveId ?? "").trim();
+            if (!archiveId) {
+              return { result: "错误：archiveId 不能为空" };
+            }
+            const tcId = crypto.randomUUID();
+            appendToolCall({
+              id: tcId,
+              toolName: "character.use_archive",
+              args: { archiveId },
+              status: "running",
+            });
+            try {
+              const { getCharacterArchive, incrementAgentUseCount } = await import(
+                "@/lib/character-archive"
+              );
+              const archive = await getCharacterArchive(archiveId);
+              if (!archive) {
+                updateToolCall(tcId, {
+                  status: "failed",
+                  result: `未找到档案 ${archiveId.slice(0, 8)}…（可能已被删除）`,
+                });
+                return {
+                  result: `未找到档案 ${archiveId}。请先在角色工坊建档，或换其他档案。`,
+                };
+              }
+              pendingCharacterArchiveRef.current = archive;
+              // 同步到 React state，让 UI 反映 PromptBar 当前档案被 Agent 选中
+              setSelectedArchiveId(archiveId);
+              // 自增计数器
+              await incrementAgentUseCount(archiveId).catch(() => null);
+              // reload archives 列表（counter 变了）
+              void reloadCharacterArchives();
+              updateToolCall(tcId, {
+                status: "done",
+                result: `已选择档案「${archive.name}」(${archive.referenceImageAssetIds.length} 张参考图, scope=${archive.scope}),下一次 jimeng_generate_image 会自动注入 prompt`,
+              });
+              return {
+                result: `已选择档案「${archive.name}」(参考图 ${archive.referenceImageAssetIds.length} 张)。请继续调 jimeng_generate_image 工具完成生图,prompt 会自动包含 [角色档案] 段。`,
+              };
+            } catch (e: any) {
+              const msg = e?.message ?? String(e);
+              updateToolCall(tcId, { status: "failed", result: msg });
+              return { result: `character_use_archive 失败：${msg}` };
+            }
+          }
           if (name === "jimeng_generate_image") {
-            const prompt = String(args.prompt ?? "").trim();
+            let prompt = String(args.prompt ?? "").trim();
             if (!prompt) {
               return { result: "错误：prompt 不能为空" };
+            }
+            // M3：Agent 调 character_use_archive 后,把档案拼到 prompt
+            // 用完即清（一次性消费），避免下次生图仍被注入
+            const pendingArchive = pendingCharacterArchiveRef.current;
+            if (pendingArchive) {
+              const { renderCharacterArchive } = await import("@/lib/character-archive");
+              const archiveBlock = renderCharacterArchive(pendingArchive);
+              if (archiveBlock) {
+                prompt = `${prompt}\n\n${archiveBlock}`;
+              }
+              pendingCharacterArchiveRef.current = null;
             }
             // P7：模型选择以 PromptBar 为准。LLM 传 model 是受控 hint（系统 prompt 已说明：
             // 显式要求切换时才传），所以保留 args.model 覆盖；没传就 fallback 到 PromptBar。
@@ -779,6 +844,10 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
               if (maxImages > 1) streamPlan.maxImages = maxImages;
               // P1：项目级风格契约短哈希（LLM 工具调用路径也透传）
               if (styleContractId) streamPlan.styleContractId = styleContractId;
+              // M3：角色档案(也写入 payload 留痕)
+              if (pendingArchive) {
+                streamPlan.characterArchive = pendingArchive;
+              }
               const result = await executePlanStream(
                 streamPlan,
                 currentProject.id,

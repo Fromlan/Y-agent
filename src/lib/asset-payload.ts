@@ -50,6 +50,8 @@ export interface BuildAssetPayloadInput {
   styleContractId?: string;
   /** 生成此资产的 Skill id。P0 新增，可选。 */
   sourceSkillId?: string;
+  /** M3：生成此资产时引用的角色档案 id。便于按角色维度筛选/统计。 */
+  characterArchiveId?: string;
   /** P1：资产状态机。approved 显式传；缺省时不在 payload 里写（保留 SQLite 旧数据兼容）。 */
   status?: "pending-generation" | "approved" | "stale";
   /** P1：相关资产 id 列表（拆解时填源 page id）。 */
@@ -145,6 +147,10 @@ export function buildAssetPayload(
   // P0：生成本资产时命中的 Skill id（便于按 Skill 维度筛选/统计）
   if (input.sourceSkillId) {
     payload.sourceSkillId = input.sourceSkillId;
+  }
+  // M3：生成本资产时引用的角色档案 id
+  if (input.characterArchiveId) {
+    payload.characterArchiveId = input.characterArchiveId;
   }
   // P1：资产状态机（显式传才写，老 SQLite 数据保留）
   if (input.status) {
