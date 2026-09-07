@@ -1,6 +1,6 @@
 [package]
 name = "y-agent"
-version = "0.2.0"
+version = "0.2.1"
 description = "Y-agent - 游戏美术 AI 工作台"
 authors = ["Y-agent"]
 edition = "2021"
