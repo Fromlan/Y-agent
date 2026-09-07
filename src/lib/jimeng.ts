@@ -175,15 +175,18 @@ export async function generateImageStream(
     }
   });
 
-  // 防御性兜底：10 分钟内都没收到 completed/aborted（理论 Rust 端会 bail），主动释放。
-  // 避免 listener 永远挂着。
+  // 防御性兜底：30 分钟内都没收到 completed/aborted（理论 Rust 端会 bail），主动释放。
+  // 5.0 Lite 组图 (maxImages=15) + 部分场景实际可达 5-10 分钟，10 分钟太短；30 分钟
+  // 仍属"远超过正常生成耗时"的下限，触发即视为"流挂住"，通知上层走 onAborted
+  // 让 agent-flow reject 当前 Promise，partial 已入库的图保留给用户。
   setTimeout(
     () => {
       if (finished) return;
       finished = true;
       safeUnlisten();
+      handlers.onAborted?.({ reason: "流式监听超时 (30min)，已自动断开" });
     },
-    10 * 60 * 1000
+    30 * 60 * 1000
   );
 
   return requestId;
