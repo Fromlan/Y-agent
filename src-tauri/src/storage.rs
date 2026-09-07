@@ -7,7 +7,7 @@ const KEY_RECORD_ID: &str = "jimeng_api_key";
 
 pub struct Storage {
     pub conn: Mutex<Connection>,
-    #[allow(dead_code)]
+    /// 缓存 app_data_dir 路径（commands.rs 用来定位 assets/videos 缓存目录）。
     pub app_dir: PathBuf,
 }
 
