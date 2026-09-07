@@ -2,8 +2,31 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::error::Error as _;
 
 const ENDPOINT: &str = "https://ark.cn-beijing.volces.com/api/v3/images/generations";
+
+/// 把 reqwest 错误转成包含 source chain 的 anyhow 错误。
+///
+/// reqwest::Error 的 Display 经常只输出顶层模板（如 "error sending request for url (...)"），
+/// 真正的根因（DNS、TLS handshake、connect refused、cert verify 等）藏在 source 链里。
+/// 上层 `?` 抛出后 `anyhow::Error::to_string()` 只看顶层 message，前端会丢失关键诊断信息。
+/// 这里把整条链展平成一行，方便前端 toast / 日志直接看到根因。
+fn format_reqwest_error(scope: &'static str, e: reqwest::Error) -> anyhow::Error {
+    let mut msg = format!("[{scope}] {e}");
+    let mut src: Option<&dyn std::error::Error> = e.source();
+    // 限深 5 层，避免病态循环（一般 2-3 层就够）
+    let mut depth = 0;
+    while let Some(s) = src {
+        if depth >= 5 {
+            break;
+        }
+        msg.push_str(&format!(" -> {s}"));
+        src = s.source();
+        depth += 1;
+    }
+    anyhow::anyhow!(msg)
+}
 
 /// P5：把一个远程图片/视频 URL 下载到 `cache_dir/<asset_id>/<n>.<ext>`。
 /// 成功返回绝对路径，失败返回 None（前端回退用 URL）。
@@ -393,7 +416,8 @@ pub async fn generate(
         .header("Content-Type", "application/json")
         .json(&body)
         .send()
-        .await?;
+        .await
+        .map_err(|e| format_reqwest_error("jimeng.generate", e))?;
 
     let status = resp.status();
     let text = resp.text().await?;
@@ -599,7 +623,8 @@ where
         .header("Accept", "text/event-stream")
         .json(&body)
         .send()
-        .await?;
+        .await
+        .map_err(|e| format_reqwest_error("jimeng.generate_stream", e))?;
 
     let status = resp.status();
     if !status.is_success() {
