@@ -71,8 +71,8 @@ pnpm install
 ## 📈 路线图
 
 ```
-M0 原型 → M1 MVP → M2 v0.2.0（当前）→ M3 角色工坊 → M4 场景+UI → M5 图层 → M6 Skill 中心 → M7 打磨发布
- ✅        ✅          ✅                ⏳                ⏳            ⏳         ⏳                ⏳
+M0 原型 → M1 MVP → M2 v0.2.1 → M3 角色工坊（当前）→ M4 场景+UI → M5 图层 → M6 Skill 中心 → M7 打磨发布
+ ✅        ✅          ✅                ✅                ⏳            ⏳         ⏳                ⏳
 ```
 
 > 各 M 的详细路线见 [`doc/plan-m3-character-workshop.md`](./doc/plan-m3-character-workshop.md) / [`doc/plan-m4-scene-ui.md`](./doc/plan-m4-scene-ui.md) / [`doc/plan-m5-layer-pro.md`](./doc/plan-m5-layer-pro.md) / [`doc/plan-m6-skill-hub.md`](./doc/plan-m6-skill-hub.md) / [`doc/plan-m7-polish-release.md`](./doc/plan-m7-polish-release.md)。实施前可调整。
