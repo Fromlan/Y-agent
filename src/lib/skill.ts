@@ -8,6 +8,8 @@
 
 import { log } from "@/lib/logger";
 import { renderStyleContract, type StyleContract } from "@/lib/style-contract";
+import { renderCharacterArchive } from "@/lib/character-archive";
+import type { CharacterArchive } from "@/lib/types";
 
 export interface Skill {
   /** Skill 标识（目录名） */
@@ -106,14 +108,36 @@ export function parseSkillMd(id: string, raw: string): Skill {
  *
  * P1 增强：接受 `styleContract`，把契约字段拼到正向 prompt 末尾。
  * 优先级：styleContract > styleHints（契约是结构化权威，hints 是 free-form 兜底）。
+ *
+ * M3 增强：接受 `characterArchive`，把档案拼到 {{character_archive}} 占位符位置。
+ * 优先级：characterArchive > styleContract（档案决定"是什么角色"，契约决定"画成什么风格"）。
+ * 拼接顺序：{{user_input}} → {{character_archive}} → {{style_contract}} → 反向限制
+ *   见 doc/plan-m3-character-workshop.md § 3.2
  */
 export function renderSkill(
   skill: Skill,
   userInput: string,
   styleHints: string[] = [],
-  styleContract?: StyleContract
+  styleContract?: StyleContract,
+  characterArchive?: CharacterArchive
 ): string {
   let prompt = skill.template.replace(/\{\{\s*user_input\s*\}\}/g, userInput.trim());
+  // M3：角色档案占位符。renderCharacterArchive 全空时返回空串，所以天然无副作用
+  if (characterArchive) {
+    const archiveBlock = renderCharacterArchive(characterArchive);
+    if (archiveBlock) {
+      prompt = prompt.replace(
+        /\{\{\s*character_archive\s*\}\}/g,
+        archiveBlock
+      );
+    } else {
+      // 没东西可拼：把占位符去掉（避免原样残留）
+      prompt = prompt.replace(/\{\{\s*character_archive\s*\}\}/g, "");
+    }
+  } else {
+    // 没传档案：把占位符去掉（避免原样残留）
+    prompt = prompt.replace(/\{\{\s*character_archive\s*\}\}/g, "");
+  }
   // P1：风格契约（结构化，权威）
   if (styleContract && styleContract.checksum) {
     const contractBlock = renderStyleContract(styleContract);
