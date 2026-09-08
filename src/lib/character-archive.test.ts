@@ -177,6 +177,18 @@ describe("aggregateAllTags", () => {
   it("空 archives 返回空数组", () => {
     expect(aggregateAllTags([])).toEqual([]);
   });
+
+  // M3.6 兜底:即便 Rust 端 schema 错配把 a.tags 发成 undefined,也不能 throw
+  it("a.tags 不是数组时安全跳过(不 throw)", () => {
+    const archives = [
+      // 模拟 IPC 错误:tags 字段是 undefined(老数据 / 错配)
+      { ...makeArchive({ id: "1" }), tags: undefined as unknown as string[] },
+      makeArchive({ id: "2", tags: ["火焰"] }),
+    ];
+    // 不 throw 就行
+    const out = aggregateAllTags(archives as Parameters<typeof aggregateAllTags>[0]);
+    expect(out).toEqual(["火焰"]);
+  });
 });
 
 describe("validateArchiveUpsert", () => {

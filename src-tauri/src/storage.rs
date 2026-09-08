@@ -858,12 +858,14 @@ fn row_to_video_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<VideoTaskRecor
 }
 
 /// M3.1 角色档案行。对应 character_archives 表。
-/// - reference_image_asset_ids_json / tags_json 是 JSON 字符串数组（前端用 serde 解析）
+/// - reference_image_asset_ids / tags 是 JSON 字符串数组,内部用 raw String 存 SQLite,
+///   serde 这里用自定义实现,序列化时解析成 Vec<String> 让前端直接拿到数组
+///   (否则 #[serde(rename_all = "camelCase")] 会把 `tags_json` 序列化成 `tagsJson`,
+///    跟前端 `CharacterArchive.tags: string[]` 错配 — M3.6 fix)
 /// - project_id 在 scope=global 时为 None，scope=project 时必填
 /// - agent_use_count 由 M3.4 Agent 工具触发时自增，upsert 不覆盖（前端回填）
 /// - timestamp 字段在 storage 层自动写，调用方不需要传
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub struct CharacterArchiveRow {
     pub id: String,
     pub scope: String, // "project" | "global"
@@ -877,6 +879,34 @@ pub struct CharacterArchiveRow {
     pub agent_use_count: i64,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+// M3.6 fix: 自定义 Serialize — 内部仍存 raw JSON 字符串(SQLite 兼容),
+// 但 IPC 出去时把 tags_json 解析成 Vec<String>、字段名 `tags`,
+// reference_image_asset_ids_json 解析成 `referenceImageAssetIds`,
+// 跟前端 src/lib/types.ts:CharacterArchive 一致。
+impl serde::Serialize for CharacterArchiveRow {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut state = s.serialize_struct("CharacterArchiveRow", 12)?;
+        state.serialize_field("id", &self.id)?;
+        state.serialize_field("scope", &self.scope)?;
+        state.serialize_field("projectId", &self.project_id)?;
+        state.serialize_field("name", &self.name)?;
+        state.serialize_field("description", &self.description)?;
+        let ref_ids: Vec<String> = serde_json::from_str(&self.reference_image_asset_ids_json)
+            .map_err(serde::ser::Error::custom)?;
+        state.serialize_field("referenceImageAssetIds", &ref_ids)?;
+        state.serialize_field("styleContractId", &self.style_contract_id)?;
+        state.serialize_field("promptSnippet", &self.prompt_snippet)?;
+        let tags: Vec<String> = serde_json::from_str(&self.tags_json)
+            .map_err(serde::ser::Error::custom)?;
+        state.serialize_field("tags", &tags)?;
+        state.serialize_field("agentUseCount", &self.agent_use_count)?;
+        state.serialize_field("createdAt", &self.created_at)?;
+        state.serialize_field("updatedAt", &self.updated_at)?;
+        state.end()
+    }
 }
 
 fn row_to_character_archive(row: &rusqlite::Row<'_>) -> rusqlite::Result<CharacterArchiveRow> {

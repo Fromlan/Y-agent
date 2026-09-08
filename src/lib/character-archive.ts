@@ -86,8 +86,11 @@ export function sortByUpdated(archives: CharacterArchive[]): CharacterArchive[] 
 export function aggregateAllTags(archives: CharacterArchive[]): string[] {
   const counts = new Map<string, number>();
   for (const a of archives) {
-    for (const t of a.tags) {
-      const trimmed = t.trim();
+    // M3.6 防御:Rust 端 schema 错配时 a.tags 可能是 undefined(老数据 / 早期 build),
+    // 这里不 throw,直接跳过,UI 至少能渲染。Rust 端 fix 见 storage.rs::CharacterArchiveRow 自定义 Serialize。
+    const tags = Array.isArray(a.tags) ? a.tags : [];
+    for (const t of tags) {
+      const trimmed = (t ?? "").trim();
       if (!trimmed) continue;
       counts.set(trimmed, (counts.get(trimmed) ?? 0) + 1);
     }
