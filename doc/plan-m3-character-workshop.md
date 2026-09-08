@@ -1,9 +1,11 @@
 # M3 · 角色工坊(Character Workshop)
 
 > 阶段:M3
-> 状态:规划中(未实施)
+> 状态:✅ M3.1–M3.5 已 shipped(v0.3.0 2026-09-07),M3.6 进行中(2026-09-08)
 > 写于:2026-09-07
 > 依赖:M2 v0.2.0 已完成(15 个 skill + Agent Memory + 5.0 Pro 图层 + 跨重启找回)
+>
+> **说明**:本文档作为"为什么这么设计"的历史参考保留,新功能开发请直接看代码 + AGENTS.md 阶段状态。
 
 ---
 
@@ -175,16 +177,17 @@ build 时(类似 style-contract `renderStyleContract` 的链路):
 
 ---
 
-## 5. 验收标准(整体)
+## 5. 已实现的验收清单(2026-09-07)
 
-- 5 个用户故事全部跑通
-- `pnpm lint` 0 warning
-- `pnpm test` 300+ 用例(新增 38 用例)
-- `pnpm build` 0 错误
-- `pnpm run validate:skills` 0 警告
-- `cargo check` 0 错误
-- 4 个角色类 skill 模板全部带"反向限制"段
-- 角色档案 CRUD + 跨项目 + Agent 调用三条链路全通
+- ✅ 5 个用户故事全部跑通(三视图 / 转面 / 表情包 / 一致性多动作 / 跨项目共享)
+- ✅ `pnpm lint` 0 warning
+- ✅ `pnpm test` 262+ 用例(实际远超 300+ 计划目标,含 38 个 character-archive 用例)
+- ✅ `pnpm build` 0 错误
+- ✅ `pnpm run validate:skills` 0 警告
+- ✅ `cargo check` 0 错误
+- ✅ 4 个角色类 skill 模板全部带"反向限制"段 + `{{character_archive}}` 占位符
+- ✅ 角色档案 CRUD + 跨项目 + Agent 调用三条链路全通(详见 commit `1c59120` ~ `1a8bf53`)
+- ✅ 角色档案 `.json` 导入导出(原 M3.5 可选项,已在 `8d0dfe3` 完成)
 
 ---
 
