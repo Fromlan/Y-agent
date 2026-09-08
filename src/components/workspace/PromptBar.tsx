@@ -6,7 +6,6 @@ import {
   Search,
   Zap,
   Droplet,
-  ChevronDown,
   Loader2,
 } from "lucide-react";
 import { useToast } from "@/components/shared/Toast";
@@ -16,6 +15,7 @@ import ModelSelect from "@/components/workspace/ModelSelect";
 import { pickImageAsDataUrl } from "@/lib/image-file";
 import SkillPicker from "@/components/workspace/SkillPicker";
 import CharacterArchivePicker from "@/components/workspace/CharacterArchivePicker";
+import { CapabilityChip, QuantityGroup } from "@/components/workspace/CapabilityChip";
 import type { Skill } from "@/lib/skill";
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import {
@@ -98,7 +98,6 @@ export default function PromptBar({
 }: Props) {
   const toast = useToast();
   const [showSkillPicker, setShowSkillPicker] = useState(false);
-  const [showMore, setShowMore] = useState(false);
   const taRef = useAutoResizeTextarea(prompt, { minRows: 1, maxRows: 6 });
 
   // 能力位驱动：模型换了之后，不支持的开关要重置
@@ -151,15 +150,9 @@ export default function PromptBar({
     return m ? m[1] : "";
   })();
 
-  // "高级"面板里被打开的能力位数量（角标）
-  const activeToggles = [
-    caps.groupGeneration && groupCount > 1,
-    caps.layerDecomposition && layerDecomp,
-    caps.webSearch && webSearch,
-    caps.fastMode && fastMode,
-    caps.outputFormats.length > 1 && outputFormat !== "",
-    caps.background && transparent,
-  ].filter(Boolean).length;
+  // O-2: 现在能力位都直接展示,不再需要 activeToggles 计数
+  // (保留位置以便后续如需"已用能力位 X 项"标识)
+  void caps;
 
   return (
     <div className="space-y-2.5 relative">
@@ -207,7 +200,7 @@ export default function PromptBar({
             className="w-full bg-transparent text-sm text-text-primary placeholder:text-text-muted
               focus:outline-none resize-none leading-[20px]"
           />
-          {/* 单行工具栏：参考 │ 模型/尺寸 │ 高级 */}
+          {/* 单行工具栏：参考 │ 角色 │ 模型/尺寸 */}
           <div className="flex items-center gap-1 pt-1.5 border-t border-border flex-wrap">
             <CompactButton
               title={`添加参考图（最多 ${caps.maxInputImages} 张，单张 ≤ 8MB）`}
@@ -240,151 +233,95 @@ export default function PromptBar({
             <ParamCell label="尺寸" bare>
               <SizeSelect value={size} onChange={setSize} modelId={model.id} />
             </ParamCell>
-
-            <div className="flex-1" />
-
-            {/* 高级按钮 + 角标 */}
-            <button
-              onClick={() => setShowMore((s) => !s)}
-              className={`btn text-[11px] h-7 px-2 relative ${
-                showMore ? "bg-bg-hover" : ""
-              }`}
-              title="更多能力位"
-            >
-              高级
-              {activeToggles > 0 && (
-                <span
-                  className="ml-1 px-1.5 h-4 min-w-[16px] rounded-full
-                    bg-accent text-text-inverse text-[10px] font-semibold
-                    flex items-center justify-center tabular-nums"
-                >
-                  {activeToggles}
-                </span>
-              )}
-              <ChevronDown
-                className={`w-3 h-3 text-text-muted ml-0.5 transition-transform ${
-                  showMore ? "rotate-180" : ""
-                }`}
-              />
-            </button>
           </div>
 
-          {/* 折叠面板：能力位开关。默认收起。 */}
-          {showMore && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-2 pt-2 border-t border-border">
-              {caps.groupGeneration && (
-                <ParamCell
-                  label={`数量 (1-${caps.maxGroupImages})`}
-                  bare
-                >
-                  <input
-                    type="number"
-                    min={1}
-                    max={caps.maxGroupImages}
-                    value={groupCount}
-                    onChange={(e) =>
-                      setGroupCount(
-                        Math.max(1, Math.min(caps.maxGroupImages, Number(e.target.value) || 1))
-                      )
-                    }
-                    className="text-xs bg-bg-elev border border-border rounded px-1.5 h-6 w-12
-                      text-text-primary focus:outline-none focus:border-accent
-                      tabular-nums text-center"
+          {/* O-2: 能力位 chip 行 — 默认全部展开,不用"高级"折叠 */}
+          {(() => {
+            const hasAny =
+              caps.groupGeneration ||
+              caps.layerDecomposition ||
+              caps.webSearch ||
+              caps.fastMode ||
+              caps.outputFormats.length > 1 ||
+              caps.background;
+            if (!hasAny) return null;
+            return (
+              <div className="flex items-center gap-1.5 pt-1.5 border-t border-border flex-wrap">
+                {caps.groupGeneration && (
+                  <>
+                    <span className="text-[10px] text-text-muted">数量</span>
+                    <QuantityGroup
+                      value={groupCount}
+                      max={caps.maxGroupImages}
+                      onChange={setGroupCount}
+                    />
+                  </>
+                )}
+                {caps.layerDecomposition && (
+                  <CapabilityChip
+                    icon={<Layers className="w-3 h-3" />}
+                    label="拆图层"
+                    title="仅 5.0 Pro 支持"
+                    active={layerDecomp}
+                    onClick={() => setLayerDecomp(!layerDecomp)}
                   />
-                </ParamCell>
-              )}
-              {caps.layerDecomposition && (
-                <ControlCell title="仅 5.0 Pro 支持">
-                  <label className="flex items-center gap-1.5 h-7 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={layerDecomp}
-                      onChange={(e) => setLayerDecomp(e.target.checked)}
-                      className="accent-accent"
-                    />
-                    <Layers className="w-3.5 h-3.5 text-text-muted" />
-                    <span className="text-[11px] text-text-secondary whitespace-nowrap">拆分图层</span>
-                  </label>
-                </ControlCell>
-              )}
-              {caps.webSearch && (
-                <ControlCell title="5.0 Lite 支持">
-                  <label className="flex items-center gap-1.5 h-7 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={webSearch}
-                      onChange={(e) => setWebSearch(e.target.checked)}
-                      className="accent-accent"
-                    />
-                    <Search className="w-3.5 h-3.5 text-text-muted" />
-                    <span className="text-[11px] text-text-secondary whitespace-nowrap">联网搜索</span>
-                  </label>
-                </ControlCell>
-              )}
-              {caps.fastMode && (
-                <ControlCell title="5.0 Pro / 4.0 支持">
-                  <label className="flex items-center gap-1.5 h-7 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={fastMode}
-                      onChange={(e) => setFastMode(e.target.checked)}
-                      className="accent-accent"
-                    />
-                    <Zap className="w-3.5 h-3.5 text-text-muted" />
-                    <span className="text-[11px] text-text-secondary whitespace-nowrap">极速模式</span>
-                  </label>
-                </ControlCell>
-              )}
-              {caps.outputFormats.length > 1 && (
-                <ParamCell label="输出格式" bare>
-                  <select
-                    value={outputFormat}
-                    onChange={(e) => {
-                      const v = e.target.value as "png" | "jpeg" | "";
-                      setOutputFormat(v);
-                      // P4：切到 jpeg 时若 transparent 开了，强制关掉
-                      if (v === "jpeg" && transparent) setTransparent(false);
-                    }}
-                    className="text-xs bg-bg-elev border border-border rounded px-1.5 h-6
-                      text-text-primary focus:outline-none focus:border-accent"
-                  >
-                    <option value="">PNG</option>
-                    {caps.outputFormats.map((f) => (
-                      <option key={f} value={f}>
-                        {f.toUpperCase()}
-                      </option>
-                    ))}
-                  </select>
-                </ParamCell>
-              )}
-              {caps.background && (
-                <ControlCell
-                  title={outputFormat === "jpeg" ? "需要 PNG 输出" : "5.0 Pro 支持"}
-                >
-                  <label
-                    className={`flex items-center gap-1.5 h-7 ${
-                      outputFormat === "jpeg" ? "opacity-40 cursor-not-allowed" : "cursor-pointer"
-                    } select-none`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={transparent}
+                )}
+                {caps.webSearch && (
+                  <CapabilityChip
+                    icon={<Search className="w-3 h-3" />}
+                    label="联网"
+                    title="5.0 Lite 支持"
+                    active={webSearch}
+                    onClick={() => setWebSearch(!webSearch)}
+                  />
+                )}
+                {caps.fastMode && (
+                  <CapabilityChip
+                    icon={<Zap className="w-3 h-3" />}
+                    label="极速"
+                    title="5.0 Pro / 4.0 支持"
+                    active={fastMode}
+                    onClick={() => setFastMode(!fastMode)}
+                  />
+                )}
+                {caps.outputFormats.length > 1 && (
+                  <ControlCell title="输出格式">
+                    <select
+                      value={outputFormat}
                       onChange={(e) => {
-                        setTransparent(e.target.checked);
-                        if (e.target.checked && outputFormat !== "png") {
-                          setOutputFormat("png"); // transparent 强制 png
-                        }
+                        const v = e.target.value as "png" | "jpeg" | "";
+                        setOutputFormat(v);
+                        if (v === "jpeg" && transparent) setTransparent(false);
                       }}
-                      className="accent-accent"
-                      disabled={outputFormat === "jpeg"}
-                    />
-                    <Droplet className="w-3.5 h-3.5 text-text-muted" />
-                    <span className="text-[11px] text-text-secondary whitespace-nowrap">透明背景</span>
-                  </label>
-                </ControlCell>
-              )}
-            </div>
-          )}
+                      className="text-[11px] bg-bg-elev border border-border rounded px-1.5 h-6
+                        text-text-primary focus:outline-none focus:border-accent"
+                    >
+                      <option value="">PNG</option>
+                      {caps.outputFormats.map((f) => (
+                        <option key={f} value={f}>
+                          {f.toUpperCase()}
+                        </option>
+                      ))}
+                    </select>
+                  </ControlCell>
+                )}
+                {caps.background && (
+                  <CapabilityChip
+                    icon={<Droplet className="w-3 h-3" />}
+                    label="透明"
+                    title={outputFormat === "jpeg" ? "需要 PNG 输出" : "5.0 Pro 支持"}
+                    active={transparent}
+                    disabled={outputFormat === "jpeg"}
+                    onClick={() => {
+                      const next = !transparent;
+                      setTransparent(next);
+                      if (next && outputFormat !== "png") setOutputFormat("png");
+                    }}
+                  />
+                )}
+              </div>
+            );
+          })()}
         </div>
 
         {/* 生成按钮 · 40×40 圆形，与工具栏同高 */}
