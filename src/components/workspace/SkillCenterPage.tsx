@@ -11,9 +11,15 @@ import {
   Layers,
   CheckCircle2,
   ArrowRight,
+  Save,
 } from "lucide-react";
 import { useToast } from "@/components/shared/Toast";
-import { loadBuiltinSkills, type Skill } from "@/lib/skill";
+import {
+  loadBuiltinSkills,
+  saveCustomSkills,
+  loadCustomSkillsCached,
+  type Skill,
+} from "@/lib/skill";
 import { useSession } from "@/lib/session";
 
 /** M-6: 项目内 PromptBar 通过这个键读取待注入的 Skill
@@ -221,6 +227,22 @@ function SkillDetail({
   const [copied, setCopied] = useState(false);
   const [triggerCopied, setTriggerCopied] = useState<string | null>(null);
 
+  // A-1: 另存为我的
+  const onSaveAsMine = () => {
+    try {
+      const customs = loadCustomSkillsCached();
+      const exists = customs.some((s) => s.id === skill.id);
+      if (exists) {
+        onCopyToast.warn(`「${skill.id}」已经是你的自定义 Skill,可在 localStorage 删除`);
+        return;
+      }
+      saveCustomSkills([...customs, skill]);
+      onCopyToast.success(`已另存「${skill.name}」(/ ${skill.id}) 为我的自定义 Skill`);
+    } catch (e: any) {
+      onCopyToast.error(`保存失败：${e?.message ?? e}`);
+    }
+  };
+
   const onCopyTemplate = () => {
     navigator.clipboard.writeText(skill.template).then(
       () => {
@@ -363,8 +385,19 @@ function SkillDetail({
           bg-bg-elev border border-border rounded-md p-3 max-h-[420px] overflow-y-auto font-mono">
           {skill.template}
         </pre>
-        <p className="text-[11px] text-text-muted mt-2">
-          <code className="text-accent">{"{{user_input}}"}</code> 会替换为你的原话。
+        <p className="text-[11px] text-text-muted mt-2 flex items-center gap-2 flex-wrap">
+          <span>
+            <code className="text-accent">{"{{user_input}}"}</code> 会替换为你的原话。
+          </span>
+          {/* A-1: 另存为我的(自定义 Skill) */}
+          <button
+            onClick={onSaveAsMine}
+            className="ml-auto text-text-muted hover:text-accent inline-flex items-center gap-1"
+            title={`复制「${skill.name}」到 localStorage,作为你的自定义 Skill`}
+          >
+            <Save className="w-3 h-3" />
+            另存为我的
+          </button>
         </p>
       </section>
     </div>

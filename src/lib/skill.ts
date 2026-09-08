@@ -165,7 +165,52 @@ const skillModules = import.meta.glob<string>(
 
 let cached: Skill[] | null = null;
 
-/** 加载所有内置 Skill（首次调用解析，后续走缓存） */
+/** A-1: 用户自定义 Skill 持久化键 */
+const CUSTOM_SKILLS_KEY = "y-agent.customSkills";
+
+/** A-1: 自定义 Skill 集合(用户 fork builtin 后另存) */
+export function loadCustomSkillsCached(): Skill[] {
+  try {
+    const raw = localStorage.getItem(CUSTOM_SKILLS_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr.filter(
+      (s: any) =>
+        s && typeof s.id === "string" && typeof s.template === "string" && Array.isArray(s.triggers)
+    );
+  } catch {
+    return [];
+  }
+}
+
+/** A-1: 保存自定义 Skill 集合 */
+export function saveCustomSkills(skills: Skill[]): void {
+  try {
+    localStorage.setItem(CUSTOM_SKILLS_KEY, JSON.stringify(skills));
+    // 清缓存,让下次 loadBuiltinSkills 重新合并
+    cached = null;
+  } catch (e) {
+    log.warn("skill", "saveCustomSkills 失败:", e);
+  }
+}
+
+/** A-1: 删除一个自定义 Skill */
+export function deleteCustomSkill(id: string): void {
+  const next = loadCustomSkillsCached().filter((s) => s.id !== id);
+  saveCustomSkills(next);
+}
+
+/** A-1: 添加或更新一个自定义 Skill */
+export function upsertCustomSkill(skill: Skill): void {
+  const all = loadCustomSkillsCached();
+  const idx = all.findIndex((s) => s.id === skill.id);
+  if (idx >= 0) all[idx] = skill;
+  else all.push(skill);
+  saveCustomSkills(all);
+}
+
+/** 加载所有内置 Skill + 自定义 Skill（首次调用解析，后续走缓存） */
 export function loadBuiltinSkills(): Skill[] {
   if (cached) return cached;
   const out: Skill[] = [];
@@ -178,6 +223,14 @@ export function loadBuiltinSkills(): Skill[] {
     } catch (e) {
       log.warn("skill", `跳过 ${path}：`, e);
     }
+  }
+  // A-1: 合并自定义 Skill
+  const customs = loadCustomSkillsCached();
+  // 覆盖或追加
+  for (const c of customs) {
+    const idx = out.findIndex((s) => s.id === c.id);
+    if (idx >= 0) out[idx] = c;
+    else out.push(c);
   }
   // 排序：按 name 字典序
   out.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
