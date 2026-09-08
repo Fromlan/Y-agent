@@ -67,6 +67,43 @@ function AppShell() {
     }
   };
 
+  // A-3: 全局快捷键(Ctrl/Cmd + ...)
+  // 注意:CommandPalette 内部已注册 ⌘K,这里补 N / , / 1-4
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+      const key = e.key.toLowerCase();
+      // 输入框里不抢快捷键
+      const tgt = e.target as HTMLElement | null;
+      if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)) {
+        return;
+      }
+      if (key === "n") {
+        e.preventDefault();
+        handleRoute("projects");
+        setCurrentProject(null);
+      } else if (key === ",") {
+        e.preventDefault();
+        setSettingsOpen(true);
+      } else if (key === "1") {
+        e.preventDefault();
+        handleRoute("projects");
+      } else if (key === "2") {
+        e.preventDefault();
+        handleRoute("project");
+      } else if (key === "3") {
+        e.preventDefault();
+        handleRoute("assets");
+      } else if (key === "4") {
+        e.preventDefault();
+        handleRoute("skills");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [handleRoute, setCurrentProject]);
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-bg-base">
       <Sidebar
