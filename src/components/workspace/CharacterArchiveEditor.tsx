@@ -41,7 +41,7 @@ interface Props {
   /** 草稿模式：草稿改动时同步调,父层自己 debounce 后落盘 */
   onDraftChange: (patch: CharacterArchiveDraftPatch) => void;
   onDelete: () => void;
-  onApply: () => void;
+  onApply: (opts?: { focus?: boolean }) => void;
   /** reference 改动后通知上层 reload（拿新 referenceImageAssetIds） */
   onReferencesChanged: () => void;
   /** 保存状态,顶部 chip 展示 */
@@ -340,16 +340,25 @@ export default function CharacterArchiveEditor({
         )}
       </div>
 
-      {/* 底部：应用按钮 */}
+      {/* 底部：应用按钮 — O-6 拆成两个,主按钮自动 focus 输入框 */}
       <div className="px-4 py-2 border-t border-border bg-bg-panel flex items-center justify-end gap-2">
         <button
           type="button"
-          onClick={onApply}
+          onClick={() => onApply()}
+          disabled={!!validation}
+          className="flex items-center gap-1 px-3 py-1.5 rounded text-xs font-medium border border-border text-text-secondary hover:text-text-primary hover:bg-bg-hover disabled:opacity-40 disabled:cursor-not-allowed transition"
+          title="把这个档案设到 PromptBar,并切到对话 tab"
+        >
+          应用
+        </button>
+        <button
+          type="button"
+          onClick={() => onApply({ focus: true })}
           disabled={!!validation}
           className="flex items-center gap-1 px-3 py-1.5 rounded text-xs font-medium bg-accent text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition"
-          title="把这个档案设到 PromptBar（需要 PromptBar 在 chat / generate 模式）"
+          title="应用 + 切到对话 + 自动 focus 输入框(1 步到位)"
         >
-          应用到 PromptBar
+          应用并打字
           <ArrowRight className="w-3.5 h-3.5" />
         </button>
       </div>

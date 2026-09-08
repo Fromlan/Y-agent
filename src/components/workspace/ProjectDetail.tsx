@@ -621,11 +621,11 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
             onReload={() => reloadCharacterArchives()}
             selectedId={selectedArchiveIdInWorkshop}
             onSelectedIdChange={setSelectedArchiveIdInWorkshop}
-            onApplyToPromptBar={(id) => {
-              // M3.2.4: 角色工坊"应用"按钮真正接到 PromptBar
+            onApplyToPromptBar={(id, opts) => {
+              // M3.2.4 + O-6: 角色工坊"应用"按钮真正接到 PromptBar
               // - 写 selectedArchiveId 让 CharacterArchivePicker 同步高亮
               // - 切到 chat tab + chat 输入模式让用户立刻能 prompt
-              // - toast 提示而不是弹窗,保持轻量
+              // - O-6: focus=true 时 setTimeout focus 输入框,1 步到位
               if (id) {
                 setSelectedArchiveId(id);
                 setInputMode("chat");
@@ -633,9 +633,20 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
                 const archive = characterArchives.find((a) => a.id === id);
                 toast.success(
                   archive
-                    ? `已应用「${archive.name}」到 PromptBar（请到对话 tab 生图）`
+                    ? `已应用「${archive.name}」到 PromptBar${
+                        opts?.focus ? "（开始打字吧）" : ""
+                      }`
                     : `已应用档案到 PromptBar`,
                 );
+                if (opts?.focus) {
+                  // 等切到 chat + ChatMessageList 渲染后,再 focus 输入框
+                  window.setTimeout(() => {
+                    const ta = document.querySelector<HTMLTextAreaElement>(
+                      'textarea[placeholder*="画面"]',
+                    );
+                    ta?.focus();
+                  }, 50);
+                }
               } else {
                 setSelectedArchiveId(null);
                 toast.info("已清除档案选择");

@@ -55,7 +55,10 @@ interface Props {
   selectedId: string | null;
   onSelectedIdChange: (id: string | null) => void;
   /** "应用到 PromptBar" 时把 id 写回;上层负责写入 PromptBar 状态 */
-  onApplyToPromptBar?: (archiveId: string | null) => void;
+  onApplyToPromptBar?: (
+    archiveId: string | null,
+    opts?: { focus?: boolean }
+  ) => void;
 }
 
 export default function CharacterWorkshop({
@@ -250,12 +253,12 @@ export default function CharacterWorkshop({
   };
 
   // === 应用到 PromptBar ===
-  const onApply = async () => {
+  //  O-6: 拆成两个按钮 - "应用" / "应用并打字"
+  const onApply = async (opts?: { focus?: boolean }) => {
     if (!selected) return;
     // 应用前 flush,确保 PromptBar 拿到最新数据
     await flushPending();
-    onApplyToPromptBar?.(selected.id);
-    toast.success(`已应用「${selected.name}」到 PromptBar(请到对话 tab 生图)`);
+    onApplyToPromptBar?.(selected.id, opts);
   };
 
   // === 导出:split-button 支持 项目内 / 全部 ===
