@@ -53,6 +53,15 @@ Y-agent — 游戏美术 AI 工作台。Tauri 2 桌面应用，封装即梦（�
 - ESLint（`.eslintrc.cjs`）开 react-hooks 规则；改完代码后跑 `pnpm lint` + `pnpm test` + `pnpm build` 三件套
 - Rust 端改完后跑 `.\build-with-msvc.cmd` 验证编译
 
+## 工作区卫生
+
+- 改完代码跑完三件套后，**手动清掉本次产生的 `*.log` / `*.tmp` / `*.tsbuildinfo` / `dist/`**，避免下次 `git status` 看到一堆 ignore 的脏文件
+- 一次性验证脚本写 `scratch-*.cjs`（自动 ignore），**不要 commit**
+- 临时备忘写 `msg-*.txt`（自动 ignore），但定期归档到 `doc/issues/` 或删
+- `dist/` 是 `pnpm build` 产物；`src-tauri/target/` 是 cargo 产物；**都别 commit**
+- 发版时 `release-notes.md` 写在 `doc/releases/vX.Y.Z.md`
+- 大组件（>40KB `.tsx`）改完后必须**手动冒烟全 tab**，不能只靠 `pnpm build`
+
 ## Testing instructions
 
 - **有 Vitest 单测**（`src/**/*.test.ts`）。当前 18 个测试文件、262 个用例，覆盖 agent-memory / agent-router / logger / asset-payload / image-resolver / image-alpha-patch / asset-events / h3-context-ir / layer-view / layer-composite / jimeng / video / skill.guardrails / skill.parseAll / style-contract / types / runTool × 2 等纯函数模块。新增纯函数时配套加测试
