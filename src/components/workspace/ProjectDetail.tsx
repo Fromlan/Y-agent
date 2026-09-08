@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, useRef } from "react";
 import { KeyRound } from "lucide-react";
+import ProjectTabs, { type ProjectTab } from "@/components/workspace/ProjectTabs";
 import { useSession } from "@/lib/session";
 import { deleteAsset, backfillLocalAssets } from "@/lib/assets";
 import { renameProject } from "@/lib/projects";
@@ -619,6 +620,19 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
         onRename={onRename}
         onOpenMemory={() => setMemoryOpen(true)}
         onClearHistory={onClearHistory}
+      />
+
+      {/* M-1: 二级 nav — 对话/资产/角色/工具 */}
+      <ProjectTabs
+        active={tab as ProjectTab}
+        onChange={(t) => {
+          setTab(t);
+          // 同步 inputMode:tab 跟 inputMode 仍走原 useEffect 同步逻辑
+          // (inputMode 一变会同步 tab,所以这里反向 set 一次)
+          if (t === "tools") setInputMode("tools");
+          else if (t === "characters") setInputMode("characters");
+        }}
+        assetCount={assets.length}
       />
 
       {/* 主区 */}
