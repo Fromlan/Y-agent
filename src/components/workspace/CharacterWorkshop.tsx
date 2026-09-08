@@ -207,10 +207,21 @@ export default function CharacterWorkshop({
   const onCreate = async (scope: "project" | "global") => {
     // 新建前 flush
     await flushPending();
-    const draft = makeEmptyArchive(
-      scope,
-      scope === "project" ? projectId : null,
-    );
+    // 关键:M3.6 修 — makeEmptyArchive 默认 name="" 会触发前后端校验失败。
+    // 这里按当前 scope + 现有档案数生成一个默认名(用户随后在 Editor 里改)。
+    const sameScopeCount = archives.filter(
+      (a) =>
+        a.scope === scope &&
+        (scope === "global" || a.projectId === projectId),
+    ).length;
+    const defaultName =
+      scope === "global"
+        ? `全局档案 #${sameScopeCount + 1}`
+        : `新档案 #${sameScopeCount + 1}`;
+    const draft: import("@/lib/types").CharacterArchiveUpsert = {
+      ...makeEmptyArchive(scope, scope === "project" ? projectId : null),
+      name: defaultName,
+    };
     try {
       const row = await upsertCharacterArchive(draft);
       await onReload();

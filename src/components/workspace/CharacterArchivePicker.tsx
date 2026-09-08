@@ -49,7 +49,13 @@ export default function CharacterArchivePicker({
   // M3.3：点 popover 底部"新建全局档案"
   const onCreateGlobal = async () => {
     try {
-      const draft = makeEmptyArchive("global", null);
+      // M3.6 修 — makeEmptyArchive 默认 name="" 会触发校验失败,
+      // 这里给一个默认名,用户随后在工坊里改。
+      const sameScopeCount = archives.filter((a) => a.scope === "global").length;
+      const draft = {
+        ...makeEmptyArchive("global", null),
+        name: `全局档案 #${sameScopeCount + 1}`,
+      };
       const row = await upsertCharacterArchive(draft);
       toast.success("全局档案已创建（跨项目可见）");
       onArchiveChanged?.();
