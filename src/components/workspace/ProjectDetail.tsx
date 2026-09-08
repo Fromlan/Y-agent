@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, useRef } from "react";
-import { ArrowLeft, Brain, KeyRound, Trash2 } from "lucide-react";
+import { KeyRound } from "lucide-react";
 import { useSession } from "@/lib/session";
 import { deleteAsset, backfillLocalAssets } from "@/lib/assets";
 import { renameProject } from "@/lib/projects";
@@ -37,6 +37,7 @@ import ModeSwitch, { type InputMode } from "@/components/workspace/ModeSwitch";
 import ToolsTab from "@/components/workspace/ToolsTab";
 import AgentMemoryPanel from "@/components/workspace/AgentMemoryPanel";
 import CharacterWorkshop from "@/components/workspace/CharacterWorkshop";
+import ProjectHeader from "@/components/workspace/ProjectHeader";
 import { loadStyleContract, type StyleContract } from "@/lib/style-contract";
 import { log } from "@/lib/logger";
 
@@ -580,40 +581,14 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* 顶部条：flex-wrap 让窄屏不溢出；左侧整块都可点击改名（不再是只 300px 文字区） */}
-      <div className="min-h-12 py-2 flex items-center gap-3 px-4 border-b border-border bg-bg-panel flex-shrink-0 flex-wrap">
-        <button onClick={onBack} className="btn-icon" title="返回项目库">
-          <ArrowLeft className="w-4 h-4" />
-        </button>
-        <button
-          onClick={onRename}
-          className="flex-1 min-w-[200px] text-left group"
-          title="点击重命名"
-        >
-          <div className="text-sm font-medium text-text-primary group-hover:text-accent truncate">
-            {currentProject.name}
-          </div>
-          <div className="text-[11px] text-text-muted">
-            {assets.length} 个资产
-          </div>
-        </button>
-        <button
-          onClick={() => setMemoryOpen(true)}
-          className="btn text-xs h-7 px-2.5"
-          title="Agent 记忆（学到的画风偏好）"
-        >
-          <Brain className="w-3.5 h-3.5" />
-          记忆
-        </button>
-        <button
-          onClick={onClearHistory}
-          className="btn text-xs h-7 px-2.5"
-          title="清空对话历史"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-          清空对话
-        </button>
-      </div>
+      <ProjectHeader
+        projectName={currentProject.name}
+        assetCount={assets.length}
+        onBack={onBack}
+        onRename={onRename}
+        onOpenMemory={() => setMemoryOpen(true)}
+        onClearHistory={onClearHistory}
+      />
 
       {/* 主区 */}
       <div className="flex-1 overflow-hidden flex flex-col">
