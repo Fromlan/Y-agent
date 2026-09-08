@@ -24,6 +24,7 @@ import {
   Image,
   AlertTriangle,
   Sparkles,
+  ArrowRight,
 } from "lucide-react";
 import type { Asset, GeneratedImage } from "@/lib/types";
 import { assetVideoSource, flatAssetImages, imageInput } from "@/lib/types";
@@ -231,6 +232,14 @@ export default function AssetDetailDialog({
     } else {
       setSelectedLayerIdx(i);
     }
+  };
+
+  // M-5: 跳到该图层(切到 single 模式 + setIdx)
+  const onJumpToLayer = (i: number) => {
+    if (asset.isLayerDecomposition && viewMode === "composite") {
+      setViewMode("single");
+    }
+    setIdx(i);
   };
 
   // P0+：整体降级 — 如果非底图层 bbox 全缺,在合成模式下自动切到单图层。
@@ -838,6 +847,14 @@ export default function AssetDetailDialog({
                             className="flex flex-col gap-0.5 flex-shrink-0"
                             onClick={(e) => e.stopPropagation()}
                           >
+                            {/* M-5: 跳到此图层(切到 single + setIdx) */}
+                            <button
+                              onClick={() => onJumpToLayer(i)}
+                              className="btn-icon p-1 hover:!text-accent"
+                              title="跳到此图层（单图层视图）"
+                            >
+                              <ArrowRight className="w-3.5 h-3.5" />
+                            </button>
                             <button
                               onClick={() => toggleLayerVisible(i)}
                               className="btn-icon p-1"
