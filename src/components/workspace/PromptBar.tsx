@@ -13,6 +13,8 @@ import { MODEL_OPTIONS, modelCapabilities, type CharacterArchive, type ModelOpti
 import SizeSelect from "@/components/workspace/SizeSelect";
 import ModelSelect from "@/components/workspace/ModelSelect";
 import { pickImageAsDataUrl } from "@/lib/image-file";
+import { resolveImageUrl } from "@/lib/image-resolver";
+import { listAssets } from "@/lib/assets";
 import SkillPicker from "@/components/workspace/SkillPicker";
 import CharacterArchivePicker from "@/components/workspace/CharacterArchivePicker";
 import { CapabilityChip, QuantityGroup } from "@/components/workspace/CapabilityChip";
@@ -98,6 +100,8 @@ export default function PromptBar({
 }: Props) {
   const toast = useToast();
   const [showSkillPicker, setShowSkillPicker] = useState(false);
+  // M-7: 拖入资产时的视觉反馈
+  const [dragHover, setDragHover] = useState(false);
   const taRef = useAutoResizeTextarea(prompt, { minRows: 1, maxRows: 6 });
 
   // 能力位驱动：模型换了之后，不支持的开关要重置
@@ -127,6 +131,44 @@ export default function PromptBar({
     } catch (e: any) {
       toast.error(`读取图片失败：${e?.message ?? e}`);
     }
+  };
+
+  // M-7: 接受从 AssetCard 拖入的资产(text/plain = asset id)
+  const onDropAsset = async (assetId: string) => {
+    if (refs.length >= caps.maxInputImages) {
+      toast.warn(`当前模型最多 ${caps.maxInputImages} 张参考图`);
+      return;
+    }
+    try {
+      // 从项目所有资产里找(不只当前列表,保险)
+      const all = await listAssets(projectId);
+      const asset = all.find((a) => a.id === assetId);
+      if (!asset) {
+        toast.warn("未找到该资产");
+        return;
+      }
+      // 取主图 URL,resolve 成浏览器可读 src,再转 dataURL 喂给 refs
+      const url = asset.payload.localPaths?.[0] || asset.payload.urls?.[0] || "";
+      if (!url) {
+        toast.warn("该资产无可用图片");
+        return;
+      }
+      const resolved = await resolveImageUrl(url);
+      // resolveImageUrl 已经返回 asset:// URL,直接放 refs
+      setRefs((p) => [...p, resolved]);
+      toast.success(`已添加「${asset.prompt.slice(0, 20)}…」为参考图`);
+    } catch (e: any) {
+      toast.error(`添加参考图失败：${e?.message ?? e}`);
+    }
+  };
+
+  // 接受 text/uri-list 或直接是 URL/data: 的拖入
+  const onDropDataUrl = (url: string) => {
+    if (refs.length >= caps.maxInputImages) {
+      toast.warn(`当前模型最多 ${caps.maxInputImages} 张参考图`);
+      return;
+    }
+    setRefs((p) => [...p, url]);
   };
 
   // 监听输入：末尾是 / 触发 Skill picker
@@ -183,7 +225,41 @@ export default function PromptBar({
       )}
 
       <div className="flex items-end gap-2">
-        <div className="flex-1 panel px-3 py-2 space-y-2">
+        <div
+          className={`flex-1 panel px-3 py-2 space-y-2 relative transition-colors ${
+            dragHover ? "ring-2 ring-accent ring-offset-1 ring-offset-bg-base" : ""
+          }`}
+          onDragOver={(e) => {
+            // M-7: 接 asset drag
+            if (e.dataTransfer.types.includes("text/plain") ||
+                e.dataTransfer.types.includes("text/uri-list")) {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "copy";
+              if (!dragHover) setDragHover(true);
+            }
+          }}
+          onDragLeave={(e) => {
+            // 只有离开 panel 自身才清(子元素 dragleave 不会清)
+            if (e.currentTarget === e.target) setDragHover(false);
+          }}
+          onDrop={async (e) => {
+            e.preventDefault();
+            setDragHover(false);
+            // 1) text/plain (AssetCard drag) 解析 asset id
+            const assetId = e.dataTransfer.getData("text/plain") ||
+                            e.dataTransfer.getData("asset-id");
+            if (assetId) {
+              await onDropAsset(assetId);
+              return;
+            }
+            // 2) 浏览器拖图(text/uri-list / 直接 data:)
+            const uri = e.dataTransfer.getData("text/uri-list") ||
+                        e.dataTransfer.getData("text/plain");
+            if (uri && (uri.startsWith("data:") || uri.startsWith("http"))) {
+              onDropDataUrl(uri);
+            }
+          }}
+        >
           <textarea
             ref={taRef}
             value={prompt}
@@ -195,11 +271,19 @@ export default function PromptBar({
                 onSubmit();
               }
             }}
-            placeholder="描述画面，按 / 选 Skill；Ctrl+Enter 发送"
+            placeholder="描述画面，按 / 选 Skill；Ctrl+Enter 发送；可拖入资产作为参考图"
             rows={1}
             className="w-full bg-transparent text-sm text-text-primary placeholder:text-text-muted
               focus:outline-none resize-none leading-[20px]"
           />
+          {dragHover && (
+            <div className="absolute inset-0 flex items-center justify-center bg-accent/10
+              border-2 border-dashed border-accent rounded pointer-events-none z-10">
+              <span className="text-xs text-accent font-medium bg-bg-panel px-2 py-1 rounded">
+                放开以加入参考图
+              </span>
+            </div>
+          )}
           {/* 单行工具栏：参考 │ 角色 │ 模型/尺寸 */}
           <div className="flex items-center gap-1 pt-1.5 border-t border-border flex-wrap">
             <CompactButton

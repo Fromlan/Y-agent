@@ -422,7 +422,7 @@ export default function AssetCard({
         className={`relative cursor-pointer break-inside-avoid group ${
           selected ? "ring-2 ring-accent" : ""
         }`}
-        title={`${asset.prompt}（可拖到角色档案）`}
+        title={`${asset.prompt}（可拖到 PromptBar 加参考 / 拖到角色档案）`}
       >
         <div className="relative aspect-square bg-bg-elev rounded overflow-hidden border border-border">
           {isVideo ? (
