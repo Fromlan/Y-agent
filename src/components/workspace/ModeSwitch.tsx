@@ -15,6 +15,11 @@ interface Props {
  * - 生视频：直接调 MiniMax H3（异步轮询，资产入库）
  * - 工具：高级能力工作台（批量组图 / 联网 / 去背 / 图层 / 局部编辑）
  * - 角色：M3 角色工坊（角色档案 CRUD / 跨项目 / 一致性注入）
+ *
+ * 2026-09-08 (O-1 UX 优化) 改 icon-only:
+ * - 小屏不再换行(从 5×60+px 缩到 5×30px)
+ * - 标签通过 title tooltip 展示,降低视觉噪音
+ * - active 态用 accent 高亮 + 加底部细线
  */
 export default function ModeSwitch({ mode, onChange, disabled }: Props) {
   const items: { id: InputMode; label: string; icon: typeof ImageIcon; title: string }[] = [
@@ -51,22 +56,30 @@ export default function ModeSwitch({ mode, onChange, disabled }: Props) {
   ];
   return (
     <div className="inline-flex rounded-md border border-border bg-bg-panel p-0.5 text-xs">
-      {items.map(({ id, label, icon: Icon, title }) => (
-        <button
-          key={id}
-          onClick={() => onChange(id)}
-          disabled={disabled}
-          className={`flex items-center gap-1 px-2 py-1 rounded transition-colors ${
-            mode === id
-              ? "bg-bg-hover text-text-primary"
-              : "text-text-muted hover:text-text-secondary"
-          } ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
-          title={title}
-        >
-          <Icon className="w-3.5 h-3.5" />
-          {label}
-        </button>
-      ))}
+      {items.map(({ id, label, icon: Icon, title }) => {
+        const active = mode === id;
+        return (
+          <button
+            key={id}
+            onClick={() => onChange(id)}
+            disabled={disabled}
+            className={`relative flex items-center gap-1.5 px-2 py-1 rounded transition-colors ${
+              active
+                ? "bg-bg-hover text-text-primary"
+                : "text-text-muted hover:text-text-secondary"
+            } ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
+            title={`${label} — ${title}`}
+            aria-label={label}
+            aria-pressed={active}
+          >
+            <Icon className="w-3.5 h-3.5" />
+            <span className="hidden md:inline">{label}</span>
+            {active && (
+              <span className="absolute left-1.5 right-1.5 -bottom-0.5 h-0.5 rounded-full bg-accent" />
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }
