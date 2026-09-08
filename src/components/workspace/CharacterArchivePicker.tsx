@@ -107,7 +107,16 @@ export default function CharacterArchivePicker({
             ) : (
               <FolderOpen className="w-3 h-3" />
             )}
-            <span className="truncate max-w-[120px]">{selected.name}</span>
+            <span
+              className="truncate max-w-[180px]"
+              title={`${selected.name}${
+                selected.scope === "global" ? "（全局）" : ""
+              } · ${selected.referenceImageAssetIds.length} 张参考图${
+                selected.description ? ` · ${selected.description}` : ""
+              }`}
+            >
+              {selected.name}
+            </span>
             <span className="text-[10px] text-text-muted">·</span>
             <span className="text-[10px] text-text-muted">
               {selected.referenceImageAssetIds.length} 图
