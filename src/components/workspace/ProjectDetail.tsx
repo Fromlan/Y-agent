@@ -792,6 +792,27 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
                     // P3：局部编辑后入库的资产走 reload（保持排序与筛选一致）
                     reload({ silent: true });
                   }}
+                  // A-4: 视频资产 → 以视频 URL 作为参考图
+                  onUseVideoAsRef={(videoSrc) => {
+                    // 复用 M-6/M-7 类似的 localStorage 接力机制
+                    try {
+                      localStorage.setItem(
+                        "y-agent.pendingVideoRef",
+                        JSON.stringify({ url: videoSrc, ts: Date.now() })
+                      );
+                    } catch {
+                      // ignore
+                    }
+                    setInputMode("chat");
+                    setTab("chat");
+                    toast.info("已切换到对话,视频 URL 已加入参考图");
+                    setTimeout(() => {
+                      const ta = document.querySelector<HTMLTextAreaElement>(
+                        'textarea[placeholder*="画面"]'
+                      );
+                      ta?.focus();
+                    }, 50);
+                  }}
                 />
               )}
             </div>

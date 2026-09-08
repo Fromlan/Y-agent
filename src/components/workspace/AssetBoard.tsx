@@ -20,6 +20,8 @@ interface Props {
   onBatchDelete: (ids: string[]) => void | Promise<void>;
   /** P3：局部编辑生成新资产时通知父组件刷新列表 */
   onAssetCreated?: (asset: Asset) => void;
+  /** A-4: 视频 → 以视频为参考生图 */
+  onUseVideoAsRef?: (videoSrc: string) => void;
 }
 
 /**
@@ -37,6 +39,7 @@ export default function AssetBoard({
   onDelete,
   onBatchDelete,
   onAssetCreated,
+  onUseVideoAsRef,
 }: Props) {
   const toast = useToast();
 
@@ -254,6 +257,7 @@ export default function AssetBoard({
           onDownload={onDownload}
           onDelete={onDelete}
           onAssetCreated={onAssetCreated}
+          onUseVideoAsRef={onUseVideoAsRef}
         />
       )}
     </div>

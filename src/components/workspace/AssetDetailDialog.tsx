@@ -76,6 +76,8 @@ interface Props {
   onDelete: (id: string) => void;
   /** P3：局部编辑后生成新资产，通知上层刷新列表 */
   onAssetCreated?: (asset: Asset) => void;
+  /** A-4: 视频资产 → 以首帧为参考再生图 */
+  onUseVideoAsRef?: (videoSrc: string) => void;
 }
 
 /**
@@ -92,6 +94,7 @@ export default function AssetDetailDialog({
   onDownload,
   onDelete,
   onAssetCreated,
+  onUseVideoAsRef,
 }: Props) {
   const images = flatAssetImages(asset);
   const isVideo = asset.payload?.kind === "video";
@@ -341,9 +344,26 @@ export default function AssetDetailDialog({
                 视频资产 · {asset.payload.video?.resolution} · {asset.payload.video?.duration}s · {asset.payload.video?.ratio}
               </span>
             </div>
-            <button onClick={onClose} className="btn-icon">
-              <X className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-1.5">
+              {/* A-4: 以首帧为参考再生图 */}
+              {onUseVideoAsRef && videoSrc && (
+                <button
+                  onClick={() => {
+                    onUseVideoAsRef(videoSrc);
+                    onClose();
+                  }}
+                  className="btn btn-primary text-[11px] h-7 px-2.5"
+                  title="用此视频作为参考图,在对话 tab 继续生图"
+                >
+                  <ImageIcon className="w-3 h-3" />
+                  以此为参考生图
+                  <ArrowRight className="w-3 h-3" />
+                </button>
+              )}
+              <button onClick={onClose} className="btn-icon">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
           <div className="flex-1 flex items-center justify-center bg-black rounded overflow-hidden min-h-0">
             {videoSrc ? (

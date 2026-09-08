@@ -119,6 +119,35 @@ export default function PromptBar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model.id]);
 
+  // A-4: 监听 pendingVideoRef(A-4 视频资产点'以此为参考生图'触发)
+  // 一次性消费,加到 refs 后立刻清 localStorage
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("y-agent.pendingVideoRef");
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const url = parsed?.url;
+      if (typeof url === "string" && url) {
+        if (refs.length < caps.maxInputImages) {
+          setRefs((p) => [...p, url]);
+          toast.success("已添加视频作为参考图");
+        } else {
+          toast.warn(`当前模型最多 ${caps.maxInputImages} 张参考图`);
+        }
+      }
+    } catch {
+      // ignore
+    } finally {
+      try {
+        localStorage.removeItem("y-agent.pendingVideoRef");
+      } catch {
+        // ignore
+      }
+    }
+    // 只在 mount 时跑一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const onPickRef = async () => {
     try {
       const dataUrl = await pickImageAsDataUrl();

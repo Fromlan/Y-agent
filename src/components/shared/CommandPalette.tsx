@@ -173,7 +173,7 @@ export default function CommandPalette({ onRoute, onOpenSettings, onUseSkill }: 
         }
 
         setItems(built);
-      } catch (e) {
+      } catch {
         // ignore
       }
     })();

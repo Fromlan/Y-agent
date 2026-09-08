@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Sidebar, { type Route } from "@/components/layout/Sidebar";
 import Workspace from "@/components/workspace/Workspace";
 import SettingsPanel from "@/components/settings/SettingsPanel";
@@ -48,12 +48,12 @@ function AppShell() {
     }
   }, [currentProject, route]);
 
-  const handleRoute = (r: Route) => {
+  const handleRoute = useCallback((r: Route) => {
     if (r === "projects") {
       setCurrentProject(null);
     }
     setRoute(r);
-  };
+  }, [setCurrentProject]);
 
   const handleBackFromProject = () => {
     setCurrentProject(null);
