@@ -122,6 +122,37 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
 
   // 共享输入态
   const [prompt, setPrompt] = useState("");
+  // M-6: 进项目时从 Skill 中心带回的待注入 Skill(localStorage 接力)
+  // 一次性消费,读后立即清,避免下次进项目还残留
+  useEffect(() => {
+    if (!currentProject) return;
+    try {
+      const raw = localStorage.getItem("y-agent.pendingSkill");
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed?.id && typeof parsed.id === "string") {
+        setPrompt(`/${parsed.id} `);
+        setInputMode("chat");
+        setTab("chat");
+        // focus 输入框
+        window.setTimeout(() => {
+          const ta = document.querySelector<HTMLTextAreaElement>(
+            'textarea[placeholder*="画面"]'
+          );
+          ta?.focus();
+        }, 50);
+      }
+    } catch {
+      // ignore
+    } finally {
+      try {
+        localStorage.removeItem("y-agent.pendingSkill");
+      } catch {
+        // ignore
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentProject?.id]);
   const [refs, setRefs] = useState<string[]>([]);
   const [groupCount, setGroupCount] = useState(1);
   const [layerDecomp, setLayerDecomp] = useState(false);

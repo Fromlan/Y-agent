@@ -59,6 +59,13 @@ function AppShell() {
     setRoute("projects");
   };
 
+  // M-6: Skill 中心 → 在项目里用
+  const handleJumpToProject = () => {
+    if (currentProject) {
+      setRoute("project");
+    }
+  };
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-bg-base">
       <Sidebar
@@ -71,6 +78,7 @@ function AppShell() {
           route={route}
           onBackFromProject={handleBackFromProject}
           onOpenSettings={() => setSettingsOpen(true)}
+          onJumpToProject={handleJumpToProject}
         />
       </main>
       <SettingsPanel

@@ -10,10 +10,17 @@ import {
   ImageIcon,
   Layers,
   CheckCircle2,
+  ArrowRight,
 } from "lucide-react";
 import { useToast } from "@/components/shared/Toast";
 import { loadBuiltinSkills, type Skill } from "@/lib/skill";
 import { useSession } from "@/lib/session";
+
+/** M-6: 项目内 PromptBar 通过这个键读取待注入的 Skill
+ * - SkillDetail 写 → ProjectDetail 渲染时读 → 注入到 prompt
+ * - 一次性消费(读后立刻清)
+ */
+const PENDING_SKILL_KEY = "y-agent.pendingSkill";
 
 /**
  * Skill 中心
@@ -23,7 +30,12 @@ import { useSession } from "@/lib/session";
  * - 复制 trigger 词、复制模板正文
  * - 选完 Skill 后可"跳到当前项目去用"（设置 currentProject 路由到 project）
  */
-export default function SkillCenterPage() {
+interface SkillCenterProps {
+  /** M-6: 跳到项目路由的回调 */
+  onJumpToProject?: () => void;
+}
+
+export default function SkillCenterPage({ onJumpToProject }: SkillCenterProps) {
   const toast = useToast();
   const { currentProject } = useSession();
 
@@ -163,7 +175,27 @@ export default function SkillCenterPage() {
         {/* 右侧：详情面板 */}
         <div className="flex-1 overflow-y-auto">
           {selected ? (
-            <SkillDetail key={selected.id} skill={selected} onCopyToast={toast} />
+            <SkillDetail
+              key={selected.id}
+              skill={selected}
+              onCopyToast={toast}
+              hasProject={!!currentProject}
+              onUseInProject={() => {
+                if (currentProject && onJumpToProject) {
+                  // 写 pending skill + 切路由 → ProjectDetail 渲染时读出来注入 prompt
+                  try {
+                    localStorage.setItem(
+                      PENDING_SKILL_KEY,
+                      JSON.stringify({ id: selected.id, ts: Date.now() })
+                    );
+                  } catch {
+                    // ignore
+                  }
+                  onJumpToProject();
+                  toast.success(`已切到项目「${currentProject.name}」并预填 /${selected.id}`);
+                }
+              }}
+            />
           ) : (
             <div className="h-full flex items-center justify-center text-text-muted text-sm">
               从左侧选择一个 Skill
@@ -178,9 +210,13 @@ export default function SkillCenterPage() {
 function SkillDetail({
   skill,
   onCopyToast,
+  hasProject,
+  onUseInProject,
 }: {
   skill: Skill;
   onCopyToast: ReturnType<typeof useToast>;
+  hasProject: boolean;
+  onUseInProject: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const [triggerCopied, setTriggerCopied] = useState<string | null>(null);
@@ -294,21 +330,34 @@ function SkillDetail({
           <h3 className="text-[10px] text-text-muted uppercase tracking-wider">
             模板正文
           </h3>
-          <button
-            onClick={onCopyTemplate}
-            className="btn text-xs h-7 px-2.5"
-            title="复制模板正文到剪贴板"
-          >
-            {copied ? (
-              <>
-                <Check className="w-3.5 h-3.5" /> 已复制
-              </>
-            ) : (
-              <>
-                <Copy className="w-3.5 h-3.5" /> 复制
-              </>
+          <div className="flex items-center gap-1.5">
+            {/* M-6: 一键用到项目（仅在有当前项目时显示） */}
+            {hasProject && (
+              <button
+                onClick={onUseInProject}
+                className="btn btn-primary text-xs h-7 px-2.5"
+                title={`在「${skill.name}」中预填 /${skill.id} 并切到当前项目`}
+              >
+                在项目里用
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             )}
-          </button>
+            <button
+              onClick={onCopyTemplate}
+              className="btn text-xs h-7 px-2.5"
+              title="复制模板正文到剪贴板"
+            >
+              {copied ? (
+                <>
+                  <Check className="w-3.5 h-3.5" /> 已复制
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5" /> 复制
+                </>
+              )}
+            </button>
+          </div>
         </div>
         <pre className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap
           bg-bg-elev border border-border rounded-md p-3 max-h-[420px] overflow-y-auto font-mono">

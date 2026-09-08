@@ -9,9 +9,11 @@ interface Props {
   route: Route;
   onBackFromProject: () => void;
   onOpenSettings: () => void;
+  /** M-6: 从 Skill 中心切到项目路由 */
+  onJumpToProject: () => void;
 }
 
-export default function Workspace({ route, onBackFromProject, onOpenSettings }: Props) {
+export default function Workspace({ route, onBackFromProject, onOpenSettings, onJumpToProject }: Props) {
   switch (route) {
     case "projects":
       return <ProjectsPage />;
@@ -20,6 +22,6 @@ export default function Workspace({ route, onBackFromProject, onOpenSettings }: 
     case "assets":
       return <AssetCenterPage />;
     case "skills":
-      return <SkillCenterPage />;
+      return <SkillCenterPage onJumpToProject={onJumpToProject} />;
   }
 }
