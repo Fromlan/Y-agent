@@ -444,3 +444,25 @@ export function downloadArchiveJson(filename: string, json: string): void {
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+// ============================================================================
+// M3.6 时间格式化(从 CharacterArchiveList 提到 lib 层,供 Picker / 详情复用)
+// ============================================================================
+
+/**
+ * 把 updatedAt 毫秒时间戳格式化为「刚刚 / N 分钟前 / N 小时前 / N 天前 / 具体日期」。
+ * - < 1 分钟 → 刚刚
+ * - < 1 小时 → N 分钟前
+ * - < 1 天   → N 小时前
+ * - < 7 天   → N 天前
+ * - 其它     → 形如 2026-09-08 的本地日期
+ */
+export function formatArchiveUpdated(ms: number): string {
+  if (!ms) return "—";
+  const diff = Date.now() - ms;
+  if (diff < 60_000) return "刚刚";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
+  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)} 天前`;
+  return new Date(ms).toLocaleDateString("zh-CN");
+}

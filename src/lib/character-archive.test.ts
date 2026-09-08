@@ -1,8 +1,8 @@
 /**
  * M3 角色档案纯函数层测试
- * 覆盖：query / sort / aggregate / validate / makeEmpty / isReferenced / summarize
+ * 覆盖：query / sort / aggregate / validate / makeEmpty / isReferenced / summarize / formatArchiveUpdated
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   queryCharacterArchives,
   sortByUpdated,
@@ -13,6 +13,7 @@ import {
   findArchivesReferencingAsset,
   summarizeArchivesForPrompt,
   renderCharacterArchive,
+  formatArchiveUpdated,
   CHARACTER_ARCHIVE_LIMITS,
   DEFAULT_SCOPE_QUERY,
 } from "@/lib/character-archive";
@@ -438,5 +439,43 @@ describe("renderCharacterArchive", () => {
     expect(out).not.toContain("名称：");
     expect(out).not.toContain("[用户补充]");
     expect(out).toContain("描述：desc");
+  });
+});
+
+describe("formatArchiveUpdated", () => {
+  // 用 fake timer 锁住 Date.now() 避免边界 case 抖
+  const NOW = 1_700_000_000_000;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("0 毫秒返回「—」", () => {
+    expect(formatArchiveUpdated(0)).toBe("—");
+  });
+
+  it("< 1 分钟返回「刚刚」", () => {
+    expect(formatArchiveUpdated(NOW - 30_000)).toBe("刚刚");
+  });
+
+  it("< 1 小时返回「N 分钟前」", () => {
+    expect(formatArchiveUpdated(NOW - 5 * 60_000)).toBe("5 分钟前");
+  });
+
+  it("< 1 天返回「N 小时前」", () => {
+    expect(formatArchiveUpdated(NOW - 3 * 3_600_000)).toBe("3 小时前");
+  });
+
+  it("< 7 天返回「N 天前」", () => {
+    expect(formatArchiveUpdated(NOW - 2 * 86_400_000)).toBe("2 天前");
+  });
+
+  it(">= 7 天返回本地日期字符串", () => {
+    const out = formatArchiveUpdated(NOW - 10 * 86_400_000);
+    // zh-CN locale 的 toLocaleDateString 形如 "2023/9/28" 或 "2023-09-28"
+    expect(out).toMatch(/\d{4}[/-]\d{1,2}[/-]\d{1,2}/);
   });
 });

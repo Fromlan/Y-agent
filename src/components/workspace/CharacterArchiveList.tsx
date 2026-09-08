@@ -11,7 +11,11 @@
 import { useMemo, useState } from "react";
 import { Search, Plus, Globe, FolderOpen, User, ChevronDown } from "lucide-react";
 import type { CharacterArchive } from "@/lib/types";
-import { aggregateAllTags, queryCharacterArchives } from "@/lib/character-archive";
+import {
+  aggregateAllTags,
+  formatArchiveUpdated,
+  queryCharacterArchives,
+} from "@/lib/character-archive";
 
 interface Props {
   archives: CharacterArchive[];
@@ -27,16 +31,6 @@ interface Props {
   /** M3.3：是否只看本项目档案（默认 false = 含全局） */
   onlyProject?: boolean;
   onOnlyProjectChange?: (v: boolean) => void;
-}
-
-function formatUpdated(ms: number): string {
-  if (!ms) return "—";
-  const diff = Date.now() - ms;
-  if (diff < 60_000) return "刚刚";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
-  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)} 天前`;
-  return new Date(ms).toLocaleDateString("zh-CN");
 }
 
 export default function CharacterArchiveList({
@@ -228,7 +222,7 @@ export default function CharacterArchiveList({
                       )}
                       <div className="flex items-center gap-2 mt-1">
                         <span className="text-[10px] text-text-muted">
-                          {formatUpdated(a.updatedAt)}
+                          {formatArchiveUpdated(a.updatedAt)}
                         </span>
                         {a.referenceImageAssetIds.length > 0 && (
                           <span className="text-[10px] text-text-muted">
