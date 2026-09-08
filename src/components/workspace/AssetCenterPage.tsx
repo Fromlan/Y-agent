@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ImageIcon, RefreshCw, Filter } from "lucide-react";
+import { ImageIcon, RefreshCw, Filter, Search, X } from "lucide-react";
 import { useToast } from "@/components/shared/Toast";
 import { useSession } from "@/lib/session";
 import { listProjects } from "@/lib/projects";
@@ -11,6 +11,9 @@ import {
 } from "@/lib/asset-events";
 import type { Asset, Project } from "@/lib/types";
 import AssetBoard from "@/components/workspace/AssetBoard";
+
+/** 资产中心项目筛选记忆 key */
+const FILTER_KEY = "y-agent.assetCenter.filter";
 
 /**
  * 资产中心（全局视图）
@@ -26,7 +29,20 @@ export default function AssetCenterPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(new Set());
+  const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(() => {
+    // M-4: 记忆上次选中的项目筛选
+    try {
+      const raw = localStorage.getItem(FILTER_KEY);
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) return new Set(arr);
+      }
+    } catch {
+      // ignore
+    }
+    return new Set();
+  });
+  const [projectSearch, setProjectSearch] = useState("");
 
   const projectNameById = useMemo(() => {
     const m = new Map<string, string>();
@@ -164,11 +180,31 @@ export default function AssetCenterPage() {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      // M-4: 记忆到 localStorage
+      try {
+        localStorage.setItem(FILTER_KEY, JSON.stringify([...next]));
+      } catch {
+        // ignore quota
+      }
       return next;
     });
   };
 
-  const clearProjectFilter = () => setSelectedProjectIds(new Set());
+  const clearProjectFilter = () => {
+    setSelectedProjectIds(new Set());
+    try {
+      localStorage.removeItem(FILTER_KEY);
+    } catch {
+      // ignore
+    }
+  };
+
+  // M-4: 项目搜索过滤
+  const filteredProjects = useMemo(() => {
+    const q = projectSearch.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter((p) => p.name.toLowerCase().includes(q));
+  }, [projects, projectSearch]);
 
   const onJumpToProject = (id: string) => {
     const p = projects.find((x) => x.id === id);
@@ -210,9 +246,9 @@ export default function AssetCenterPage() {
         </button>
       </header>
 
-      {/* 项目筛选条 */}
+      {/* 项目筛选条 — M-4 加搜索框 */}
       {projects.length > 0 && (
-        <div className="px-4 py-2 border-b border-border flex items-center gap-2 flex-shrink-0 overflow-x-auto">
+        <div className="px-4 py-2 border-b border-border flex items-center gap-2 flex-shrink-0 flex-wrap">
           <Filter className="w-3.5 h-3.5 text-text-muted flex-shrink-0" />
           <span className="text-[10px] text-text-muted uppercase tracking-wider flex-shrink-0">
             项目
@@ -220,20 +256,43 @@ export default function AssetCenterPage() {
           <Chip active={selectedProjectIds.size === 0} onClick={clearProjectFilter}>
             全部
           </Chip>
-          {projects.map((p) => {
-            const count = assets.filter((a) => a.projectId === p.id).length;
-            return (
-              <Chip
-                key={p.id}
-                active={selectedProjectIds.has(p.id)}
-                onClick={() => toggleProject(p.id)}
-                title={`${p.name} · ${count} 个资产`}
+          <div className="relative">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-text-muted" />
+            <input
+              value={projectSearch}
+              onChange={(e) => setProjectSearch(e.target.value)}
+              placeholder="搜索项目…"
+              className="pl-7 pr-6 py-0.5 text-[11px] rounded border border-border bg-bg text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent w-32"
+            />
+            {projectSearch && (
+              <button
+                onClick={() => setProjectSearch("")}
+                className="absolute right-1 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary"
+                title="清空搜索"
               >
-                {p.name}
-                <span className="ml-1 text-text-muted">{count}</span>
-              </Chip>
-            );
-          })}
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
+            {filteredProjects.map((p) => {
+              const count = assets.filter((a) => a.projectId === p.id).length;
+              return (
+                <Chip
+                  key={p.id}
+                  active={selectedProjectIds.has(p.id)}
+                  onClick={() => toggleProject(p.id)}
+                  title={`${p.name} · ${count} 个资产`}
+                >
+                  {p.name}
+                  <span className="ml-1 text-text-muted">{count}</span>
+                </Chip>
+              );
+            })}
+            {filteredProjects.length === 0 && projectSearch && (
+              <span className="text-[11px] text-text-muted">没有匹配的项目</span>
+            )}
+          </div>
         </div>
       )}
 
