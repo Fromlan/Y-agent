@@ -2,6 +2,12 @@
 
 Y-agent — 游戏美术 AI 工作台。Tauri 2 桌面应用，封装即梦（豆包 Seedream）图像生成 API，提供 LLM 驱动的 Agent 对话模式。
 
+## 阶段状态
+
+- **M2 v0.2.0 — shipped**:Agent 对话 + 15 个 Skill + Agent Memory + 5.0 Pro 图层 + 跨重启找回
+- **M3 角色工坊 — shipped(M3.1-M3.5)**:`src/lib/character-archive.ts` 角色档案 CRUD + 跨项目 scope + 6 张参考图附件 + 导入导出 + Agent 工具 `character_use_archive` + 4 个角色类 Skill(`character-sheet` / `character-turnaround` / `expression-grid` / `character-consistency-set`)用 `{{character_archive}}` 占位符
+- **M3.6 角色工坊优化(进行中)**:Workshop 改为受控组件,Editor 加 savingStatus chip + 切档案 flushPending 防丢草稿,Picker projectId 真实化,Tauri IPC `CharacterArchiveRow` 自定义 Serialize 修 `tags_json` 字段名错配,加 ErrorBoundary 兜底
+
 ## Setup commands
 
 - Install deps: `pnpm install`
