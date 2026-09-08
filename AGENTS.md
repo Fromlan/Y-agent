@@ -39,8 +39,9 @@ Y-agent — 游戏美术 AI 工作台。Tauri 2 桌面应用，封装即梦（�
 - `src-tauri/` — Rust 后端（Tauri 2 + reqwest + rusqlite + aes-gcm）
   - `src-tauri/capabilities/` — Tauri 权限声明
   - `src-tauri/icons/` — 应用图标（多平台）
-- `doc/` — 项目文档（`plan-jimeng-full-integration.md` / `api-integration.md` / `development.md` / `release.md`）
+- `doc/` — 项目文档(`plan-jimeng-full-integration.md` / `api-integration.md` / `development.md` / `release.md`)
 - `public/` — 静态资源
+- `brand/` — 品牌资产(`BRAND.md` 规范 + logo/appicon/wordmark JPG/PNG);`_internal/` 是 prompt 模板 + 重新生成脚本,非品牌资产本身
 - `dev-with-msvc.cmd` / `build-with-msvc.cmd` — Windows MSVC 环境包装脚本
 
 ## Code style
