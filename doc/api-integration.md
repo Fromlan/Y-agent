@@ -959,12 +959,12 @@ try {
 
 ## Part 5. 接下来要读
 
-- [architecture.md](./architecture.md) — 系统全貌
-- [agent-system.md](./agent-system.md) — Agent 引擎 / Router / Memory
 - [development.md](./development.md) — 怎么 setup / build / test
+- [plan-m3-character-workshop.md](./plan-m3-character-workshop.md) — M3 角色工坊（M3.1–M3.5 已 shipped，作为"为什么这么设计"的历史参考）
+- [README.md](../README.md) — 项目入口（路线图 / 快速试用 / 文档索引）
 
 
-## Part 7. MiniMax H3 视频 API（P8 新增）
+## Part 6. MiniMax H3 视频 API（P8 新增）
 
 > 数据源：`src/lib/video.ts`（前端） + `src-tauri/src/video.rs`（Rust 端）。
 > 后端 `src-tauri/src/commands.rs::poll_video_task` 异步轮询，事件名 `jimeng_video://{progress|succeeded|failed|cancelled}`。
@@ -1246,7 +1246,7 @@ type OptimizeReason =
 | `src/components/workspace/AssetDetailDialog.tsx:374-407` | 视频资产下的「AI 增强」collapsible 面板 |
 
 
-## Part 8. 角色档案 CharacterArchive（M3 · 跨项目一致性）
+## Part 7. 角色档案 CharacterArchive（M3 · 跨项目一致性）
 
 > 数据源：`src/lib/character-archive.ts`（前端纯函数层 + IPC） + `src/lib/types.ts:316-371`（类型） + `src-tauri/src/commands.rs:2234-2400`（7 个 Tauri command）。
 > 角色档案是「跨项目可复用的角色一致性资产」：同一角色多视角 / 表情 / 动作 / 场景矩阵都自动一致。
