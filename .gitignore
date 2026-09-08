@@ -53,6 +53,12 @@ src-tauri/WixTools
 # (GitHub 硬限制 100MB/单文件。本地保留,版本管理靠网盘)
 # doc/MiniMax Design - 新手指南/
 
+# ===== HyperFrames product demo video (generated artifact) =====
+# 历史：2026-09-08 之前 hyperframes-video/ 是 5MB+ untracked 子项目
+# (HyperFrames CLI 渲染产物,含 renders/video.mp4 + node_modules + debug-frames)
+# 物理删除后规则保留,防止未来重新生成时再被误跟踪
+hyperframes-video/
+
 # ===== Local config & secrets =====
 .env
 .env.local
