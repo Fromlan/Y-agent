@@ -16,7 +16,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   X,
-  Trash2,
   Copy,
   Check,
   ArrowRight,
@@ -32,6 +31,7 @@ import {
   validateArchiveUpsert,
 } from "@/lib/character-archive";
 import CharacterReferenceGrid from "@/components/workspace/CharacterReferenceGrid";
+import ConfirmDelete from "@/components/shared/ConfirmDelete";
 import type { CharacterArchiveDraftPatch } from "@/components/workspace/CharacterWorkshop";
 
 interface Props {
@@ -64,7 +64,6 @@ export default function CharacterArchiveEditor({
   const [tagsInput, setTagsInput] = useState("");
   const [tags, setTags] = useState<string[]>(archive.tags);
   const [copied, setCopied] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
 
   // archive 切换时重置本地草稿
   useEffect(() => {
@@ -73,7 +72,6 @@ export default function CharacterArchiveEditor({
     setPromptSnippet(archive.promptSnippet);
     setTags(archive.tags);
     setTagsInput("");
-    setConfirmDelete(false);
   }, [archive.id, archive.name, archive.description, archive.promptSnippet, archive.tags]);
 
   // 校验：把所有字段组合成 upsert，跑 validateArchiveUpsert
@@ -210,37 +208,13 @@ export default function CharacterArchiveEditor({
           </span>
         )}
         <div className="flex-1" />
-        {confirmDelete ? (
-          <>
-            <button
-              type="button"
-              onClick={() => setConfirmDelete(false)}
-              aria-label="取消删除"
-              className="text-[10px] px-2 py-0.5 rounded text-text-secondary hover:text-text-primary"
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              onClick={onDelete}
-              aria-label={`确认删除档案 ${archive.name}`}
-              className="text-[10px] px-2 py-0.5 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20"
-            >
-              确认删除
-            </button>
-          </>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setConfirmDelete(true)}
-            aria-label={`删除档案 ${archive.name}`}
-            className="text-[10px] text-text-muted hover:text-red-400 flex items-center gap-0.5"
-            title="删除档案（不会删除参考图本身）"
-          >
-            <Trash2 className="w-3 h-3" />
-            删除
-          </button>
-        )}
+        <ConfirmDelete
+          onDelete={onDelete}
+          itemName={`档案「${archive.name}」`}
+          extraWarning="不会删除参考图本身。"
+          size="regular"
+          title="删除档案"
+        />
       </div>
 
       {/* 主表单 */}

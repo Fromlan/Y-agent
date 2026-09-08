@@ -3,7 +3,6 @@ import {
   Layers,
   Copy,
   Download,
-  Trash2,
   Check,
   ImageIcon,
   Droplet,
@@ -15,7 +14,7 @@ import {
 import type { Asset, GeneratedImage } from "@/lib/types";
 import { assetMainImage, assetVideoSource, flatAssetImages, imageInput } from "@/lib/types";
 import { resolveImageUrlSync } from "@/lib/image-resolver";
-import { useToast } from "@/components/shared/Toast";
+import ConfirmDelete from "@/components/shared/ConfirmDelete";
 import SafeImage from "@/components/shared/SafeImage";
 import {
   layerRectNormalized,
@@ -380,12 +379,10 @@ export default function AssetCard({
   onDownload,
   onDelete,
 }: Props) {
-  const toast = useToast();
   const main = assetMainImage(asset);
   const isVideo = asset.payload?.kind === "video";
   const videoSrc = isVideo ? resolveImageUrlSync(assetVideoSource(asset)) : "";
   const [hover, setHover] = useState(false);
-  const [confirmDel, setConfirmDel] = useState(false);
 
   const onClick = () => {
     if (selectMode) {
@@ -395,16 +392,7 @@ export default function AssetCard({
     if (main) onOpenPreview(asset);
   };
 
-  const onDeleteClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!confirmDel) {
-      setConfirmDel(true);
-      setTimeout(() => setConfirmDel(false), 2500);
-      toast.warn("再点一次确认删除");
-      return;
-    }
-    onDelete(asset.id);
-  };
+  const handleDelete = () => onDelete(asset.id);
 
   const onCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -586,17 +574,11 @@ export default function AssetCard({
                   </button>
                 )}
                 <div className="flex-1" />
-                <button
-                  onClick={onDeleteClick}
-                  className={`p-1 rounded text-white ${
-                    confirmDel
-                      ? "bg-red-500/80"
-                      : "bg-black/60 hover:bg-red-500/80"
-                  }`}
-                  title="删除"
-                >
-                  <Trash2 className="w-3 h-3" />
-                </button>
+                <ConfirmDelete
+                  onDelete={handleDelete}
+                  itemName="此资产"
+                  title="删除资产"
+                />
               </div>
             </div>
           )}
@@ -715,15 +697,11 @@ export default function AssetCard({
                 </button>
               )}
               <div className="flex-1" />
-              <button
-                onClick={onDeleteClick}
-                className={`p-1 rounded text-white ${
-                  confirmDel ? "bg-red-500/80" : "bg-black/60 hover:bg-red-500/80"
-                }`}
-                title="删除"
-              >
-                <Trash2 className="w-3 h-3" />
-              </button>
+              <ConfirmDelete
+                onDelete={handleDelete}
+                itemName="此资产"
+                title="删除资产"
+              />
             </div>
           </div>
         )}
