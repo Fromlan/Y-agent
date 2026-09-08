@@ -148,7 +148,11 @@ export default function CharacterArchiveEditor({
               ? "bg-accent/10 text-accent"
               : "bg-bg-hover text-text-secondary"
           }`}
-          title={archive.scope === "global" ? "全局档案：跨项目可见" : "项目档案：仅本项目可见"}
+          title={
+            archive.scope === "global"
+              ? "全局档案：跨所有项目可见,在任意项目的 PromptBar 都能选"
+              : "项目档案：只在本项目可见,其他项目看不到"
+          }
         >
           {archive.scope === "global" ? (
             <Globe className="w-3 h-3" />

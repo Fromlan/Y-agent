@@ -72,23 +72,23 @@ export default function CharacterArchiveList({
     <div className="flex flex-col h-full bg-bg-panel border-r border-border">
       {/* 顶部：搜索 + 新建 */}
       <div className="p-3 border-b border-border space-y-2">
-        {/* 新建按钮：分裂成"项目 / 全局"两选项 */}
+        {/* 新建按钮：分裂成"项目 / 全局"两选项 (A-5 scope 解释前置) */}
         <div className="relative">
           <div className="flex">
             <button
               type="button"
               onClick={() => onCreate("project")}
               className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-l text-xs font-medium bg-accent text-white hover:opacity-90 transition"
-              title="在本项目内可见的角色档案"
+              title="项目档案：仅本项目可见"
             >
               <Plus className="w-3.5 h-3.5" />
-              新建项目档案
+              新建档案
             </button>
             <button
               type="button"
               onClick={() => setShowCreateMenu((v) => !v)}
               className="px-2 py-1.5 rounded-r border-l border-white/20 bg-accent text-white hover:opacity-90 transition"
-              title="更多新建选项"
+              title="更多 scope 选项"
             >
               <ChevronDown className="w-3.5 h-3.5" />
             </button>
@@ -98,16 +98,30 @@ export default function CharacterArchiveList({
               <button
                 type="button"
                 onClick={() => {
+                  onCreate("project");
+                  setShowCreateMenu(false);
+                }}
+                className="w-full flex items-start gap-1.5 px-3 py-1.5 text-xs hover:bg-bg-hover text-left"
+              >
+                <Plus className="w-3 h-3 text-text-muted flex-shrink-0 mt-0.5" />
+                <div>
+                  <div>项目档案</div>
+                  <div className="text-[10px] text-text-muted">仅本项目可见</div>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
                   onCreate("global");
                   setShowCreateMenu(false);
                 }}
-                className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs hover:bg-bg-hover text-left"
+                className="w-full flex items-start gap-1.5 px-3 py-1.5 text-xs hover:bg-bg-hover text-left"
               >
-                <Globe className="w-3 h-3 text-accent" />
-                新建全局档案
-                <span className="text-[10px] text-text-muted ml-auto">
-                  跨项目可见
-                </span>
+                <Globe className="w-3 h-3 text-accent flex-shrink-0 mt-0.5" />
+                <div>
+                  <div>全局档案</div>
+                  <div className="text-[10px] text-text-muted">跨所有项目可见</div>
+                </div>
               </button>
             </div>
           )}
