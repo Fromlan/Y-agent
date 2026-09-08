@@ -185,7 +185,7 @@ export default function CharacterReferenceGrid({
         ))}
       </div>
       <p className="text-[10px] text-text-muted mt-1">
-        从「资产」tab 生成图片后回这里点「添加参考图」；后续 AssetCard 会支持直接拖入。
+        从「资产」tab 拖入图片即可;或点「添加参考图」从列表里选。
       </p>
 
       {showPicker && (

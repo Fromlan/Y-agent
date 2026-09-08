@@ -1,26 +1,17 @@
 /**
  * M3 角色工坊主页（2-pane 布局：列表 + 编辑器）
  *
- * 职责：
- * - 加载 / 缓存当前项目可见的档案列表（IPC）
- * - 选中档案的草稿态（本地 useState，自动防抖落盘）
- * - 新建 / 删除 / 更新（含校验失败时不发 IPC）
- * - "应用到 PromptBar"通过回调让上层（ProjectDetail）写入 PromptBar 状态
- *
- * 数据流：
- *   list_character_archives(projectId) → CharacterArchive[]
- *   ↓ queryCharacterArchives (scope / tag / search 过滤)
- *   CharacterArchiveList 渲染
- *   ↓ 选中
- *   CharacterArchiveEditor 编辑
- *   ↓ 防抖 500ms
- *   upsert_character_archive(input)
- *   ↓
- *   重新 listCharacterArchives 拿新行（含 createdAt / updatedAt）
+ * M3.6 改造要点：
+ * - 数据流去重：archives / loading / reload 由上层 ProjectDetail 持有 + 透传。
+ *   Workshop 内部不再调 listCharacterArchives,只是消费 props + 调 onReload。
+ * - 草稿不丢：切档案 / 卸载前先 flushPending,把当前草稿立即落盘。
+ * - 错误可见：校验失败 / IPC 失败 → toast.error,不再静默 return。
+ * - 保存状态：savingStatus chip(saving / saved / error)提示用户。
+ * - 顶部条整理:导出 split-button(项目内 / 全部);导入按钮加 tooltip。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/shared/Toast";
-import { Download, Upload } from "lucide-react";
+import { Download, Upload, ChevronDown } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
   Asset,
@@ -31,7 +22,6 @@ import {
   buildArchiveExportJson,
   deleteCharacterArchive,
   downloadArchiveJson,
-  listCharacterArchives,
   makeEmptyArchive,
   parseArchiveExportJson,
   upsertCharacterArchive,
@@ -40,144 +30,241 @@ import {
 import CharacterArchiveList from "@/components/workspace/CharacterArchiveList";
 import CharacterArchiveEditor from "@/components/workspace/CharacterArchiveEditor";
 
+/** 编辑器向上传的草稿字段(标量,不再包 Partial) */
+export interface CharacterArchiveDraftPatch {
+  name: string;
+  description: string;
+  promptSnippet: string;
+  tags: string[];
+}
+
+/** 保存状态指示 */
+type SavingStatus = "idle" | "saving" | "saved" | "error";
+
 interface Props {
   projectId: string;
-  /** 项目下所有资产（reference grid 用） */
+  /** 项目下所有资产(reference grid 用) */
   assets: Asset[];
-  /** "应用到 PromptBar" 时把 id 写回；上层负责写入 PromptBar 状态 */
+  /** 上层持有的 archives(单一源);Workshop 是消费方 */
+  archives: CharacterArchive[];
+  /** 数据加载中(上层控制) */
+  loading: boolean;
+  /** 让上层重新拉 archives(走 IPC);所有写操作(新建/删除/upsert)完成后调用 */
+  onReload: () => Promise<void>;
+  /** 当前选中的档案 id */
+  selectedId: string | null;
+  onSelectedIdChange: (id: string | null) => void;
+  /** "应用到 PromptBar" 时把 id 写回;上层负责写入 PromptBar 状态 */
   onApplyToPromptBar?: (archiveId: string | null) => void;
 }
 
 export default function CharacterWorkshop({
   projectId,
   assets,
+  archives,
+  loading,
+  onReload,
+  selectedId,
+  onSelectedIdChange,
   onApplyToPromptBar,
 }: Props) {
   const toast = useToast();
-  const [archives, setArchives] = useState<CharacterArchive[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchName, setSearchName] = useState("");
   const [tagFilter, setTagFilter] = useState<string[]>([]);
-  // M3.3：是否只看本项目档案
+  // M3.3:是否只看本项目档案
   const [onlyProject, setOnlyProject] = useState(false);
 
-  // 防抖落盘：onChange 触发后 500ms 合并 + 调 upsert_character_archive
+  // === 防抖落盘 ===
+  // 1. 草稿态:用 ref 存最新 patch(避免闭包过期)
+  const draftRef = useRef<CharacterArchiveDraftPatch | null>(null);
+  // 2. timer ref
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // 加载
-  const reload = useCallback(async () => {
-    setLoading(true);
-    try {
-      const rows = await listCharacterArchives(projectId);
-      setArchives(rows);
-      // 选中不存在时清掉
-      if (selectedId && !rows.find((a) => a.id === selectedId)) {
-        setSelectedId(null);
-      }
-    } catch (e) {
-      toast.error("加载角色档案失败");
-      console.error("[CharacterWorkshop] list failed:", e);
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, selectedId, toast]);
-
-  useEffect(() => {
-    void reload();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  // 3. 保存状态(savingStatus 透传给 Editor 顶部 chip)
+  const [savingStatus, setSavingStatus] = useState<SavingStatus>("idle");
+  // 4. 当前防抖处理的是哪个 selectedId(避免旧 timer 落到新选中的档案上)
+  const pendingSelectedIdRef = useRef<string | null>(null);
+  // 5. saved 状态自动回 idle 的 timer
+  const savedResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selected = archives.find((a) => a.id === selectedId) ?? null;
 
-  // 新建（scope 由参数决定：project / global）
+  // === 实际落盘函数(从 timer / flush 共用) ===
+  // 关键:闭包捕获的 selectedId 必须是当前 selected.id,否则会写到错对象
+  const performSave = useCallback(
+    async (forId: string) => {
+      const draft = draftRef.current;
+      if (!draft) return;
+      const target = archives.find((a) => a.id === forId);
+      if (!target) {
+        // 选中的档案已经被外部删了/切了 — 跳过
+        draftRef.current = null;
+        setSavingStatus("idle");
+        return;
+      }
+      const merged: CharacterArchiveUpsert = {
+        id: target.id,
+        scope: target.scope,
+        projectId: target.projectId,
+        name: draft.name,
+        description: draft.description,
+        referenceImageAssetIds: target.referenceImageAssetIds,
+        styleContractId: target.styleContractId,
+        promptSnippet: draft.promptSnippet,
+        tags: draft.tags,
+        agentUseCount: target.agentUseCount,
+      };
+      const err = validateArchiveUpsert(merged);
+      if (err) {
+        toast.error(err);
+        setSavingStatus("error");
+        return;
+      }
+      setSavingStatus("saving");
+      try {
+        await upsertCharacterArchive(merged);
+        // 成功后清草稿 + 拉新数据
+        draftRef.current = null;
+        await onReload();
+        setSavingStatus("saved");
+        // 2 秒后回 idle
+        if (savedResetTimerRef.current) clearTimeout(savedResetTimerRef.current);
+        savedResetTimerRef.current = setTimeout(() => {
+          setSavingStatus("idle");
+        }, 2000);
+      } catch (e: any) {
+        toast.error(`保存失败:${e?.message ?? e}`);
+        setSavingStatus("error");
+      }
+    },
+    [archives, onReload, toast],
+  );
+
+  // === 收到草稿 → 重新设防抖 timer ===
+  const onDraftChange = useCallback(
+    (patch: CharacterArchiveDraftPatch) => {
+      if (!selected) return;
+      // 切档案后第一帧 onDraftChange 是 useEffect 触发的同步草稿
+      // 如果跟 selected 当前内容一致(没真的改),直接清状态不保存
+      const isNoop =
+        patch.name === selected.name &&
+        patch.description === selected.description &&
+        patch.promptSnippet === selected.promptSnippet &&
+        JSON.stringify(patch.tags) === JSON.stringify(selected.tags);
+      if (isNoop) {
+        draftRef.current = null;
+        return;
+      }
+      draftRef.current = patch;
+      pendingSelectedIdRef.current = selected.id;
+      // 清掉 saved 状态(用户又开始编辑)
+      if (savedResetTimerRef.current) clearTimeout(savedResetTimerRef.current);
+      if (savingStatus === "saved" || savingStatus === "error") {
+        setSavingStatus("idle");
+      }
+      // 重置 timer
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        void performSave(selected.id);
+      }, 500);
+    },
+    [selected, savingStatus, performSave],
+  );
+
+  // === flush:立即落盘(切档案 / 卸载 / 应用前调) ===
+  const flushPending = useCallback(async () => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const pendingId = pendingSelectedIdRef.current;
+    if (pendingId && draftRef.current) {
+      await performSave(pendingId);
+    }
+  }, [performSave]);
+
+  // 卸载时 flush(防用户意外关 tab 丢内容)
+  useEffect(() => {
+    return () => {
+      void flushPending();
+      if (savedResetTimerRef.current) clearTimeout(savedResetTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // === 选中档案:先 flush 当前,再切 ===
+  const handleSelect = useCallback(
+    async (id: string) => {
+      await flushPending();
+      draftRef.current = null;
+      pendingSelectedIdRef.current = null;
+      setSavingStatus("idle");
+      onSelectedIdChange(id);
+    },
+    [flushPending, onSelectedIdChange],
+  );
+
+  // === 新建(scope 由参数决定:project / global) ===
   const onCreate = async (scope: "project" | "global") => {
+    // 新建前 flush
+    await flushPending();
     const draft = makeEmptyArchive(
       scope,
       scope === "project" ? projectId : null,
     );
     try {
       const row = await upsertCharacterArchive(draft);
-      await reload();
-      setSelectedId(row.id);
+      await onReload();
+      onSelectedIdChange(row.id);
       toast.success(
-        scope === "global" ? "全局档案已创建（跨项目可见）" : "档案已创建",
+        scope === "global" ? "全局档案已创建(跨项目可见)" : "档案已创建",
       );
     } catch (e: any) {
-      toast.error(`新建失败：${e?.message ?? e}`);
+      toast.error(`新建失败:${e?.message ?? e}`);
     }
   };
 
-  // 删除
+  // === 删除 ===
   const onDelete = async () => {
     if (!selected) return;
+    // 删除前 flush
+    await flushPending();
     try {
       await deleteCharacterArchive(selected.id);
       toast.success(`已删除「${selected.name}」`);
-      setSelectedId(null);
-      await reload();
+      onSelectedIdChange(null);
+      await onReload();
     } catch (e: any) {
-      toast.error(`删除失败：${e?.message ?? e}`);
+      toast.error(`删除失败:${e?.message ?? e}`);
     }
   };
 
-  // 编辑：本地草稿 + 防抖落盘
-  const onChange = useCallback(
-    (patch: Partial<CharacterArchiveUpsert>) => {
-      if (!selected) return;
-      // 清掉之前的 timer
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      // 500ms 后落盘
-      saveTimerRef.current = setTimeout(async () => {
-        const merged: CharacterArchiveUpsert = {
-          id: selected.id,
-          scope: selected.scope,
-          projectId: selected.projectId,
-          name: patch.name ?? selected.name,
-          description: patch.description ?? selected.description,
-          referenceImageAssetIds: selected.referenceImageAssetIds,
-          styleContractId: selected.styleContractId,
-          promptSnippet: patch.promptSnippet ?? selected.promptSnippet,
-          tags: patch.tags ?? selected.tags,
-          agentUseCount: selected.agentUseCount,
-        };
-        // 二次校验（防止空名等）
-        const err = validateArchiveUpsert(merged);
-        if (err) return; // 静默：UI 已经显示错误，等用户改对
-        try {
-          await upsertCharacterArchive(merged);
-          // 重新拉一次拿最新 updatedAt
-          await reload();
-        } catch (e: any) {
-          toast.error(`保存失败：${e?.message ?? e}`);
-        }
-      }, 500);
-    },
-    [selected, reload, toast],
-  );
-
-  // 应用到 PromptBar
-  const onApply = () => {
+  // === 应用到 PromptBar ===
+  const onApply = async () => {
     if (!selected) return;
-    // 先同步落盘一次（不等防抖）
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    // 应用前 flush,确保 PromptBar 拿到最新数据
+    await flushPending();
     onApplyToPromptBar?.(selected.id);
-    toast.success(`已应用「${selected.name}」到 PromptBar`);
+    toast.success(`已应用「${selected.name}」到 PromptBar(请到对话 tab 生图)`);
   };
 
-  // M3.5：导出全部档案为 .json
-  const onExportAll = () => {
-    if (archives.length === 0) {
-      toast.info("没有档案可导出");
+  // === 导出:split-button 支持 项目内 / 全部 ===
+  const doExport = (mode: "project" | "all") => {
+    const items =
+      mode === "project"
+        ? archives.filter((a) => a.scope === "project")
+        : archives;
+    if (items.length === 0) {
+      toast.info(mode === "project" ? "本项目内没有档案可导出" : "没有档案可导出");
       return;
     }
-    const json = buildArchiveExportJson(archives);
+    const json = buildArchiveExportJson(items);
     const ts = new Date().toISOString().slice(0, 10);
-    downloadArchiveJson(`y-agent-archives-${ts}.json`, json);
-    toast.success(`已导出 ${archives.length} 个档案到下载目录`);
+    const tag = mode === "project" ? "project" : "all";
+    downloadArchiveJson(`y-agent-archives-${tag}-${ts}.json`, json);
+    toast.success(`已导出 ${items.length} 个档案到下载目录`);
   };
 
-  // M3.5：导入 .json
+  // === 导入 ===
   const onImportJson = async () => {
     try {
       const picked = await openDialog({
@@ -186,12 +273,11 @@ export default function CharacterWorkshop({
         filters: [{ name: "JSON", extensions: ["json"] }],
       });
       if (!picked || typeof picked !== "string") return;
-      // 读文件
       const { readTextFile } = await import("@tauri-apps/plugin-fs");
       const raw = await readTextFile(picked);
       const result = parseArchiveExportJson(raw);
       if ("error" in result) {
-        toast.error(`导入失败：${result.error}`);
+        toast.error(`导入失败:${result.error}`);
         return;
       }
       const { archives: items } = result.payload;
@@ -199,17 +285,17 @@ export default function CharacterWorkshop({
         toast.info("JSON 里没有档案");
         return;
       }
-      // 逐项 upsert（id 留空 → Rust 端生成新 UUID）
       let okCount = 0;
       for (const a of items) {
         try {
           await upsertCharacterArchive({
             id: undefined,
-            scope: a.scope,
-            projectId: a.scope === "project" ? projectId : null,
+            // 导入默认进当前项目(scope=project);scope=global 也会尊重
+            scope: a.scope === "global" ? "global" : "project",
+            projectId: a.scope === "global" ? null : projectId,
             name: a.name,
             description: a.description,
-            referenceImageAssetIds: [], // 导入不携带资产图（跨机器无意义）
+            referenceImageAssetIds: [],
             styleContractId: null,
             promptSnippet: a.promptSnippet,
             tags: a.tags,
@@ -217,22 +303,19 @@ export default function CharacterWorkshop({
           });
           okCount++;
         } catch {
-          // 静默：单个失败不阻塞其他
+          // 静默:单个失败不阻塞其他
         }
       }
-      await reload();
-      toast.success(`导入完成（${okCount}/${items.length}）`);
+      await onReload();
+      toast.success(`导入完成(${okCount}/${items.length},已添加到当前项目)`);
     } catch (e: any) {
-      toast.error(`导入失败：${e?.message ?? e}`);
+      toast.error(`导入失败:${e?.message ?? e}`);
     }
   };
 
-  // 卸载时清理
-  useEffect(() => {
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    };
-  }, []);
+  // 顶部条 split 状态
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showImportMenu, setShowImportMenu] = useState(false);
 
   if (loading && archives.length === 0) {
     return (
@@ -248,11 +331,7 @@ export default function CharacterWorkshop({
         <CharacterArchiveList
           archives={archives}
           selectedId={selectedId}
-          onSelect={(id) => {
-            // 切换时立即 flush 当前草稿
-            if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-            setSelectedId(id);
-          }}
+          onSelect={handleSelect}
           onCreate={onCreate}
           searchName={searchName}
           onSearchNameChange={setSearchName}
@@ -264,26 +343,92 @@ export default function CharacterWorkshop({
         />
       </div>
       <div className="flex-1 min-w-0 flex flex-col">
-        {/* M3.5：工具栏（导出 / 导入） */}
+        {/* 工具栏(导入 / 导出 split) */}
         <div className="px-4 py-1.5 border-b border-border bg-bg-panel flex items-center justify-end gap-1.5">
-          <button
-            type="button"
-            onClick={onImportJson}
-            className="text-[10px] flex items-center gap-0.5 px-2 py-0.5 rounded text-text-muted hover:text-text-primary hover:bg-bg-hover"
-            title="从 .json 文件导入档案（不含参考图）"
-          >
-            <Upload className="w-3 h-3" />
-            导入
-          </button>
-          <button
-            type="button"
-            onClick={onExportAll}
-            className="text-[10px] flex items-center gap-0.5 px-2 py-0.5 rounded text-text-muted hover:text-text-primary hover:bg-bg-hover"
-            title="把所有可见档案导出为 .json"
-          >
-            <Download className="w-3 h-3" />
-            导出全部
-          </button>
+          {/* 导入 split-button */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setShowImportMenu((v) => !v);
+                setShowExportMenu(false);
+              }}
+              className="text-[10px] flex items-center gap-0.5 px-2 py-0.5 rounded text-text-muted hover:text-text-primary hover:bg-bg-hover"
+              title="从 .json 文件导入档案(只导入到当前项目;不含参考图)"
+            >
+              <Upload className="w-3 h-3" />
+              导入
+            </button>
+            {showImportMenu && (
+              <div className="absolute right-0 top-full mt-1 z-10 bg-bg-panel border border-border rounded shadow-lg overflow-hidden min-w-[180px]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowImportMenu(false);
+                    void onImportJson();
+                  }}
+                  className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[11px] hover:bg-bg-hover text-left"
+                >
+                  <Upload className="w-3 h-3" />
+                  选择 .json 文件…
+                </button>
+                <div className="px-3 py-1 text-[10px] text-text-muted border-t border-border">
+                  仅当前项目,scope=global 一律落到 project
+                </div>
+              </div>
+            )}
+          </div>
+          {/* 导出 split-button */}
+          <div className="relative">
+            <div className="flex">
+              <button
+                type="button"
+                onClick={() => doExport("all")}
+                className="text-[10px] flex items-center gap-0.5 px-2 py-0.5 rounded-l text-text-muted hover:text-text-primary hover:bg-bg-hover"
+                title="把所有可见档案(项目 + 全局)导出为 .json"
+              >
+                <Download className="w-3 h-3" />
+                导出全部
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowExportMenu((v) => !v);
+                  setShowImportMenu(false);
+                }}
+                className="px-1.5 py-0.5 rounded-r border-l border-border/40 text-text-muted hover:text-text-primary hover:bg-bg-hover"
+                title="更多导出选项"
+              >
+                <ChevronDown className="w-3 h-3" />
+              </button>
+            </div>
+            {showExportMenu && (
+              <div className="absolute right-0 top-full mt-1 z-10 bg-bg-panel border border-border rounded shadow-lg overflow-hidden min-w-[180px]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowExportMenu(false);
+                    doExport("project");
+                  }}
+                  className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[11px] hover:bg-bg-hover text-left"
+                >
+                  <Download className="w-3 h-3" />
+                  仅导出项目内档案
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowExportMenu(false);
+                    doExport("all");
+                  }}
+                  className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[11px] hover:bg-bg-hover text-left"
+                >
+                  <Download className="w-3 h-3" />
+                  导出全部(含全局)
+                </button>
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex-1 min-w-0">
           {selected ? (
@@ -291,10 +436,11 @@ export default function CharacterWorkshop({
               key={selected.id}
               archive={selected}
               assets={assets}
-              onChange={onChange}
+              onDraftChange={onDraftChange}
               onDelete={onDelete}
               onApply={onApply}
-              onReferencesChanged={() => void reload()}
+              onReferencesChanged={() => void onReload()}
+              savingStatus={savingStatus}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-xs text-text-muted p-8 text-center">

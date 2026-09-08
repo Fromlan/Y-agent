@@ -5,43 +5,59 @@
  * - name / description / promptSnippet 编辑
  * - tags 增删（chips 输入）
  * - 校验失败时实时提示
- * - 顶部"删除" + "复制 id"按钮
- * - 底部"应用到 PromptBar"按钮（close 并把 id 写回 store）
+ * - 顶部"删除" + "复制 id"按钮 + savingStatus 指示
+ * - 底部"应用到 PromptBar"按钮
+ *
+ * M3.6 改造：
+ * - onChange 改名为 onDraftChange,接收 4 个标量（name/desc/snippet/tags）,
+ *   类型上比 Partial<CharacterArchiveUpsert> 更诚实。
+ * - 新增 savingStatus prop,顶部显示"保存中…/已保存/保存失败" chip。
  */
 import { useEffect, useMemo, useState } from "react";
-import { X, Trash2, Copy, Check, ArrowRight, Plus, Globe, FolderOpen } from "lucide-react";
-import type {
-  Asset,
-  CharacterArchive,
-  CharacterArchiveUpsert,
-} from "@/lib/types";
+import {
+  X,
+  Trash2,
+  Copy,
+  Check,
+  ArrowRight,
+  Plus,
+  Globe,
+  FolderOpen,
+  Loader2,
+  AlertCircle,
+} from "lucide-react";
+import type { Asset, CharacterArchive } from "@/lib/types";
 import {
   CHARACTER_ARCHIVE_LIMITS,
   validateArchiveUpsert,
 } from "@/lib/character-archive";
 import CharacterReferenceGrid from "@/components/workspace/CharacterReferenceGrid";
+import type { CharacterArchiveDraftPatch } from "@/components/workspace/CharacterWorkshop";
 
 interface Props {
   archive: CharacterArchive;
   /** 项目下所有资产（reference grid 用） */
   assets: Asset[];
-  /** 草稿模式：onChange 每次改动都触发，外部自己决定何时落盘 */
-  onChange: (patch: Partial<CharacterArchiveUpsert>) => void;
+  /** 草稿模式：草稿改动时同步调,父层自己 debounce 后落盘 */
+  onDraftChange: (patch: CharacterArchiveDraftPatch) => void;
   onDelete: () => void;
   onApply: () => void;
   /** reference 改动后通知上层 reload（拿新 referenceImageAssetIds） */
   onReferencesChanged: () => void;
+  /** 保存状态,顶部 chip 展示 */
+  savingStatus?: "idle" | "saving" | "saved" | "error";
 }
 
 export default function CharacterArchiveEditor({
   archive,
   assets,
-  onChange,
+  onDraftChange,
   onDelete,
   onApply,
   onReferencesChanged,
+  savingStatus = "idle",
 }: Props) {
-  // 本地草稿态：编辑时实时显示 + onChange 透传
+  // 本地草稿态：编辑时实时显示 + onDraftChange 透传
   const [name, setName] = useState(archive.name);
   const [description, setDescription] = useState(archive.description);
   const [promptSnippet, setPromptSnippet] = useState(archive.promptSnippet);
@@ -87,9 +103,9 @@ export default function CharacterArchiveEditor({
     tags,
   ]);
 
-  // 名字 / 描述 / snippet 实时 onChange 上去（让外部 store 保持最新）
+  // 名字 / 描述 / snippet 实时 onDraftChange 上去（让父层防抖落盘）
   useEffect(() => {
-    onChange({ name, description, promptSnippet, tags });
+    onDraftChange({ name, description, promptSnippet, tags });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name, description, promptSnippet, tags]);
 
@@ -150,17 +166,56 @@ export default function CharacterArchiveEditor({
           type="button"
           onClick={onCopyId}
           className="text-[10px] text-text-muted hover:text-text-primary flex items-center gap-0.5"
-          title="复制完整 id"
+          title="复制完整 id（调试用,普通用户不需要）"
         >
           {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
           {copied ? "已复制" : "复制 id"}
         </button>
+        {/* M3.6:保存状态指示 chip */}
+        {savingStatus !== "idle" && (
+          <span
+            className={`text-[10px] px-1.5 py-0.5 rounded inline-flex items-center gap-0.5 ${
+              savingStatus === "saving"
+                ? "bg-bg-hover text-text-muted"
+                : savingStatus === "saved"
+                ? "bg-green-500/10 text-green-400"
+                : "bg-red-500/10 text-red-400"
+            }`}
+            title={
+              savingStatus === "saving"
+                ? "正在写入数据库…"
+                : savingStatus === "saved"
+                ? "已成功保存到数据库"
+                : "保存失败 — 检查上方校验错误或网络"
+            }
+          >
+            {savingStatus === "saving" && (
+              <>
+                <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                保存中…
+              </>
+            )}
+            {savingStatus === "saved" && (
+              <>
+                <Check className="w-2.5 h-2.5" />
+                已保存
+              </>
+            )}
+            {savingStatus === "error" && (
+              <>
+                <AlertCircle className="w-2.5 h-2.5" />
+                保存失败
+              </>
+            )}
+          </span>
+        )}
         <div className="flex-1" />
         {confirmDelete ? (
           <>
             <button
               type="button"
               onClick={() => setConfirmDelete(false)}
+              aria-label="取消删除"
               className="text-[10px] px-2 py-0.5 rounded text-text-secondary hover:text-text-primary"
             >
               取消
@@ -168,6 +223,7 @@ export default function CharacterArchiveEditor({
             <button
               type="button"
               onClick={onDelete}
+              aria-label={`确认删除档案 ${archive.name}`}
               className="text-[10px] px-2 py-0.5 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20"
             >
               确认删除
@@ -177,6 +233,7 @@ export default function CharacterArchiveEditor({
           <button
             type="button"
             onClick={() => setConfirmDelete(true)}
+            aria-label={`删除档案 ${archive.name}`}
             className="text-[10px] text-text-muted hover:text-red-400 flex items-center gap-0.5"
             title="删除档案（不会删除参考图本身）"
           >

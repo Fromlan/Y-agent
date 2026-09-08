@@ -51,6 +51,8 @@ interface Props {
   generating: boolean;
   /** 当前输入模式：决定底部 "正在..." 提示文案 */
   inputMode?: "chat" | "generate" | "tools" | "characters";
+  /** M3.6：当前项目 id(给 CharacterArchivePicker 做真实 projectId 过滤用) */
+  projectId: string;
   /** M3：当前项目下可见的角色档案（含 scope=global），由上层 ProjectDetail 持有 */
   archives: CharacterArchive[];
   /** M3：当前选中的角色档案 id（null = 未选） */
@@ -86,6 +88,7 @@ export default function PromptBar({
   setTransparent,
   generating,
   inputMode = "generate",
+  projectId,
   archives,
   selectedArchiveId,
   setSelectedArchiveId,
@@ -221,7 +224,7 @@ export default function PromptBar({
 
             {/* M3：角色档案下拉（在模型/尺寸前，跟"输入内容"分组） */}
             <CharacterArchivePicker
-              projectId={"" /* Picker 内部按 archives 过滤，projectId 仅用于 query 函数 */}
+              projectId={projectId}
               archives={archives}
               selectedId={selectedArchiveId}
               onSelect={setSelectedArchiveId}

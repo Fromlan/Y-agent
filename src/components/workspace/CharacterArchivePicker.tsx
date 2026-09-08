@@ -162,10 +162,16 @@ export default function CharacterArchivePicker({
                           onSelect(a.id);
                           setOpen(false);
                         }}
-                        className={`w-full text-left px-2 py-1.5 hover:bg-bg-hover transition ${
+                        className={`relative w-full text-left px-2 py-1.5 hover:bg-bg-hover transition ${
                           on ? "bg-accent/5" : ""
                         }`}
                       >
+                        {on && (
+                          <span
+                            className="absolute left-0 top-1 bottom-1 w-0.5 rounded-r bg-accent"
+                            aria-hidden
+                          />
+                        )}
                         <div className="flex items-center gap-1.5">
                           {a.scope === "global" ? (
                             <Globe className="w-3 h-3 text-accent flex-shrink-0" />

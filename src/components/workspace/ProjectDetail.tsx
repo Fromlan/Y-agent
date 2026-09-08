@@ -97,16 +97,28 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     import("@/lib/types").CharacterArchive[]
   >([]);
   const [selectedArchiveId, setSelectedArchiveId] = useState<string | null>(null);
+  // M3.6：Workshop 内部"当前正在编辑哪条"的选中态(跟 selectedArchiveId 解耦 —
+  // 选中的不一定就是应用到 PromptBar 的)。
+  const [selectedArchiveIdInWorkshop, setSelectedArchiveIdInWorkshop] =
+    useState<string | null>(null);
+  // 切项目时清掉两个选中态
+  useEffect(() => {
+    setSelectedArchiveIdInWorkshop(null);
+  }, [currentProject?.id]);
 
   // 共享 reload 入口（useEffect + picker 内部新建/删除 都用）
+  const [loadingCharacterArchives, setLoadingCharacterArchives] = useState(true);
   const reloadCharacterArchives = useCallback(async () => {
     if (!currentProject) return;
+    setLoadingCharacterArchives(true);
     try {
       const { listCharacterArchives } = await import("@/lib/character-archive");
       const rows = await listCharacterArchives(currentProject.id);
       setCharacterArchives(rows);
     } catch {
       setCharacterArchives([]);
+    } finally {
+      setLoadingCharacterArchives(false);
     }
   }, [currentProject]);
 
@@ -1464,6 +1476,11 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
           <CharacterWorkshop
             projectId={currentProject.id}
             assets={assets}
+            archives={characterArchives}
+            loading={loadingCharacterArchives}
+            onReload={() => reloadCharacterArchives()}
+            selectedId={selectedArchiveIdInWorkshop}
+            onSelectedIdChange={setSelectedArchiveIdInWorkshop}
             onApplyToPromptBar={(id) => {
               // M3.2.4: 角色工坊"应用"按钮真正接到 PromptBar
               // - 写 selectedArchiveId 让 CharacterArchivePicker 同步高亮
@@ -1684,6 +1701,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
           setTransparent={setTransparent}
           generating={generating}
           inputMode={inputMode}
+          projectId={currentProject.id}
           archives={characterArchives}
           selectedArchiveId={selectedArchiveId}
           setSelectedArchiveId={setSelectedArchiveId}
