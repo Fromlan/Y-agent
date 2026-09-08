@@ -14,9 +14,6 @@ import {
   Cpu,
   CalendarClock,
   Check,
-  ZoomIn,
-  ZoomOut,
-  Maximize2,
   Eye,
   EyeOff,
   Frame,
@@ -29,7 +26,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import type { Asset, GeneratedImage } from "@/lib/types";
-import { assetMainImage, assetVideoSource, flatAssetImages, imageInput } from "@/lib/types";
+import { assetVideoSource, flatAssetImages, imageInput } from "@/lib/types";
 import { resolveImageUrlSync } from "@/lib/image-resolver";
 import { useToast } from "@/components/shared/Toast";
 import { explainOptimizeReason } from "@/lib/h3-context-ir";
@@ -39,9 +36,9 @@ import { resolveImageUrl } from "@/lib/image-resolver";
 import SafeImage from "@/components/shared/SafeImage";
 import { createAsset } from "@/lib/assets";
 import { pickVisibleLayers, getBboxHealth } from "@/lib/layer-view";
-import LayerCompositeStage from "@/components/workspace/LayerCompositeStage";
 import LayerThumb from "@/components/workspace/LayerThumb";
-import { MetaItem, formatDateTime, formatRelative, EditStage } from "./asset-detail-helpers";
+import LayerStage, { type ViewMode } from "@/components/workspace/LayerStage";
+import { MetaItem, formatDateTime, formatRelative } from "./asset-detail-helpers";
 
 /**
  * 从 GeneratedImage 推断下载扩展名
@@ -193,7 +190,7 @@ export default function AssetDetailDialog({
     });
   };
   // 合成视图：solo / 选中 / 视图模式（仅 isLayerDecomposition 生效）
-  const [viewMode, setViewMode] = useState<"composite" | "single">("composite");
+  const [viewMode, setViewMode] = useState<ViewMode>("composite");
   const [soloLayerIdx, setSoloLayerIdx] = useState<number | null>(null);
   const [selectedLayerIdx, setSelectedLayerIdx] = useState<number | null>(null);
   const toggleSolo = (i: number) => {
@@ -522,27 +519,18 @@ export default function AssetDetailDialog({
               </div>
             )}
             <div className="flex-1 flex items-center justify-center p-4 min-h-0">
-              {editMode && cur && (cur.localPath || cur.url) ? (
-                <EditStage
-                  imageUrl={imageInput(cur)}
-                  onBboxChange={(b) => {
-                    editBboxRef.current = b;
-                  }}
-                />
-              ) : !cur ? (
-                <AllHiddenPlaceholder />
-              ) : asset.isLayerDecomposition && viewMode === "composite" ? (
-                <LayerCompositeStage
-                  layers={visibleLayers}
-                  baseLayer={baseLayer}
-                  selectedLayer={selectedLayer}
-                />
-              ) : (
-                <PreviewStage
-                  image={cur}
-                  fallbackUrl={assetMainImage(asset)}
-                />
-              )}
+              <LayerStage
+                asset={asset}
+                viewMode={viewMode}
+                editMode={editMode}
+                cur={cur}
+                visibleLayers={visibleLayers}
+                baseLayer={baseLayer}
+                selectedLayer={selectedLayer}
+                onBboxChange={(b) => {
+                  editBboxRef.current = b;
+                }}
+              />
             </div>
             {/* P3：编辑模式的 prompt + 提交栏 */}
             {editMode && cur?.url && (
@@ -965,155 +953,6 @@ export default function AssetDetailDialog({
   );
 }
 
-/**
- * 所有图层都被隐藏时的占位（单图层视图路径）
- */
-function AllHiddenPlaceholder() {
-  return (
-    <div
-      className="w-full max-w-[640px] aspect-[16/10] bg-bg-elev rounded-md
-        flex items-center justify-center text-text-muted border border-border"
-    >
-      <div className="text-center">
-        <EyeOff className="w-10 h-10 mx-auto mb-2 opacity-50" />
-        <p className="text-xs">所有图层都已隐藏</p>
-      </div>
-    </div>
-  );
-}
-
-/**
- * 统一预览舞台
- * - 容器：max-w-[640px] 16:10
- * - 默认：object-contain 居中（适合 1K~2K 缩略图浏览）
- * - 缩放：滚轮 / 按钮（0.5x ~ 4x），双击重置
- * - 平移：放大后可拖动
- */
-function PreviewStage({
-  image,
-  fallbackUrl,
-}: {
-  image: GeneratedImage | undefined;
-  fallbackUrl: string | null;
-}) {
-  // P5：优先用 localPath（已下载到本地，URL 失效后仍可看）
-  const url = image ? imageInput(image) : fallbackUrl;
-  const [errored, setErrored] = useState(false);
-  const [scale, setScale] = useState(1);
-  const [tx, setTx] = useState(0);
-  const [ty, setTy] = useState(0);
-  const dragRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
-
-  // 切换图片时重置
-  useEffect(() => {
-    setErrored(false);
-    setScale(1);
-    setTx(0);
-    setTy(0);
-  }, [url]);
-
-  const reset = useCallback(() => {
-    setScale(1);
-    setTx(0);
-    setTy(0);
-  }, []);
-
-  const zoomBy = useCallback((delta: number) => {
-    setScale((s) => Math.max(0.5, Math.min(4, s + delta)));
-  }, []);
-
-  // 滚轮缩放（按住 Ctrl 更直观；无 Ctrl 也允许）
-  const onWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    zoomBy(e.deltaY < 0 ? 0.2 : -0.2);
-  };
-
-  // 拖拽平移
-  const onMouseDown = (e: React.MouseEvent) => {
-    if (scale <= 1.05) return; // 未放大不进入拖拽
-    dragRef.current = { x: e.clientX, y: e.clientY, tx, ty };
-  };
-  const onMouseMove = (e: React.MouseEvent) => {
-    if (!dragRef.current) return;
-    const dx = e.clientX - dragRef.current.x;
-    const dy = e.clientY - dragRef.current.y;
-    setTx(dragRef.current.tx + dx);
-    setTy(dragRef.current.ty + dy);
-  };
-  const stopDrag = () => {
-    dragRef.current = null;
-  };
-
-  if (!url || errored) {
-    return (
-      <div className="w-full max-w-[640px] aspect-[16/10] bg-bg-elev rounded-md
-        flex items-center justify-center text-text-muted">
-        <div className="text-center">
-          <ImageIcon className="w-10 h-10 mx-auto mb-2 opacity-50" />
-          <p className="text-xs">图片加载失败</p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="relative w-full max-w-[640px] aspect-[16/10] bg-bg-elev rounded-md
-      overflow-hidden border border-border select-none">
-      <div
-        className="w-full h-full flex items-center justify-center"
-        style={{
-          cursor: scale > 1.05 ? (dragRef.current ? "grabbing" : "grab") : "zoom-in",
-        }}
-        onWheel={onWheel}
-        onMouseDown={onMouseDown}
-        onMouseMove={onMouseMove}
-        onMouseUp={stopDrag}
-        onMouseLeave={stopDrag}
-        onDoubleClick={reset}
-        title="滚轮缩放 · 双击重置 · 拖拽平移"
-      >
-        <SafeImage
-          src={url}
-          alt={image?.name ?? ""}
-          onError={() => setErrored(true)}
-          draggable={false}
-          className="max-w-full max-h-full object-contain"
-          style={{
-            imageRendering: scale > 2 ? "pixelated" : "auto",
-            transform: `scale(${scale}) translate(${tx / scale}px, ${ty / scale}px)`,
-            transition: dragRef.current ? "none" : "transform 0.15s",
-          }}
-        />
-      </div>
-      {/* 缩放控制条 */}
-      <div className="absolute bottom-2 right-2 flex items-center gap-1 px-1.5 py-1 rounded
-        bg-black/60 backdrop-blur-sm text-white text-xs">
-        <button
-          className="p-1 hover:bg-white/10 rounded"
-          onClick={() => zoomBy(-0.25)}
-          title="缩小"
-        >
-          <ZoomOut className="w-3.5 h-3.5" />
-        </button>
-        <span className="w-10 text-center tabular-nums">{Math.round(scale * 100)}%</span>
-        <button
-          className="p-1 hover:bg-white/10 rounded"
-          onClick={() => zoomBy(0.25)}
-          title="放大"
-        >
-          <ZoomIn className="w-3.5 h-3.5" />
-        </button>
-        <button
-          className="p-1 hover:bg-white/10 rounded"
-          onClick={reset}
-          title="重置（双击图片也可）"
-        >
-          <Maximize2 className="w-3.5 h-3.5" />
-        </button>
-      </div>
-    </div>
-  );
-}
 
 /**
  * P3：编辑模式底栏（prompt + 提交/取消）
