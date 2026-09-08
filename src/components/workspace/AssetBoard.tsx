@@ -10,6 +10,7 @@ import BoardToolbar, {
   type SpecialFilter,
 } from "@/components/workspace/BoardToolbar";
 import AssetDetailDialog from "@/components/workspace/AssetDetailDialog";
+import { exportAssetsZip, downloadBlob } from "@/lib/asset-export-zip";
 
 interface Props {
   assets: Asset[];
@@ -136,16 +137,29 @@ export default function AssetBoard({
   const handleBatchDownload = async () => {
     const targets = filtered.filter((a) => selectedIds.has(a.id));
     if (targets.length === 0) return;
-    toast.info(`开始批量下载 ${targets.length} 个主图…`);
-    // 浏览器对连续 download 有限制，用间隔触发
-    for (let i = 0; i < targets.length; i++) {
-      const a = targets[i];
+    if (targets.length === 1) {
+      // 1 个走原方式(快)
+      const a = targets[0];
       const url = assetMainImage(a);
-      if (url) {
-        onDownload(url, `y-agent-${a.id}.png`);
-      }
-      // 让浏览器喘口气，避免被当广告拦截
-      await new Promise((r) => setTimeout(r, 250));
+      if (url) onDownload(url, `y-agent-${a.id}.png`);
+      return;
+    }
+    // O-7: 多个走 ZIP 一键导出
+    toast.info(`开始打包 ${targets.length} 个资产为 zip…`);
+    try {
+      const result = await exportAssetsZip({
+        assets: targets,
+        projectName: "y-agent-export",
+        onProgress: (cur, total) => {
+          if (cur % 5 === 0 || cur === total) {
+            toast.info(`打包中 ${cur}/${total}…`);
+          }
+        },
+      });
+      downloadBlob(result.blob, result.filename);
+      toast.success(`已导出 ${result.count} 个文件 → ${result.filename}`);
+    } catch (e: any) {
+      toast.error(`打包失败：${e?.message ?? e}`);
     }
   };
 

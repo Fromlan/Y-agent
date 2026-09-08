@@ -5,7 +5,5 @@ allowBuilds:
 # pnpm 9+ 安全性增强:默认忽略所有 postinstall 脚本(防止恶意 install script)。
 # 这里显式允许 esbuild 跑 install 脚本(它的 postinstall 编译 native binary,
 # 没跑会运行时找不到 platform-specific 二进制,导致 vite / vitest 启动失败)。
-# 之前这里填的是占位符 "set this to true or false",被 pnpm 当成字面量接受,
-# 导致 `pnpm install --frozen-lockfile` 退出 1 — CI 第 1 步会失败。
 onlyBuiltDependencies:
   - esbuild
