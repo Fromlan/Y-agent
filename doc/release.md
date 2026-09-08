@@ -34,6 +34,7 @@
 - [ ] `doc/plan.md` / 文档里 milestone 状态已更新
 - [ ] SettingsPanel「关于」行显示的版本号正确（自动从 `tauri.conf.json` 读）
 - [ ] `git status` 干净（没未提交密钥，参考素材没被误加）
+- [ ] `doc/releases/vX.Y.Z.md` 写好 release notes（新增 / 修复 / 变更 / 下载 四段）
 
 ---
 
