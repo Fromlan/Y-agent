@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState, useRef, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, useState, useRef, type ReactNode } from "react";
 import { CheckCircle2, AlertCircle, Info, XCircle } from "lucide-react";
 
 type Level = "success" | "error" | "warn" | "info";
@@ -36,12 +36,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     }, 3500);
   }, []);
 
-  const value: ToastContextValue = {
-    success: (t) => push("success", t),
-    error: (t) => push("error", t),
-    warn: (t) => push("warn", t),
-    info: (t) => push("info", t),
-  };
+  // M3.6 修:用 useMemo 锁住 value,避免所有 useToast() 消费者每次 render 都拿到
+  // 新对象导致依赖它的 useEffect / useCallback 反复触发,造成 "Maximum update depth exceeded" 白屏。
+  const value = useMemo<ToastContextValue>(
+    () => ({
+      success: (t) => push("success", t),
+      error: (t) => push("error", t),
+      warn: (t) => push("warn", t),
+      info: (t) => push("info", t),
+    }),
+    [push],
+  );
 
   return (
     <ToastContext.Provider value={value}>
