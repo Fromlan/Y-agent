@@ -24,6 +24,13 @@ Y-agent — 游戏美术 AI 工作台。Tauri 2 桌面应用，封装即梦（�
 
 > 桌面端必须用 `dev-with-msvc.cmd` / `build-with-msvc.cmd`，因为 Rust 端需要 MSVC 工具链。
 > 不要直接 `pnpm tauri:dev` —— 它在多数 Windows 机器上会因找不到 linker 失败。
+>
+> **dev 依赖 PowerShell 7+ (`pwsh`)**：默认的 Windows PowerShell 5.1 不支持 ANSI 转义码 / UTF-8,
+> 在中文 Windows 上渲染 tauri / vite / cargo 输出会乱码。装法:
+> ```
+> winget install Microsoft.PowerShell
+> ```
+> 装完 `pwsh -v` 验 7.x，`dev-with-msvc.cmd` 会自动用 `pwsh` 而不是 `powershell`。
 
 ## Project layout
 

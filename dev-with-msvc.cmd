@@ -14,5 +14,7 @@ set "FORCE_COLOR=0"
 REM Run the tee wrapper (dev-with-msvc.ps1), which routes npm through cmd so its
 REM stderr notices do not surface as PowerShell "NativeCommandError", and logs to
 REM dev-stdout.log. Kept as a .cmd so the documented entry point stays unchanged.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0dev-with-msvc.ps1" %*
+REM PowerShell 7+ (pwsh) 是 dev 的运行时依赖 — 自带 PS5.1 不支持 ANSI/UTF-8,
+REM 在中文 Windows 上会渲染 tauri/vite/cargo 输出为乱码。装法: winget install Microsoft.PowerShell
+pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0dev-with-msvc.ps1" %*
 exit /b %errorlevel%
