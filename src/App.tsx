@@ -4,6 +4,7 @@ import Workspace from "@/components/workspace/Workspace";
 import SettingsPanel from "@/components/settings/SettingsPanel";
 import { ToastProvider, useToast } from "@/components/shared/Toast";
 import { PromptProvider } from "@/components/shared/PromptProvider";
+import CommandPalette from "@/components/shared/CommandPalette";
 import { SessionProvider, useSession } from "@/lib/session";
 import { log } from "@/lib/logger";
 import { useTheme } from "@/lib/use-theme";
@@ -84,6 +85,24 @@ function AppShell() {
       <SettingsPanel
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+      />
+      {/* M-2: 全局 ⌘K 命令面板 */}
+      <CommandPalette
+        onRoute={handleRoute}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onUseSkill={(skillId) => {
+          if (!currentProject) return;
+          // 复用 M-6 逻辑:写 pendingSkill + 切路由
+          try {
+            localStorage.setItem(
+              "y-agent.pendingSkill",
+              JSON.stringify({ id: skillId, ts: Date.now() })
+            );
+          } catch {
+            // ignore
+          }
+          handleJumpToProject();
+        }}
       />
     </div>
   );
