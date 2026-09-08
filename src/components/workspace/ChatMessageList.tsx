@@ -17,6 +17,8 @@ interface Props {
   onCancelPlan?: (msgId: string) => void;
   /** P7：当前 PromptBar 选定的模型（用于 PlanCard 展示"将使用 X 模型"） */
   currentModelName?: string;
+  /** M-8: 点示范 prompt 时把文本塞进输入框 */
+  onPickDemoPrompt?: (text: string) => void;
 }
 
 /**
@@ -25,7 +27,7 @@ interface Props {
  * - Agent 消息左对齐，含折叠日志（命中 Skill / 调用模型 / 耗时）
  * - Agent 消息生成的资产缩略图（点击可放大，复用 AssetCard 暂 v0.1 简化为 img）
  */
-export default function ChatMessageList({ messages, generating, onConfirmPlan, onCancelPlan, currentModelName }: Props) {
+export default function ChatMessageList({ messages, generating, onConfirmPlan, onCancelPlan, currentModelName, onPickDemoPrompt }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -33,13 +35,34 @@ export default function ChatMessageList({ messages, generating, onConfirmPlan, o
 
   if (messages.length === 0 && !generating) {
     return (
-      <div className="flex-1 flex items-center justify-center text-text-muted text-sm">
-        <div className="text-center max-w-md">
+      <div className="flex-1 flex items-center justify-center text-text-muted text-sm p-6">
+        <div className="text-center max-w-2xl w-full">
           <Sparkles className="w-8 h-8 mx-auto mb-3 text-accent" />
           <p className="font-medium text-text-secondary">对话生成游戏美术</p>
-          <p className="text-xs mt-2 text-text-muted">
-            按 <code className="px-1 py-0.5 bg-bg-hover rounded text-accent">/</code> 选 Skill
+          <p className="text-xs mt-1.5 text-text-muted">
+            按 <code className="px-1 py-0.5 bg-bg-hover rounded text-accent">/</code> 选 Skill · 或从下面任选一个试试
           </p>
+          {/* M-8: 示范 prompt 卡片 */}
+          {onPickDemoPrompt && (
+            <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-2 text-left">
+              <DemoPromptCard
+                title="直接生图"
+                prompt="赛博朋克风格的女剑客,紫色短发,持光剑,远景"
+                onPick={onPickDemoPrompt}
+              />
+              <DemoPromptCard
+                title="三视图(用 Skill)"
+                prompt="/character-turnaround 赛博女剑客"
+                onPick={onPickDemoPrompt}
+                accent
+              />
+              <DemoPromptCard
+                title="纯对话"
+                prompt="我想做一个 2D 横版银河恶魔城类的独立游戏,先帮我列 5 个关键概念美术资产"
+                onPick={onPickDemoPrompt}
+              />
+            </div>
+          )}
         </div>
       </div>
     );
@@ -363,6 +386,39 @@ function triggerLabel(t: "explicit" | "keyword" | "fallback") {
   if (t === "explicit") return <span className="text-accent">/ 命令</span>;
   if (t === "keyword") return <span className="text-accent">关键词</span>;
   return <span className="text-text-muted">未指定</span>;
+}
+
+/** M-8: 空状态示范 prompt 卡片 */
+function DemoPromptCard({
+  title,
+  prompt,
+  accent,
+  onPick,
+}: {
+  title: string;
+  prompt: string;
+  accent?: boolean;
+  onPick: (text: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onPick(prompt)}
+      className={`panel p-3 text-left hover:border-accent/40 transition-colors group ${
+        accent ? "border-accent/30 bg-accent/5" : ""
+      }`}
+    >
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <Sparkles className={`w-3 h-3 ${accent ? "text-accent" : "text-text-muted"}`} />
+        <span className={`text-[11px] font-medium ${accent ? "text-accent" : "text-text-secondary"}`}>
+          {title}
+        </span>
+      </div>
+      <p className="text-[11px] text-text-muted line-clamp-3 leading-relaxed group-hover:text-text-primary">
+        {prompt}
+      </p>
+    </button>
+  );
 }
 
 // ============================================================================

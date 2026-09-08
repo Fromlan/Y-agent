@@ -1,18 +1,46 @@
 import { useCallback, useEffect, useState } from "react";
-import { FolderPlus, Trash2, FolderOpen, Pencil, ArrowRight } from "lucide-react";
+import { FolderPlus, Trash2, FolderOpen, Pencil, ArrowRight, FlaskConical } from "lucide-react";
 import { listProjects, createProject, deleteProject, renameProject } from "@/lib/projects";
+import { setApiKey } from "@/lib/api-key";
+import { setPref, getPref } from "@/lib/prefs";
+import { MODEL_OPTIONS } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
 import { usePrompt } from "@/components/shared/PromptProvider";
 import { useSession } from "@/lib/session";
 import { confirmDialog } from "@/lib/dialog";
 import type { Project } from "@/lib/types";
 
-export default function ProjectsPage() {
+export default function ProjectsPage({ onOpenSettings }: { onOpenSettings?: () => void } = {}) {
   const [items, setItems] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const { setCurrentProject } = useSession();
   const toast = useToast();
   const prompt = usePrompt();
+  const [enablingDemo, setEnablingDemo] = useState(false);
+
+  // M-8: 一键启用 Demo 模式 — 写一个 demo- 前缀的伪 Key,设默认模型/尺寸
+  const onEnableDemo = useCallback(async () => {
+    setEnablingDemo(true);
+    try {
+      const demoKey = `demo-${Date.now().toString(36)}`;
+      await setApiKey(demoKey);
+      // 顺手把默认模型/尺寸写进 pref,让进项目后立即有合理值
+      try {
+        const m = await getPref("default_model").catch(() => null);
+        if (!m) await setPref("default_model", MODEL_OPTIONS[0].id);
+        const s = await getPref("default_size").catch(() => null);
+        if (!s) await setPref("default_size", "2k");
+      } catch {
+        // ignore
+      }
+      toast.success("Demo 模式已启用 — 进项目即可看完整 UI");
+      onOpenSettings?.();
+    } catch (e: any) {
+      toast.error(`启用失败：${e?.message ?? e}`);
+    } finally {
+      setEnablingDemo(false);
+    }
+  }, [toast, onOpenSettings]);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -86,13 +114,27 @@ export default function ProjectsPage() {
         {loading ? (
           <p className="text-text-secondary text-sm">加载中...</p>
         ) : items.length === 0 ? (
-          <div className="panel p-8 text-center">
+          <div className="panel p-8 text-center max-w-md mx-auto">
             <FolderOpen className="w-10 h-10 mx-auto text-text-muted mb-3" />
-            <p className="text-text-secondary mb-4">还没有项目</p>
-            <button onClick={onCreate} className="btn btn-primary">
-              <FolderPlus className="w-4 h-4" />
-              新建项目
-            </button>
+            <p className="text-text-secondary mb-1 font-medium">还没有项目</p>
+            <p className="text-[11px] text-text-muted mb-5">
+              先建一个项目,或先开 Demo 模式体验完整 UI(无需 Key,不烧 token)
+            </p>
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              <button onClick={onCreate} className="btn btn-primary">
+                <FolderPlus className="w-4 h-4" />
+                新建项目
+              </button>
+              <button
+                onClick={onEnableDemo}
+                disabled={enablingDemo}
+                className="btn"
+                title="启用 Demo 模式(无需 API Key,看 UI 不烧钱)"
+              >
+                <FlaskConical className="w-4 h-4" />
+                {enablingDemo ? "启用中…" : "试用 Demo 模式"}
+              </button>
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">

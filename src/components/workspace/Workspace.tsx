@@ -16,7 +16,7 @@ interface Props {
 export default function Workspace({ route, onBackFromProject, onOpenSettings, onJumpToProject }: Props) {
   switch (route) {
     case "projects":
-      return <ProjectsPage />;
+      return <ProjectsPage onOpenSettings={onOpenSettings} />;
     case "project":
       return <ProjectDetail onBack={onBackFromProject} onOpenSettings={onOpenSettings} />;
     case "assets":

@@ -631,6 +631,16 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
             onCancelPlan={onCancelPlan}
             // P7：让 PlanCard 展示"将使用 X 模型"
             currentModelName={model.name}
+            // M-8: 示范 prompt 卡片 → 写入输入框
+            onPickDemoPrompt={(text) => {
+              setPrompt(text);
+              setTimeout(() => {
+                const ta = document.querySelector<HTMLTextAreaElement>(
+                  'textarea[placeholder*="画面"]'
+                );
+                ta?.focus();
+              }, 50);
+            }}
           />
         ) : tab === "tools" ? (
           <ToolsTab
