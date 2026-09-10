@@ -18,10 +18,11 @@ import { log } from "@/lib/logger";
 import { llmChatLoop, type LLMConfig, type ChatMessage as LLMChatMessage } from "@/lib/llm";
 import { loadLlmConfig } from "@/lib/llm-config";
 import { AGENT_TOOLS, renderSystemPrompt } from "@/lib/agent-tools";
-import { route } from "@/lib/agent-router";
-import { agentEvents, type AgentEvent, type ChatMessage, type ToolCallRecord } from "@/lib/agent-event";
+import { useRulePlan } from "./useRulePlan";
+import { usePlanActions } from "./usePlanActions";
 import { executePlanStream, learnFromGeneration } from "@/lib/agent-flow";
-import { assetIds as dbAssetIds, persistInsert, persistUpdate, persistDelete } from "@/lib/chat-history";
+import { agentEvents, type AgentEvent, type ChatMessage, type ToolCallRecord } from "@/lib/agent-event";
+import { assetIds as dbAssetIds, persistInsert, persistUpdate } from "@/lib/chat-history";
 import { MODEL_OPTIONS, type Asset, type ModelOption, type CharacterArchive } from "@/lib/types";
 import type { AgentContext } from "@/lib/agent-memory";
 import type { StyleContract } from "@/lib/style-contract";
@@ -80,7 +81,35 @@ export function useChatSubmit(args: UseChatSubmitArgs): UseChatSubmitAPI {
     generating, setGenerating, reload, toast,
   } = args;
 
-  const onSubmitChat = useCallback(async () => {
+  
+  // 规则路由 + PlanCard 由 useRulePlan 封装
+  const runRulePlan = useRulePlan({
+    model,
+    size,
+    refs,
+    agentCtx,
+    styleContract,
+    styleContractId,
+    groupCount,
+    chatSessionId,
+    setMessages,
+  });
+
+  // PlanCard 的"开始生成/取消" 由 usePlanActions 封装
+  const { onConfirmPlan, onCancelPlan } = usePlanActions({
+    model,
+    messages,
+    setMessages,
+    agentCtx,
+    setAgentCtx,
+    currentProjectId,
+    generating,
+    setGenerating,
+    reload,
+    toast,
+  });
+
+const onSubmitChat = useCallback(async () => {
     if (generating) return;
     if (!prompt.trim()) {
       toast.warn("请输入提示词");
@@ -150,6 +179,7 @@ export function useChatSubmit(args: UseChatSubmitArgs): UseChatSubmitAPI {
   }, [generating, prompt, setPrompt, refs, setRefs, tab, setTab, chatSessionId, setMessages, toast]);
 
   /** LLM 路径：把当前 messages + system prompt + tools 给 LLM，循环直到没有 tool_call */
+
   const runLlmTurn = useCallback(async (
     userInput: string,
     cfg: LLMConfig,
@@ -549,202 +579,6 @@ export function useChatSubmit(args: UseChatSubmitArgs): UseChatSubmitAPI {
   }, [chatSessionId, setMessages, agentCtx, setAgentCtx, model, size, refs, characterArchives, styleContract, styleContractId, currentProjectId, toast, setSelectedArchiveId, reloadCharacterArchives, pendingCharacterArchiveRef, messages, reload]);
 
   /** 规则降级：展示计划，等用户点确认才生图 */
-  const runRulePlan = useCallback(async (
-    userInput: string,
-    events: AgentEvent[],
-    _off: () => void
-  ) => {
-    const decision = route(
-      userInput,
-      model,
-      agentCtx?.styleHints ?? [],
-      styleContract && styleContract.checksum ? styleContract : undefined
-    );
-    agentEvents.emit({
-      type: "skill_matched",
-      skillName: decision.skillName ?? "(default)",
-      trigger: decision.triggerType,
-    });
-    agentEvents.emit({ type: "turn_end", assistantMessage: { id: "", role: "agent", content: "", createdAt: Date.now() } });
-
-    const agentId = crypto.randomUUID();
-    const planGroupCount = decision.groupCount ?? groupCount;
-    // P7：plan 不再存 modelId/modelName（避免和 PromptBar 双源），执行时统一读 model state。
-    // 兼容老数据：onConfirmPlan 里如果 plan.modelId 存在仍能用（fallback）。
-    const plan: {
-      prompt: string;
-      size: string;
-      image?: string[];
-      maxImages?: number;
-      suggestedModelName?: string;
-      // P0：命中的 Skill id（写入资产 payload，便于按 Skill 维度筛选/统计）
-      sourceSkillId?: string;
-      // P1：项目级风格契约短哈希（写入资产 payload）
-      styleContractId?: string;
-    } = {
-      prompt: decision.prompt,
-      size: decision.size ?? size,
-      image: refs.length > 0 ? [...refs] : undefined,
-      maxImages: planGroupCount > 1 ? planGroupCount : undefined,
-    };
-    if (decision.suggestedModelName) {
-      plan.suggestedModelName = decision.suggestedModelName;
-    }
-    if (decision.skill?.id) {
-      plan.sourceSkillId = decision.skill.id;
-    }
-    if (styleContractId) {
-      plan.styleContractId = styleContractId;
-    }
-    const skillLog = {
-      matchedSkill: decision.skillName,
-      triggerType: decision.triggerType,
-      reasoning: decision.reasoning,
-      modelUsed: decision.model.id,
-      modelName: decision.model.name,
-      costMs: 0,
-      isDemo: false,
-    };
-    // 文案更短 + 加引导：把"去配置 LLM"做成可点击的"打开设置"按钮
-    // P1 改进 7：原版整条都塞同一段长句，现在拆成"短结论" + "PlanCard 内的提示"
-    const content = "已规划好生成计划，点下方「开始生成」即可。\n（未配置 Agent LLM，规则路由模式。）";
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: agentId,
-        role: "agent",
-        content,
-        events: [...events],
-        skillLog,
-        createdAt: Date.now(),
-        pendingPlan: plan,
-      } as ChatMessage & { pendingPlan?: typeof plan },
-    ]);
-    // 持久化（plan 信息也存）
-    persistInsert(chatSessionId!, {
-      id: agentId,
-      role: "agent",
-      content,
-      events: [...events],
-      skillLog,
-      pendingPlan: plan,
-    });
-  }, [model, agentCtx, styleContract, styleContractId, refs, groupCount, size, chatSessionId, setMessages]);
-
-  /** 规则降级：用户点了"开始生成"按钮 */
-  const onConfirmPlan = useCallback(async (msgId: string) => {
-    if (generating) return;
-    const msg = messages.find((m) => m.id === msgId);
-    if (!msg?.pendingPlan) return;
-    const plan = msg.pendingPlan;
-    setGenerating(true);
-    const events: AgentEvent[] = [];
-    const off = agentEvents.on((e) => events.push(e));
-    // P7：模型以 PromptBar state 为准（plan 不再存 modelId）。
-    // 兼容老数据：plan.modelId 若存在仍允许使用，避免老 chat 历史出 bug。
-    const useModelId = plan.modelId ?? model.id;
-    const useModelOpt: ModelOption =
-      MODEL_OPTIONS.find((m) => m.id === useModelId) ?? model;
-    const useModelName = useModelOpt.name;
-    // P7：能力位预检——maxImages 与 groupGeneration 不匹配时降级 + toast
-    let useMaxImages = plan.maxImages;
-    if (useMaxImages && useMaxImages > 1 && !useModelOpt.capabilities.groupGeneration) {
-      toast.warn(
-        `${useModelName} 不支持 ${useMaxImages} 张组图，已自动改为 1 张。要 N 张变体请在 PromptBar 切到 5.0 Lite。`
-      );
-      useMaxImages = 1;
-    }
-    try {
-      agentEvents.emit({
-        type: "tool_start",
-        toolName: "jimeng.generate_image",
-        model: useModelId,
-        args: { prompt: plan.prompt, size: plan.size, maxImages: useMaxImages },
-      });
-      // P7：规则降级也走 executePlanStream（5.0 Pro 自动 fallback 到非流式）。
-      // 组图场景：partial 资产独立入库；主资产是 onCompleted 返回的（首张 partial 复用）。
-      const result = await executePlanStream(
-        {
-          prompt: plan.prompt,
-          modelId: useModelId,
-          modelName: useModelName,
-          size: plan.size,
-          ...(plan.image ? { images: plan.image } : {}),
-          ...(useMaxImages && useMaxImages > 1 ? { maxImages: useMaxImages } : {}),
-          // P0：透传 sourceSkillId 让入库资产可追溯到 Skill
-          ...(plan.sourceSkillId ? { sourceSkillId: plan.sourceSkillId } : {}),
-          // P1：透传 styleContractId 让入库资产可被契约变更追踪
-          ...(plan.styleContractId ? { styleContractId: plan.styleContractId } : {}),
-        },
-        currentProjectId,
-        {
-          onPartialFailed: (info) => {
-            toast.warn(`第 ${(info.index ?? -1) + 1} 张生成失败：${info.message ?? info.code ?? "未知"}`);
-          },
-        }
-      );
-      const { asset, costMs, isDemo } = result;
-      agentEvents.emit({
-        type: "tool_end",
-        toolName: "jimeng.generate_image",
-        costMs,
-        assets: [asset],
-        isDemo,
-      });
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === msgId
-            ? {
-                ...m,
-                content: "✅ 已生成。",
-                pendingPlan: undefined,
-                assets: [asset],
-                skillLog: m.skillLog
-                  ? { ...m.skillLog, costMs, isDemo, modelUsed: useModelId, modelName: useModelName }
-                  : undefined,
-                events: [...events, { type: "turn_end", assistantMessage: { id: msgId, role: "agent", content: "", createdAt: Date.now() } }],
-              }
-            : m
-        )
-      );
-      // 持久化：把 plan 清掉 + asset_id 存上
-      persistUpdate(msgId, {
-        content: "✅ 已生成。",
-        pendingPlan: null,
-        assetIds: [asset.id],
-        skillLog: msg.skillLog
-          ? { ...msg.skillLog, costMs, isDemo, modelUsed: useModelId, modelName: useModelName }
-          : undefined,
-      });
-      // 自动学习
-      const userMsgs = messages.filter((m) => m.role === "user");
-      const lastUserText = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : "";
-      if (agentCtx && lastUserText) {
-        await learnFromGeneration(agentCtx, lastUserText, useModelId, currentProjectId, setAgentCtx);
-      }
-      reload({ silent: true });
-    } catch (e: any) {
-      const raw = e?.message ?? String(e);
-      const friendly = await explainError(raw).catch(() => raw);
-      log.error("project-detail", "onConfirmPlan failed:", e);
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === msgId
-            ? { ...m, content: m.content, error: friendly, pendingPlan: undefined, events: [...events] }
-            : m
-        )
-      );
-    } finally {
-      off();
-      setGenerating(false);
-    }
-  }, [generating, setGenerating, messages, setMessages, model, toast, currentProjectId, agentCtx, setAgentCtx, reload]);
-
-  /** 规则降级：用户点了"取消" */
-  const onCancelPlan = useCallback((msgId: string) => {
-    setMessages((prev) => prev.filter((m) => m.id !== msgId));
-    persistDelete(msgId);
-  }, [setMessages]);
-
+  
   return { onSubmitChat, onConfirmPlan, onCancelPlan };
 }
