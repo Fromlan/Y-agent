@@ -10,5 +10,6 @@ export default defineConfig({
     include: ["src/**/*.test.{ts,tsx}"],
     exclude: ["**/node_modules/**", "**/dist/**", "**/src-tauri/**"],
     globals: false,
+    setupFiles: ['./src/test/setup.ts'],
   },
 });
