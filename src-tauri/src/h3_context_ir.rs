@@ -231,7 +231,9 @@ pub fn validate_submit_params(req: &H3ContextIRReq) -> Result<(), String> {
         _ => false,
     });
     if !has_text {
-        return Err("InvalidParameter: content 必须包含一个非空 text 项（prompt is required）".into());
+        return Err(
+            "InvalidParameter: content 必须包含一个非空 text 项（prompt is required）".into(),
+        );
     }
     // ratio 规则和 video_generation 一致：
     // - 有 first_frame/last_frame（图生视频） → adaptive
@@ -248,7 +250,9 @@ pub fn validate_submit_params(req: &H3ContextIRReq) -> Result<(), String> {
                 return Err("InvalidParameter: t2va 场景必须指定 ratio（21:9 / 16:9 / 4:3 / 1:1 / 3:4 / 9:16）".into());
             }
             if ratio == "adaptive" {
-                return Err("InvalidParameter: t2va 场景 ratio 不能是 \'adaptive\'（必须显式指定）".into());
+                return Err(
+                    "InvalidParameter: t2va 场景 ratio 不能是 \'adaptive\'（必须显式指定）".into(),
+                );
             }
         }
         "i2va" => {
@@ -270,14 +274,13 @@ pub fn validate_submit_params(req: &H3ContextIRReq) -> Result<(), String> {
 ///
 /// **永远不返回 `Err`**——所有失败都通过 `OptimizeResult { is_optimized: false, reason }` 表达。
 /// 调用方可以直接 `let result = h3_context_ir::optimize(...).await;` 不需要 try/catch。
-pub async fn optimize(
-    api_key: &str,
-    req: H3ContextIRReq,
-    original_prompt: &str,
-) -> OptimizeResult {
+pub async fn optimize(api_key: &str, req: H3ContextIRReq, original_prompt: &str) -> OptimizeResult {
     // 0. Demo 模式：直接返回合成增强 prompt，不调 HTTP
     if is_demo_key(api_key) {
-        log::info!("h3 optimize (demo) for prompt: {}", truncate_for_log(original_prompt));
+        log::info!(
+            "h3 optimize (demo) for prompt: {}",
+            truncate_for_log(original_prompt)
+        );
         return OptimizeResult {
             prompt: demo_optimized_prompt(original_prompt),
             is_optimized: true,
@@ -605,7 +608,10 @@ mod tests {
             OptimizeReason::RateLimit
         );
         assert_eq!(
-            OptimizeReason::from_api_code(None, Some("video description contains sensitive content (1026)")),
+            OptimizeReason::from_api_code(
+                None,
+                Some("video description contains sensitive content (1026)")
+            ),
             OptimizeReason::Sensitive
         );
     }
@@ -629,9 +635,7 @@ mod tests {
     fn validate_t2va_missing_ratio() {
         let req = H3ContextIRReq {
             model: "MiniMax-H3".into(),
-            content: vec![ContentItem::Text {
-                text: "x".into(),
-            }],
+            content: vec![ContentItem::Text { text: "x".into() }],
             duration: 5,
             ratio: None,
         };
@@ -642,9 +646,7 @@ mod tests {
     fn validate_t2va_valid() {
         let req = H3ContextIRReq {
             model: "MiniMax-H3".into(),
-            content: vec![ContentItem::Text {
-                text: "x".into(),
-            }],
+            content: vec![ContentItem::Text { text: "x".into() }],
             duration: 5,
             ratio: Some("16:9".into()),
         };
@@ -692,7 +694,9 @@ mod tests {
         let req = H3ContextIRReq {
             model: "MiniMax-H3".into(),
             content: vec![
-                ContentItem::Text { text: "push in slowly".into() },
+                ContentItem::Text {
+                    text: "push in slowly".into(),
+                },
                 ContentItem::ImageUrl {
                     image_url: crate::video::ImageUrlRef {
                         url: "data:image/png;base64,xxx".into(),

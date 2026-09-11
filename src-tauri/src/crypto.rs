@@ -84,9 +84,7 @@ mod tests {
     /// 加密 → 解密 完整往返
     #[test]
     fn encrypt_decrypt_round_trip() {
-        let cipher = KeyCipher {
-            key: [7u8; 32],
-        };
+        let cipher = KeyCipher { key: [7u8; 32] };
         let plain = "doubao-seedream-test-key-abc123";
         let enc = cipher.encrypt(plain).unwrap();
         assert!(!enc.is_empty());
@@ -97,9 +95,7 @@ mod tests {
     /// 中文 / Emoji / 长字符串都能正常加解密
     #[test]
     fn encrypt_decrypt_unicode() {
-        let cipher = KeyCipher {
-            key: [1u8; 32],
-        };
+        let cipher = KeyCipher { key: [1u8; 32] };
         let plain = "中文密钥 🎨 ñ ü — Hello";
         let enc = cipher.encrypt(plain).unwrap();
         let dec = cipher.decrypt(&enc).unwrap();
@@ -109,9 +105,7 @@ mod tests {
     /// 同一明文每次加密密文不同（nonce 随机）
     #[test]
     fn encrypt_produces_different_ciphertexts() {
-        let cipher = KeyCipher {
-            key: [9u8; 32],
-        };
+        let cipher = KeyCipher { key: [9u8; 32] };
         let plain = "same-plaintext";
         let enc1 = cipher.encrypt(plain).unwrap();
         let enc2 = cipher.encrypt(plain).unwrap();
@@ -123,12 +117,8 @@ mod tests {
     /// 不同密钥解密失败
     #[test]
     fn decrypt_with_wrong_key_fails() {
-        let cipher1 = KeyCipher {
-            key: [1u8; 32],
-        };
-        let cipher2 = KeyCipher {
-            key: [2u8; 32],
-        };
+        let cipher1 = KeyCipher { key: [1u8; 32] };
+        let cipher2 = KeyCipher { key: [2u8; 32] };
         let enc = cipher1.encrypt("secret").unwrap();
         let result = cipher2.decrypt(&enc);
         assert!(result.is_err(), "不同 key 必须解密失败");

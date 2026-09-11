@@ -1,8 +1,8 @@
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
 use std::error::Error as _;
+use std::path::{Path, PathBuf};
 
 const ENDPOINT: &str = "https://ark.cn-beijing.volces.com/api/v3/images/generations";
 
@@ -68,7 +68,11 @@ pub async fn download_to_cache(
     };
     let dst = dir.join(format!("{index}.{ext}"));
 
-    let resp = client.get(url).timeout(std::time::Duration::from_secs(30)).send().await;
+    let resp = client
+        .get(url)
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await;
     match resp {
         Ok(r) if r.status().is_success() => match r.bytes().await {
             Ok(bytes) => {
@@ -102,9 +106,7 @@ fn validate_params(params: &GenerateImageParams) -> Result<(), String> {
         "doubao-seedream-4-5-251128" | "doubao-seedream-4-0-250828"
     );
     if is_5_0_pro && params.sequential_image_generation.is_some() {
-        return Err(
-            "InvalidParameter: 5.0 Pro 不支持组图（sequential_image_generation）".into(),
-        );
+        return Err("InvalidParameter: 5.0 Pro 不支持组图（sequential_image_generation）".into());
     }
     if let Some(fmt) = &params.output_format {
         if is_4_5_or_4_0 && fmt == "png" {
@@ -135,7 +137,10 @@ fn validate_params(params: &GenerateImageParams) -> Result<(), String> {
                     "doubao-seedream-5-0-pro-260628" | "doubao-seedream-4-0-250828"
                 )
             {
-                return Err("InvalidParameter: optimize_prompt_options.mode=fast 仅 5.0 Pro / 4.0 支持".into());
+                return Err(
+                    "InvalidParameter: optimize_prompt_options.mode=fast 仅 5.0 Pro / 4.0 支持"
+                        .into(),
+                );
             }
         }
     }
@@ -407,7 +412,11 @@ pub async fn generate(
             obj.insert("watermark".into(), serde_json::Value::Bool(false));
         }
     }
-    log::info!("jimeng request: model={}, prompt_len={}", params.model, params.prompt.len());
+    log::info!(
+        "jimeng request: model={}, prompt_len={}",
+        params.model,
+        params.prompt.len()
+    );
     log::debug!("jimeng payload: {}", body);
 
     let resp = client
@@ -440,7 +449,11 @@ pub async fn generate(
         let url = if let Some(u) = img.url {
             u
         } else if let Some(b64) = img.b64_json {
-            let bare = b64.split(',').next_back().unwrap_or("").trim_end_matches('=');
+            let bare = b64
+                .split(',')
+                .next_back()
+                .unwrap_or("")
+                .trim_end_matches('=');
             if B64.decode(bare).is_err() {
                 anyhow::bail!("b64_json is not valid base64");
             }
@@ -478,7 +491,10 @@ pub async fn generate(
     // P0+：图层拆分场景的 bbox 健康度诊断。排查"图层全叠在一起"问题：
     // 如果这里看到 boundingBox 都是 None,说明 5.0 Pro API 当次没返 bbox,
     // 前端 fallback 铺满不是 bug,而是上游数据缺失。
-    if out.iter().any(|img| img.z_index.is_some() && img.z_index != Some(0)) {
+    if out
+        .iter()
+        .any(|img| img.z_index.is_some() && img.z_index != Some(0))
+    {
         let sample: Vec<_> = out
             .iter()
             .take(3)
@@ -551,10 +567,7 @@ pub enum StreamEvent {
         usage: Option<Usage>,
     },
     /// 流中断（InternalServiceError / 网络断开 / 顶层 error）
-    Aborted {
-        request_id: String,
-        reason: String,
-    },
+    Aborted { request_id: String, reason: String },
 }
 
 #[derive(Debug, Deserialize)]

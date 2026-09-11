@@ -132,13 +132,13 @@ impl Storage {
             return Ok(());
         }
         let cols = Self::table_columns(conn, "projects")?;
-        let additions: &[(&str, &str)] = &[
-            ("agent_context", "TEXT"),
-            ("style_contract", "TEXT"),
-        ];
+        let additions: &[(&str, &str)] = &[("agent_context", "TEXT"), ("style_contract", "TEXT")];
         for (name, decl) in additions {
             if !cols.iter().any(|c| c.eq_ignore_ascii_case(name)) {
-                conn.execute(&format!("ALTER TABLE projects ADD COLUMN {name} {decl}"), [])?;
+                conn.execute(
+                    &format!("ALTER TABLE projects ADD COLUMN {name} {decl}"),
+                    [],
+                )?;
             }
         }
         Ok(())
@@ -209,7 +209,9 @@ impl Storage {
         // 需要 SQLite 3.35+ 支持 DROP COLUMN（libsqlite3-sys 0.30 默认 3.4x，远超 3.35）
         for old_col in ["kind", "urls", "meta"] {
             if cols.iter().any(|c| c.eq_ignore_ascii_case(old_col)) {
-                if let Err(e) = conn.execute(&format!("ALTER TABLE assets DROP COLUMN {old_col}"), []) {
+                if let Err(e) =
+                    conn.execute(&format!("ALTER TABLE assets DROP COLUMN {old_col}"), [])
+                {
                     log::warn!("DROP COLUMN {old_col} 失败（可能 SQLite 版本 < 3.35）：{e}");
                 }
             }
@@ -230,7 +232,10 @@ impl Storage {
     }
 
     pub fn put_kv(&self, key: &str, value: &str) -> anyhow::Result<()> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         conn.execute(
             "INSERT INTO kv(key, value) VALUES(?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -240,7 +245,10 @@ impl Storage {
     }
 
     pub fn get_kv(&self, key: &str) -> anyhow::Result<Option<String>> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         let mut stmt = conn.prepare("SELECT value FROM kv WHERE key = ?1")?;
         let mut rows = stmt.query(params![key])?;
         if let Some(row) = rows.next()? {
@@ -251,7 +259,10 @@ impl Storage {
     }
 
     pub fn delete_kv(&self, key: &str) -> anyhow::Result<()> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         conn.execute("DELETE FROM kv WHERE key = ?1", params![key])?;
         Ok(())
     }
@@ -277,7 +288,10 @@ impl Storage {
 
     /// 读项目 agent_context（JSON 字符串）。未设置返回 Ok(None)。
     pub fn get_project_agent_context(&self, project_id: &str) -> anyhow::Result<Option<String>> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         let mut stmt = conn.prepare("SELECT agent_context FROM projects WHERE id = ?1")?;
         let mut rows = stmt.query(params![project_id])?;
         if let Some(row) = rows.next()? {
@@ -289,12 +303,11 @@ impl Storage {
     }
 
     /// 写项目 agent_context（必须是 JSON 字符串）。空字符串 = 清除。
-    pub fn set_project_agent_context(
-        &self,
-        project_id: &str,
-        json: &str,
-    ) -> anyhow::Result<()> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+    pub fn set_project_agent_context(&self, project_id: &str, json: &str) -> anyhow::Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         let changed = conn.execute(
             "UPDATE projects SET agent_context = ?1, updated_at = ?2 WHERE id = ?3",
             params![json, chrono::Utc::now().timestamp_millis(), project_id],
@@ -309,7 +322,10 @@ impl Storage {
 
     /// 读项目 style_contract（JSON 字符串）。未设置返回 Ok(None)。
     pub fn get_project_style_contract(&self, project_id: &str) -> anyhow::Result<Option<String>> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         let mut stmt = conn.prepare("SELECT style_contract FROM projects WHERE id = ?1")?;
         let mut rows = stmt.query(params![project_id])?;
         if let Some(row) = rows.next()? {
@@ -328,7 +344,10 @@ impl Storage {
         project_id: &str,
         json: &str,
     ) -> anyhow::Result<MarkStaleResult> {
-        let mut conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         let tx = conn.transaction()?;
 
         // 1. 读旧契约
@@ -380,11 +399,11 @@ impl Storage {
     // messages 存结构化 JSON（skill_log / events / pending_plan / asset_ids 等）
 
     /// 获取或创建项目对应的 chat_session（v0.1: 一个项目一个 session）
-    pub fn get_or_create_chat_session(
-        &self,
-        project_id: &str,
-    ) -> anyhow::Result<String> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+    pub fn get_or_create_chat_session(&self, project_id: &str) -> anyhow::Result<String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         let mut stmt = conn.prepare("SELECT id FROM chat_sessions WHERE project_id = ?1")?;
         let mut rows = stmt.query(params![project_id])?;
         if let Some(row) = rows.next()? {
@@ -401,7 +420,10 @@ impl Storage {
 
     /// 列出某 session 的所有消息（按 created_at 升序），返回 JSON 字符串数组
     pub fn list_chat_messages(&self, session_id: &str) -> anyhow::Result<Vec<String>> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         let mut stmt = conn.prepare(
             "SELECT id, role, content, attachments, skill_log, events,
                     pending_plan, error, asset_ids, created_at
@@ -450,7 +472,10 @@ impl Storage {
         asset_ids: Option<&str>,
         id: Option<&str>,
     ) -> anyhow::Result<String> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         // 前端传过来的 id 优先；没传才用 UUID
         let id_owned = id
             .map(|s| s.to_string())
@@ -484,15 +509,36 @@ impl Storage {
         error: Option<&str>,
         asset_ids: Option<&str>,
     ) -> anyhow::Result<()> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         let mut sets: Vec<&str> = Vec::new();
         let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        if let Some(v) = content { sets.push("content = ?"); values.push(Box::new(v.to_string())); }
-        if let Some(v) = skill_log { sets.push("skill_log = ?"); values.push(Box::new(v.to_string())); }
-        if let Some(v) = events { sets.push("events = ?"); values.push(Box::new(v.to_string())); }
-        if let Some(v) = pending_plan { sets.push("pending_plan = ?"); values.push(Box::new(v.to_string())); }
-        if let Some(v) = error { sets.push("error = ?"); values.push(Box::new(v.to_string())); }
-        if let Some(v) = asset_ids { sets.push("asset_ids = ?"); values.push(Box::new(v.to_string())); }
+        if let Some(v) = content {
+            sets.push("content = ?");
+            values.push(Box::new(v.to_string()));
+        }
+        if let Some(v) = skill_log {
+            sets.push("skill_log = ?");
+            values.push(Box::new(v.to_string()));
+        }
+        if let Some(v) = events {
+            sets.push("events = ?");
+            values.push(Box::new(v.to_string()));
+        }
+        if let Some(v) = pending_plan {
+            sets.push("pending_plan = ?");
+            values.push(Box::new(v.to_string()));
+        }
+        if let Some(v) = error {
+            sets.push("error = ?");
+            values.push(Box::new(v.to_string()));
+        }
+        if let Some(v) = asset_ids {
+            sets.push("asset_ids = ?");
+            values.push(Box::new(v.to_string()));
+        }
         if sets.is_empty() {
             return Ok(());
         }
@@ -509,15 +555,27 @@ impl Storage {
 
     /// 删除单条消息
     pub fn delete_chat_message(&self, message_id: &str) -> anyhow::Result<()> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
-        conn.execute("DELETE FROM chat_messages WHERE id = ?1", params![message_id])?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        conn.execute(
+            "DELETE FROM chat_messages WHERE id = ?1",
+            params![message_id],
+        )?;
         Ok(())
     }
 
     /// 清空某 session 的所有消息
     pub fn clear_chat_session(&self, session_id: &str) -> anyhow::Result<()> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
-        conn.execute("DELETE FROM chat_messages WHERE session_id = ?1", params![session_id])?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        conn.execute(
+            "DELETE FROM chat_messages WHERE session_id = ?1",
+            params![session_id],
+        )?;
         conn.execute(
             "UPDATE chat_sessions SET updated_at = ?1 WHERE id = ?2",
             params![chrono::Utc::now().timestamp_millis(), session_id],
@@ -529,7 +587,10 @@ impl Storage {
 
     /// 落库一条视频任务（提交时写入，或在恢复时用于重建）。
     pub fn upsert_video_task(&self, r: &VideoTaskRecord) -> anyhow::Result<()> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         conn.execute(
             "INSERT INTO video_tasks(task_id, project_id, prompt, content, meta, resolution,
                                      duration, ratio, status, url, error, created_at, updated_at)
@@ -564,7 +625,10 @@ impl Storage {
         url: Option<&str>,
         error: Option<&str>,
     ) -> anyhow::Result<()> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         let now = chrono::Utc::now().timestamp_millis();
         conn.execute(
             "UPDATE video_tasks SET status=?1, url=?2, error=?3, updated_at=?4 WHERE task_id=?5",
@@ -575,7 +639,10 @@ impl Storage {
 
     /// 列出某项目的所有持久化视频任务（按创建时间倒序）。
     pub fn list_video_tasks(&self, project_id: &str) -> anyhow::Result<Vec<VideoTaskRecord>> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         let mut stmt = conn.prepare(
             "SELECT task_id, project_id, prompt, content, meta, resolution, duration, ratio,
                     status, url, error, created_at, updated_at
@@ -591,7 +658,10 @@ impl Storage {
 
     /// 列出所有"未落定"（queued/running）的视频任务，用于启动恢复重新挂轮询。
     pub fn list_pending_video_tasks(&self) -> anyhow::Result<Vec<VideoTaskRecord>> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
         let mut stmt = conn.prepare(
             "SELECT task_id, project_id, prompt, content, meta, resolution, duration, ratio,
                     status, url, error, created_at, updated_at
@@ -616,10 +686,7 @@ impl Storage {
     /// 创建或更新（upsert by id）。如果 id 已存在则覆盖，否则新建。
     /// timestamp 由 Rust 端自动写，调用方不需要传 createdAt/updatedAt。
     /// 注意：upsert 不会保留旧的 agent_use_count —— 调用方需要在新 archive 里回填。
-    pub fn upsert_character_archive(
-        &self,
-        archive: &CharacterArchiveRow,
-    ) -> anyhow::Result<()> {
+    pub fn upsert_character_archive(&self, archive: &CharacterArchiveRow) -> anyhow::Result<()> {
         let conn = self
             .conn
             .lock()
@@ -712,10 +779,7 @@ impl Storage {
             .conn
             .lock()
             .map_err(|e| anyhow::anyhow!("storage mutex poisoned: {e}"))?;
-        let changed = conn.execute(
-            "DELETE FROM character_archives WHERE id = ?1",
-            params![id],
-        )?;
+        let changed = conn.execute("DELETE FROM character_archives WHERE id = ?1", params![id])?;
         Ok(changed as i64)
     }
 
@@ -899,8 +963,8 @@ impl serde::Serialize for CharacterArchiveRow {
         state.serialize_field("referenceImageAssetIds", &ref_ids)?;
         state.serialize_field("styleContractId", &self.style_contract_id)?;
         state.serialize_field("promptSnippet", &self.prompt_snippet)?;
-        let tags: Vec<String> = serde_json::from_str(&self.tags_json)
-            .map_err(serde::ser::Error::custom)?;
+        let tags: Vec<String> =
+            serde_json::from_str(&self.tags_json).map_err(serde::ser::Error::custom)?;
         state.serialize_field("tags", &tags)?;
         state.serialize_field("agentUseCount", &self.agent_use_count)?;
         state.serialize_field("createdAt", &self.created_at)?;

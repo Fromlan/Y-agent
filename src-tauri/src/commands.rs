@@ -132,10 +132,7 @@ fn infer_mime(bytes: &[u8], path: &Path) -> Option<&'static str> {
         Some("image/gif")
     } else {
         // SVG / XML 文本头
-        let head = bytes
-            .iter()
-            .take_while(|b| b.is_ascii_whitespace())
-            .count();
+        let head = bytes.iter().take_while(|b| b.is_ascii_whitespace()).count();
         if head < bytes.len()
             && (bytes[head..].starts_with(b"<?xml") || bytes[head..].starts_with(b"<svg"))
         {
@@ -283,9 +280,11 @@ pub async fn jimeng_generate(
                 layer_decomposition: params.layer_decomposition,
                 watermark: params.watermark,
                 output_format: params.output_format,
-                tools: params
-                    .tools
-                    .map(|v| v.into_iter().map(|t| jimeng::ToolSpec { kind: t }).collect()),
+                tools: params.tools.map(|v| {
+                    v.into_iter()
+                        .map(|t| jimeng::ToolSpec { kind: t })
+                        .collect()
+                }),
                 optimize_prompt_options: params
                     .optimize_prompt_mode
                     .map(|m| jimeng::OptimizePromptOptions { mode: Some(m) }),
@@ -299,18 +298,16 @@ pub async fn jimeng_generate(
     // P5：把外链 URL 全部下载到本地 cache（24h 失效兜底）
     // 用 batch_id 把这次生成的所有图放到同一目录
     let batch_id = uuid::Uuid::new_v4().to_string();
-    let cache_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(map_err)?
-        .join("assets");
+    let cache_dir = app.path().app_data_dir().map_err(map_err)?.join("assets");
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| format!("reqwest client build failed: {e}"))?;
     let mut images = result.images;
     for (i, img) in images.iter_mut().enumerate() {
-        if let Some(p) = jimeng::download_to_cache(&client, &img.url, &cache_dir, &batch_id, i, None).await {
+        if let Some(p) =
+            jimeng::download_to_cache(&client, &img.url, &cache_dir, &batch_id, i, None).await
+        {
             img.local_path = Some(p.to_string_lossy().to_string());
         }
     }
@@ -371,9 +368,11 @@ pub async fn jimeng_generate_stream(
                 layer_decomposition: params.layer_decomposition,
                 watermark: params.watermark,
                 output_format: params.output_format,
-                tools: params
-                    .tools
-                    .map(|v| v.into_iter().map(|t| jimeng::ToolSpec { kind: t }).collect()),
+                tools: params.tools.map(|v| {
+                    v.into_iter()
+                        .map(|t| jimeng::ToolSpec { kind: t })
+                        .collect()
+                }),
                 optimize_prompt_options: params
                     .optimize_prompt_mode
                     .map(|m| jimeng::OptimizePromptOptions { mode: Some(m) }),
@@ -386,11 +385,7 @@ pub async fn jimeng_generate_stream(
     let app_for_emit = app.clone();
     let rid_for_task = request_id.clone();
     // P5：本地缓存目录（按 request_id 隔离）
-    let cache_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(map_err)?
-        .join("assets");
+    let cache_dir = app.path().app_data_dir().map_err(map_err)?.join("assets");
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
@@ -403,82 +398,93 @@ pub async fn jimeng_generate_stream(
         let client_inner = client.clone();
         // P5：本地化用的 rid（独立 clone，避免 closure 互相打架）
         let rid_for_localize = rid_for_task.clone();
-        let result = jimeng::generate_stream(
-            &api_key,
-            p,
-            rid_for_task,
-            move |event| {
-                // P5：对 PartialImage/PartialImageB64 异步下载到本地，再回填 local_path
-                let app_for_dl = app_inside.clone();
-                let cache_for_dl = cache_dir_inner.clone();
-                let client_for_dl = client_inner.clone();
-                let rid_for_dl = rid_for_localize.clone();
-                // 必须在 spawn 前取出 event 里需要的字段（因为 event 后面要 move）
-                let download_target: Option<(String, i32, String, Option<String>)> = match &event {
-                    jimeng::StreamEvent::PartialImage { url, index, output_format, .. } => {
-                        Some((rid_for_dl.clone(), *index, url.clone(), output_format.clone()))
-                    }
-                    _ => None,
-                };
-                let b64_target: Option<(String, i32, String, Option<String>)> = match &event {
-                    jimeng::StreamEvent::PartialImageB64 { b64, index, output_format, .. } => {
-                        Some((rid_for_dl.clone(), *index, b64.clone(), output_format.clone()))
-                    }
-                    _ => None,
-                };
-                let _ = app_inside.emit("jimeng://stream", &event);
+        let result = jimeng::generate_stream(&api_key, p, rid_for_task, move |event| {
+            // P5：对 PartialImage/PartialImageB64 异步下载到本地，再回填 local_path
+            let app_for_dl = app_inside.clone();
+            let cache_for_dl = cache_dir_inner.clone();
+            let client_for_dl = client_inner.clone();
+            let rid_for_dl = rid_for_localize.clone();
+            // 必须在 spawn 前取出 event 里需要的字段（因为 event 后面要 move）
+            let download_target: Option<(String, i32, String, Option<String>)> = match &event {
+                jimeng::StreamEvent::PartialImage {
+                    url,
+                    index,
+                    output_format,
+                    ..
+                } => Some((
+                    rid_for_dl.clone(),
+                    *index,
+                    url.clone(),
+                    output_format.clone(),
+                )),
+                _ => None,
+            };
+            let b64_target: Option<(String, i32, String, Option<String>)> = match &event {
+                jimeng::StreamEvent::PartialImageB64 {
+                    b64,
+                    index,
+                    output_format,
+                    ..
+                } => Some((
+                    rid_for_dl.clone(),
+                    *index,
+                    b64.clone(),
+                    output_format.clone(),
+                )),
+                _ => None,
+            };
+            let _ = app_inside.emit("jimeng://stream", &event);
 
-                if let Some((rid, idx, url, output_format)) = download_target {
-                    tokio::spawn(async move {
-                        if let Some(p) = jimeng::download_to_cache(
-                            &client_for_dl,
-                            &url,
-                            &cache_for_dl,
-                            &rid,
-                            idx as usize,
-                            None,
-                        )
-                        .await
-                        {
-                            let _ = app_for_dl.emit(
-                                "jimeng://stream",
-                                &jimeng::StreamEvent::PartialImage {
-                                    request_id: rid,
-                                    index: idx,
-                                    url,
-                                    size: None,
-                                    local_path: Some(p.to_string_lossy().to_string()),
-                                    output_format,
-                                },
-                            );
-                        }
-                    });
-                } else if let Some((rid, idx, b64, output_format)) = b64_target {
-                    tokio::spawn(async move {
-                        let dir = cache_for_dl.join(&rid);
-                        let _ = tokio::fs::create_dir_all(&dir).await;
-                        let dst = dir.join(format!("{idx}.png"));
-                        match B64.decode(b64.as_bytes()) {
-                            Ok(bytes) => {
-                                if tokio::fs::write(&dst, &bytes).await.is_ok() {
-                                    let _ = app_for_dl.emit(
-                                        "jimeng://stream",
-                                        &jimeng::StreamEvent::PartialImageB64 {
-                                            request_id: rid,
-                                            index: idx,
-                                            b64,
-                                            local_path: Some(dst.to_string_lossy().to_string()),
-                                            output_format,
-                                        },
-                                    );
-                                }
+            if let Some((rid, idx, url, output_format)) = download_target {
+                tokio::spawn(async move {
+                    if let Some(p) = jimeng::download_to_cache(
+                        &client_for_dl,
+                        &url,
+                        &cache_for_dl,
+                        &rid,
+                        idx as usize,
+                        None,
+                    )
+                    .await
+                    {
+                        let _ = app_for_dl.emit(
+                            "jimeng://stream",
+                            &jimeng::StreamEvent::PartialImage {
+                                request_id: rid,
+                                index: idx,
+                                url,
+                                size: None,
+                                local_path: Some(p.to_string_lossy().to_string()),
+                                output_format,
+                            },
+                        );
+                    }
+                });
+            } else if let Some((rid, idx, b64, output_format)) = b64_target {
+                tokio::spawn(async move {
+                    let dir = cache_for_dl.join(&rid);
+                    let _ = tokio::fs::create_dir_all(&dir).await;
+                    let dst = dir.join(format!("{idx}.png"));
+                    match B64.decode(b64.as_bytes()) {
+                        Ok(bytes) => {
+                            if tokio::fs::write(&dst, &bytes).await.is_ok() {
+                                let _ = app_for_dl.emit(
+                                    "jimeng://stream",
+                                    &jimeng::StreamEvent::PartialImageB64 {
+                                        request_id: rid,
+                                        index: idx,
+                                        b64,
+                                        local_path: Some(dst.to_string_lossy().to_string()),
+                                        output_format,
+                                    },
+                                );
                             }
-                            Err(e) => log::warn!("decode b64 failed: {e}"),
                         }
-                    });
-                }
-            },
-        )
+                        Err(e) => log::warn!("decode b64 failed: {e}"),
+                    }
+                });
+            }
+        })
         .await;
         if let Err(e) = result {
             // 兜底：stream 函数本身没 emit Aborted 时（理论上不应发生）
@@ -536,7 +542,10 @@ pub fn list_projects(state: State<'_, Mutex<AppState>>) -> Result<Vec<JsProject>
 }
 
 #[tauri::command]
-pub fn create_project(name: String, state: State<'_, Mutex<AppState>>) -> Result<JsProject, String> {
+pub fn create_project(
+    name: String,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<JsProject, String> {
     let s = state.lock().map_err(map_err)?;
     let conn = s.storage.conn.lock().map_err(map_err)?;
     let id = uuid::Uuid::new_v4().to_string();
@@ -686,7 +695,11 @@ pub async fn create_asset(
                 params.size,
                 params.ref_count as i64,
                 params.cost_ms as i64,
-                if params.is_layer_decomposition { 1i64 } else { 0i64 },
+                if params.is_layer_decomposition {
+                    1i64
+                } else {
+                    0i64
+                },
                 payload_str,
                 now,
             ],
@@ -751,10 +764,7 @@ pub fn list_assets(
 }
 
 #[tauri::command]
-pub fn delete_asset(
-    id: String,
-    state: State<'_, Mutex<AppState>>,
-) -> Result<(), String> {
+pub fn delete_asset(id: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
     // 1) 先拿 app_data_dir,后面清文件要拼路径
     let app_dir = {
         let s = state.lock().map_err(map_err)?;
@@ -953,7 +963,11 @@ fn write_local_paths_to_payload(
         .map(|a| !a.is_empty())
         .unwrap_or(false);
     let is_layer_mode = !has_urls && has_layers;
-    let field = if is_layer_mode { "layerLocalPaths" } else { "localPaths" };
+    let field = if is_layer_mode {
+        "layerLocalPaths"
+    } else {
+        "localPaths"
+    };
     // P0+：bbox 链路诊断。写回前打一次 bbox 摘要,写回后再打一次。
     // 如果 before 都有、after 没了 → 说明 `as_object_mut().insert` 之外
     // 还有路径在丢字段（理论上不应该，但加 log 兜底确认）。
@@ -1225,7 +1239,10 @@ pub fn backfill_output_format(
                             .and_then(|v| v.as_i64())
                             .unwrap_or(0)
                     });
-                    sorted.first().and_then(|l| l.get("url")).and_then(|u| u.as_str())
+                    sorted
+                        .first()
+                        .and_then(|l| l.get("url"))
+                        .and_then(|u| u.as_str())
                 })
                 .or_else(|| {
                     payload
@@ -1398,8 +1415,12 @@ async fn download_and_write_candidates(
             let write_result: Result<Option<Vec<String>>, String> = match state_in_spawn.lock() {
                 Ok(g) => match g.storage.conn.lock() {
                     Ok(conn) => {
-                        let r =
-                            write_local_paths_to_payload(&conn, &app_dir_inner, &asset_id, &existing);
+                        let r = write_local_paths_to_payload(
+                            &conn,
+                            &app_dir_inner,
+                            &asset_id,
+                            &existing,
+                        );
                         if r.is_ok() {
                             let cleaned: Vec<String> = existing
                                 .iter()
@@ -1508,7 +1529,10 @@ pub async fn startup_backfill_assets(app: AppHandle) {
     match download_and_write_candidates(candidates, app).await {
         Ok(r) => log::info!(
             "startup backfill done: scanned={} downloaded={} failed={} broken_marked={}",
-            r.scanned, r.downloaded, r.failed, r.broken_marked
+            r.scanned,
+            r.downloaded,
+            r.failed,
+            r.broken_marked
         ),
         Err(e) => log::warn!("startup backfill failed: {e}"),
     }
@@ -1545,10 +1569,7 @@ fn mark_asset_broken(conn: &rusqlite::Connection, asset_id: &str) -> Result<(), 
 /// 通用 KV 偏好。前端用同一个 command 读写 default model / size 等。
 /// value 必须是字符串。
 #[tauri::command]
-pub fn get_pref(
-    key: String,
-    state: State<'_, Mutex<AppState>>,
-) -> Result<Option<String>, String> {
+pub fn get_pref(key: String, state: State<'_, Mutex<AppState>>) -> Result<Option<String>, String> {
     let s = state.lock().map_err(map_err)?;
     s.storage.get_kv(&key).map_err(map_err)
 }
@@ -1572,11 +1593,7 @@ pub fn set_pref(
 pub fn read_image_data_url(path: String, app: AppHandle) -> Result<String, String> {
     let p = std::path::PathBuf::from(&path);
     // 路径必须在 app_data_dir/assets 下
-    let assets_root = app
-        .path()
-        .app_data_dir()
-        .map_err(map_err)?
-        .join("assets");
+    let assets_root = app.path().app_data_dir().map_err(map_err)?.join("assets");
     let canonical_assets = assets_root
         .canonicalize()
         .unwrap_or_else(|_| assets_root.clone());
@@ -1607,10 +1624,7 @@ pub fn read_image_data_url(path: String, app: AppHandle) -> Result<String, Strin
     };
 
     // SVG / XML 文本头：跳过前导 ASCII 空白再判
-    let head_offset = bytes
-        .iter()
-        .take_while(|b| b.is_ascii_whitespace())
-        .count();
+    let head_offset = bytes.iter().take_while(|b| b.is_ascii_whitespace()).count();
     let looks_like_svg = head_offset < bytes.len()
         && (bytes[head_offset..].starts_with(b"<?xml")
             || bytes[head_offset..].starts_with(b"<svg"));
@@ -1644,7 +1658,9 @@ pub fn read_image_data_url(path: String, app: AppHandle) -> Result<String, Strin
 #[tauri::command]
 pub fn explain_error(raw: String) -> String {
     let lower = raw.to_lowercase();
-    let hint = if lower.contains("invalidendpointormodel.notfound") || lower.contains("\"code\":\"notfound\"") {
+    let hint = if lower.contains("invalidendpointormodel.notfound")
+        || lower.contains("\"code\":\"notfound\"")
+    {
         "模型 ID 不存在或账号未开通。在 [火山方舟控制台](https://console.volcengine.com/ark/region:cn-beijing/openManagement) 检查模型详情。"
     } else if raw.contains("5.0 Pro 不支持组图") {
         "5.0 Pro 不支持组图（sequential_image_generation），请改用 5.0 Lite / 4.5 / 4.0，或去掉「数量」参数。"
@@ -1665,7 +1681,8 @@ pub fn explain_error(raw: String) -> String {
         "服务端内部错误（通常 5xx）。重试一次，或等几分钟后回来。"
     } else if lower.contains("dial tcp")
         || lower.contains("connection refused")
-        || (lower.contains("error while downloading") && (lower.contains("asset.localhost") || lower.contains("asset://")))
+        || (lower.contains("error while downloading")
+            && (lower.contains("asset.localhost") || lower.contains("asset://")))
     {
         // 修复：原始 raw 错误可能已经是 dataURL（Rust 端自动转过），但 explainError 看到的可能是
         // 用户界面上展示的二次错误。匹配 dial tcp / connection refused / asset.localhost fetch 失败
@@ -1758,10 +1775,7 @@ pub fn agent_llm_get(state: State<'_, Mutex<AppState>>) -> Result<Option<String>
 
 /// 写 Agent LLM 配置（JSON 字符串）。
 #[tauri::command]
-pub fn agent_llm_update(
-    json: String,
-    state: State<'_, Mutex<AppState>>,
-) -> Result<(), String> {
+pub fn agent_llm_update(json: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
     let s = state.lock().map_err(map_err)?;
     s.storage.set_agent_llm(&json).map_err(map_err)
 }
@@ -1794,9 +1808,7 @@ pub fn chat_message_list(
     state: State<'_, Mutex<AppState>>,
 ) -> Result<Vec<String>, String> {
     let s = state.lock().map_err(map_err)?;
-    s.storage
-        .list_chat_messages(&session_id)
-        .map_err(map_err)
+    s.storage.list_chat_messages(&session_id).map_err(map_err)
 }
 
 /// 插入一条消息，返回消息 id。
@@ -1937,7 +1949,9 @@ pub fn split_sprite_sheet(
     use std::io::Write;
 
     if rows == 0 || cols == 0 {
-        return Err(format!("rows 和 cols 必须 ≥ 1，实际 rows={rows} cols={cols}"));
+        return Err(format!(
+            "rows 和 cols 必须 ≥ 1，实际 rows={rows} cols={cols}"
+        ));
     }
     let base_name = base_name.unwrap_or_else(|| "tile".to_string());
 
@@ -1982,8 +1996,7 @@ pub fn split_sprite_sheet(
 
     // 5. （可选）打 ZIP
     let zip_path = if output_zip {
-        let zip_path = std::path::Path::new(&output_dir)
-            .join(format!("{base_name}.zip"));
+        let zip_path = std::path::Path::new(&output_dir).join(format!("{base_name}.zip"));
         let file = fs::File::create(&zip_path).map_err(|e| format!("创建 zip 失败：{e}"))?;
         let mut zip = zip::ZipWriter::new(file);
         let options: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
@@ -1998,7 +2011,8 @@ pub fn split_sprite_sheet(
             zip.start_file(name, options)
                 .map_err(|e| format!("写 zip 失败：{e}"))?;
             let bytes = fs::read(p).map_err(|e| format!("读 {} 失败：{e}", tile.path))?;
-            zip.write_all(&bytes).map_err(|e| format!("写 zip 内容失败：{e}"))?;
+            zip.write_all(&bytes)
+                .map_err(|e| format!("写 zip 内容失败：{e}"))?;
         }
         zip.finish().map_err(|e| format!("关闭 zip 失败：{e}"))?;
         Some(zip_path.to_string_lossy().into_owned())
@@ -2033,9 +2047,7 @@ pub fn split_sprite_sheet(
 
 use crate::state::VideoTaskHandle;
 use crate::storage::VideoTaskRecord;
-use crate::video::{
-    self, ContentItem, VideoSubmitReq, VideoTask, VideoTaskError,
-};
+use crate::video::{self, ContentItem, VideoSubmitReq, VideoTask, VideoTaskError};
 use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
 
@@ -2084,10 +2096,7 @@ pub struct JsVideoSubmitParams {
 pub enum JsVideoEvent {
     /// 任务被服务端接受，正在排队 / 生成中
     #[serde(rename_all = "camelCase")]
-    Progress {
-        task_id: String,
-        status: String,
-    },
+    Progress { task_id: String, status: String },
     /// 生成成功，附视频 URL（已下载到本地 cache）
     #[serde(rename_all = "camelCase")]
     Succeeded {
@@ -2107,9 +2116,7 @@ pub enum JsVideoEvent {
     },
     /// 用户主动取消
     #[serde(rename_all = "camelCase")]
-    Cancelled {
-        task_id: String,
-    },
+    Cancelled { task_id: String },
 }
 
 impl JsVideoEvent {
@@ -2162,7 +2169,10 @@ fn validate_archive_input(input: &JsCharacterArchiveUpsert) -> Result<String, St
     }
     // 2. scope 必须合法
     if input.scope != "project" && input.scope != "global" {
-        return Err(format!("scope 必须是 'project' 或 'global'，收到 '{}'", input.scope));
+        return Err(format!(
+            "scope 必须是 'project' 或 'global'，收到 '{}'",
+            input.scope
+        ));
     }
     // 3. scope=project 必须有 projectId，scope=global 必须没有 projectId
     match input.scope.as_str() {
@@ -2207,8 +2217,8 @@ fn archive_input_to_row(
     input: JsCharacterArchiveUpsert,
     generated_id: String,
 ) -> CharacterArchiveRow {
-    let reference_image_asset_ids_json =
-        serde_json::to_string(&input.reference_image_asset_ids).unwrap_or_else(|_| "[]".to_string());
+    let reference_image_asset_ids_json = serde_json::to_string(&input.reference_image_asset_ids)
+        .unwrap_or_else(|_| "[]".to_string());
     let tags_json = serde_json::to_string(&input.tags).unwrap_or_else(|_| "[]".to_string());
     let project_id = if input.scope == "global" {
         None
@@ -2332,10 +2342,7 @@ pub fn get_video_api_key(state: State<'_, Mutex<AppState>>) -> Result<Option<Str
 }
 
 #[tauri::command]
-pub fn set_video_api_key(
-    key: String,
-    state: State<'_, Mutex<AppState>>,
-) -> Result<(), String> {
+pub fn set_video_api_key(key: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
     let s = state.lock().map_err(map_err)?;
     let enc = s.cipher.encrypt(&key).map_err(map_err)?;
     s.storage.put_kv(KEY_VIDEO_KV, &enc).map_err(map_err)?;
@@ -2514,7 +2521,10 @@ async fn poll_video_task(
         }
         // 2. 检查超时
         if start.elapsed() > POLL_MAX_DURATION {
-            log::warn!("video task {task_id} timed out after {:?}", POLL_MAX_DURATION);
+            log::warn!(
+                "video task {task_id} timed out after {:?}",
+                POLL_MAX_DURATION
+            );
             let msg = format!("轮询超时（{} 分钟）", POLL_MAX_DURATION.as_secs() / 60);
             persist_video_terminal(&app, &task_id, "failed", None, Some(&msg));
             JsVideoEvent::Failed {
@@ -2555,9 +2565,16 @@ async fn poll_video_task(
                                         .ok();
                                     if let Some(c) = client {
                                         let asset_id = task_id.replace("demo-", "video-");
-                                        jimeng::download_to_cache(&c, url, &dir, &asset_id, 0, Some("mp4"))
-                                            .await
-                                            .map(|p| p.to_string_lossy().to_string())
+                                        jimeng::download_to_cache(
+                                            &c,
+                                            url,
+                                            &dir,
+                                            &asset_id,
+                                            0,
+                                            Some("mp4"),
+                                        )
+                                        .await
+                                        .map(|p| p.to_string_lossy().to_string())
                                     } else {
                                         None
                                     }
@@ -2568,7 +2585,13 @@ async fn poll_video_task(
                             _ => None,
                         };
                         // P10/M2：成功 → 终态写库（url 存起来，给历史/资产恢复兜底）
-                        persist_video_terminal(&app, &task_id, "succeeded", task.url.as_deref(), None);
+                        persist_video_terminal(
+                            &app,
+                            &task_id,
+                            "succeeded",
+                            task.url.as_deref(),
+                            None,
+                        );
                         JsVideoEvent::Succeeded {
                             task_id: task_id.clone(),
                             url: task.url.clone().unwrap_or_default(),
@@ -2667,7 +2690,10 @@ fn persist_video_terminal(
 ) {
     if let Some(state) = app.try_state::<Mutex<AppState>>() {
         if let Ok(s) = state.lock() {
-            if let Err(e) = s.storage.update_video_task_terminal(task_id, status, url, error) {
+            if let Err(e) = s
+                .storage
+                .update_video_task_terminal(task_id, status, url, error)
+            {
                 log::warn!("persist video terminal {task_id} ({status}) failed: {e}");
             }
         }
@@ -2694,7 +2720,9 @@ pub async fn startup_video_task_recovery(app: AppHandle) {
             None => return,
         };
         let Ok(g) = s.lock() else { return };
-        let Ok(enc) = g.storage.get_kv(KEY_VIDEO_KV) else { return };
+        let Ok(enc) = g.storage.get_kv(KEY_VIDEO_KV) else {
+            return;
+        };
         let Some(enc) = enc else { return };
         match g.cipher.decrypt(&enc) {
             Ok(k) => k,
@@ -2751,7 +2779,6 @@ pub async fn startup_video_task_recovery(app: AppHandle) {
         });
     }
 }
-
 
 // ============================================================================
 // P9: H3-Context-IR 视频提示词增强

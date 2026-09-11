@@ -190,7 +190,9 @@ pub fn validate_submit_params(req: &VideoSubmitReq) -> Result<(), String> {
         _ => false,
     });
     if !has_text {
-        return Err("InvalidParameter: content 必须包含一个非空 text 项（prompt is required）".into());
+        return Err(
+            "InvalidParameter: content 必须包含一个非空 text 项（prompt is required）".into(),
+        );
     }
 
     // 场景判定 + ratio 规则
@@ -203,7 +205,9 @@ pub fn validate_submit_params(req: &VideoSubmitReq) -> Result<(), String> {
                 return Err("InvalidParameter: t2va 场景必须指定 ratio（21:9 / 16:9 / 4:3 / 1:1 / 3:4 / 9:16）".into());
             }
             if ratio == "adaptive" {
-                return Err("InvalidParameter: t2va 场景 ratio 不能是 \'adaptive\'（必须显式指定）".into());
+                return Err(
+                    "InvalidParameter: t2va 场景 ratio 不能是 \'adaptive\'（必须显式指定）".into(),
+                );
             }
         }
         "i2va" => {
@@ -243,7 +247,10 @@ pub fn detect_scenario(content: &[ContentItem]) -> Result<String, String> {
         }
     }
     if has_ref && has_frame {
-        return Err("InvalidParameter: 图生视频（first_frame/last_frame）与多模态参考（reference_*）互斥".into());
+        return Err(
+            "InvalidParameter: 图生视频（first_frame/last_frame）与多模态参考（reference_*）互斥"
+                .into(),
+        );
     }
     Ok(if has_ref {
         "r2va".into()
@@ -280,7 +287,11 @@ pub async fn submit(api_key: &str, req: VideoSubmitReq) -> anyhow::Result<String
     if is_demo_key(api_key) {
         let fake_id = format!(
             "demo-{}",
-            uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("0")
+            uuid::Uuid::new_v4()
+                .to_string()
+                .split('-')
+                .next()
+                .unwrap_or("0")
         );
         log::info!("video submit (demo): task_id={}", fake_id);
         return Ok(fake_id);
@@ -408,11 +419,15 @@ mod tests {
     use super::*;
 
     fn text(s: &str) -> ContentItem {
-        ContentItem::Text { text: s.to_string() }
+        ContentItem::Text {
+            text: s.to_string(),
+        }
     }
     fn image_url(url: &str, role: Option<&str>) -> ContentItem {
         ContentItem::ImageUrl {
-            image_url: ImageUrlRef { url: url.to_string() },
+            image_url: ImageUrlRef {
+                url: url.to_string(),
+            },
             role: role.map(|s| s.to_string()),
         }
     }
@@ -435,7 +450,13 @@ mod tests {
 
     // ---------- validate_submit_params ----------
 
-    fn req(model: &str, resolution: &str, duration: u32, content: Vec<ContentItem>, ratio: Option<&str>) -> VideoSubmitReq {
+    fn req(
+        model: &str,
+        resolution: &str,
+        duration: u32,
+        content: Vec<ContentItem>,
+        ratio: Option<&str>,
+    ) -> VideoSubmitReq {
         VideoSubmitReq {
             model: model.to_string(),
             content,
@@ -522,7 +543,10 @@ mod tests {
 
     #[test]
     fn detect_i2va_with_first_frame() {
-        let c = vec![text("hi"), image_url("https://e/x.png", Some("first_frame"))];
+        let c = vec![
+            text("hi"),
+            image_url("https://e/x.png", Some("first_frame")),
+        ];
         assert_eq!(detect_scenario(&c).unwrap(), "i2va");
     }
 
@@ -534,7 +558,10 @@ mod tests {
 
     #[test]
     fn detect_r2va_with_reference_image() {
-        let c = vec![text("hi"), image_url("https://e/x.png", Some("reference_image"))];
+        let c = vec![
+            text("hi"),
+            image_url("https://e/x.png", Some("reference_image")),
+        ];
         assert_eq!(detect_scenario(&c).unwrap(), "r2va");
     }
 
@@ -553,19 +580,34 @@ mod tests {
 
     #[test]
     fn fix_i2va_always_adaptive() {
-        assert_eq!(fix_ratio_for_scenario("i2va", Some("16:9".into())), Some("adaptive".into()));
-        assert_eq!(fix_ratio_for_scenario("i2va", None), Some("adaptive".into()));
+        assert_eq!(
+            fix_ratio_for_scenario("i2va", Some("16:9".into())),
+            Some("adaptive".into())
+        );
+        assert_eq!(
+            fix_ratio_for_scenario("i2va", None),
+            Some("adaptive".into())
+        );
     }
 
     #[test]
     fn fix_r2va_defaults_adaptive() {
-        assert_eq!(fix_ratio_for_scenario("r2va", None), Some("adaptive".into()));
-        assert_eq!(fix_ratio_for_scenario("r2va", Some("16:9".into())), Some("16:9".into()));
+        assert_eq!(
+            fix_ratio_for_scenario("r2va", None),
+            Some("adaptive".into())
+        );
+        assert_eq!(
+            fix_ratio_for_scenario("r2va", Some("16:9".into())),
+            Some("16:9".into())
+        );
     }
 
     #[test]
     fn fix_t2va_preserves_ratio() {
-        assert_eq!(fix_ratio_for_scenario("t2va", Some("9:16".into())), Some("9:16".into()));
+        assert_eq!(
+            fix_ratio_for_scenario("t2va", Some("9:16".into())),
+            Some("9:16".into())
+        );
     }
 
     // ---------- parse_data_url ----------

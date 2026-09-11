@@ -1,9 +1,9 @@
 mod commands;
-mod paths;
-mod error;
 mod crypto;
+mod error;
 mod h3_context_ir;
 mod jimeng;
+mod paths;
 mod state;
 mod storage;
 mod video;
