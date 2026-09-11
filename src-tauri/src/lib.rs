@@ -1,4 +1,6 @@
 mod commands;
+mod paths;
+mod error;
 mod crypto;
 mod h3_context_ir;
 mod jimeng;
