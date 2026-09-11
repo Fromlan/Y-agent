@@ -1,4 +1,5 @@
 use crate::jimeng::{self, GenerateImageParams, GeneratedImage};
+use crate::paths;
 use crate::state::AppState;
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use image::GenericImageView;
@@ -29,10 +30,7 @@ fn map_err<E: std::fmt::Display>(e: E) -> String {
 /// `http://asset.localhost/...` 后，jimeng 服务端在公网 fetch 不到
 /// （错误: dial tcp [::1]:80: connect: connection refused）的问题。
 fn resolve_local_image_urls(images: Vec<String>, app: &AppHandle) -> Vec<String> {
-    let assets_root = match app.path().app_data_dir() {
-        Ok(d) => d.join("assets"),
-        Err(_) => return images,
-    };
+    let assets_root = paths::assets_root(app);
     let canonical_assets = assets_root
         .canonicalize()
         .unwrap_or_else(|_| assets_root.clone());
@@ -1593,7 +1591,7 @@ pub fn set_pref(
 pub fn read_image_data_url(path: String, app: AppHandle) -> Result<String, String> {
     let p = std::path::PathBuf::from(&path);
     // 路径必须在 app_data_dir/assets 下
-    let assets_root = app.path().app_data_dir().map_err(map_err)?.join("assets");
+    let assets_root = paths::assets_root(&app);
     let canonical_assets = assets_root
         .canonicalize()
         .unwrap_or_else(|_| assets_root.clone());
