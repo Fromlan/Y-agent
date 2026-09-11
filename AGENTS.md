@@ -7,7 +7,7 @@ Y-agent — 游戏美术 AI 工作台。Tauri 2 桌面应用，封装即梦（�
 - **M2 v0.2.0 — shipped**:Agent 对话 + 15 个 Skill + Agent Memory + 5.0 Pro 图层 + 跨重启找回
 - **M3 角色工坊 — shipped(M3.1-M3.5)**:`src/lib/character-archive.ts` 角色档案 CRUD + 跨项目 scope + 6 张参考图附件 + 导入导出 + Agent 工具 `character_use_archive` + 4 个角色类 Skill(`character-sheet` / `character-turnaround` / `expression-grid` / `character-consistency-set`)用 `{{character_archive}}` 占位符
 - **M3.6 角色工坊优化 — shipped**:Workshop 受控组件化 + Editor savingStatus chip + 切档案 flushPending + Picker projectId 真实化 + Tauri IPC `CharacterArchiveRow` 自定义 Serialize 修 `tags_json` 字段名错配 + ErrorBoundary 兜底。归档报告 `doc/plan-m3-character-workshop-closeout.md`
-- **P0+P1 质量完善期 — shipped (2026-09-11, 17 commits)**:质量基建 + 安全 CI + 大型组件拆解准备 + Skill / Agent 引擎扩展接口。详见 `CHANGELOG.md` `[Unreleased]` + `doc/plan-p0p1-polish.md`
+- **P0+P1 质量完善期 — shipped (2026-09-11, 20 commits)**:质量基建 + 安全 CI + 大型组件拆解准备 + Skill / Agent 引擎扩展接口。详见 `CHANGELOG.md` `[Unreleased]` + `doc/plan-p0p1-polish.md`
 
 ## Setup commands
 

@@ -4,7 +4,7 @@
 
 ## [Unreleased]
 
-### P0+P1 完善期 (2026-09-11, 17 commits)
+### P0+P1 完善期 (2026-09-11, 20 commits)
 
 按 AGENTS.md §"提交流程" 的 `feat / fix / refactor / docs / chore / perf / test` scope 分类。
 
