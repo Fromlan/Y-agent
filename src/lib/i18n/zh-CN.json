@@ -1,0 +1,30 @@
+{
+  "app.title": "Y-agent",
+  "app.tagline": "Make. Iterate. Ship.",
+
+  "sidebar.projects": "项目",
+  "sidebar.assets": "资产中心",
+  "sidebar.skills": "Skill 中心",
+  "sidebar.tools": "工具",
+  "sidebar.settings": "设置",
+
+  "settings.title": "设置",
+  "settings.language": "语言",
+  "settings.language.zh-CN": "简体中文",
+  "settings.language.en-US": "English",
+  "settings.apiKey": "API Key",
+  "settings.theme": "主题",
+
+  "toast.successPrefix": "成功",
+  "toast.errorPrefix": "出错了",
+  "toast.warnPrefix": "警告",
+  "toast.infoPrefix": "提示",
+  "toast.retry": "重试",
+
+  "common.cancel": "取消",
+  "common.confirm": "确认",
+  "common.delete": "删除",
+  "common.save": "保存",
+  "common.close": "关闭",
+  "common.loading": "加载中…"
+}

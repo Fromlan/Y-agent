@@ -1,0 +1,30 @@
+{
+  "app.title": "Y-agent",
+  "app.tagline": "Make. Iterate. Ship.",
+
+  "sidebar.projects": "Projects",
+  "sidebar.assets": "Assets",
+  "sidebar.skills": "Skill Hub",
+  "sidebar.tools": "Tools",
+  "sidebar.settings": "Settings",
+
+  "settings.title": "Settings",
+  "settings.language": "Language",
+  "settings.language.zh-CN": "简体中文",
+  "settings.language.en-US": "English",
+  "settings.apiKey": "API Key",
+  "settings.theme": "Theme",
+
+  "toast.successPrefix": "Success",
+  "toast.errorPrefix": "Error",
+  "toast.warnPrefix": "Warning",
+  "toast.infoPrefix": "Info",
+  "toast.retry": "Retry",
+
+  "common.cancel": "Cancel",
+  "common.confirm": "Confirm",
+  "common.delete": "Delete",
+  "common.save": "Save",
+  "common.close": "Close",
+  "common.loading": "Loading…"
+}
