@@ -63,3 +63,108 @@ impl KeyCipher {
         Ok(String::from_utf8(plain)?)
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    /// 拿一个唯一的临时目录,测试结束自动清理
+    fn fresh_tempdir(label: &str) -> std::path::PathBuf {
+        let id = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let pid = std::process::id();
+        let dir = std::env::temp_dir().join(format!("y-agent-crypto-test-{label}-{pid}-{id}"));
+        // 残留就清掉
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// 加密 → 解密 完整往返
+    #[test]
+    fn encrypt_decrypt_round_trip() {
+        let cipher = KeyCipher {
+            key: [7u8; 32],
+        };
+        let plain = "doubao-seedream-test-key-abc123";
+        let enc = cipher.encrypt(plain).unwrap();
+        assert!(!enc.is_empty());
+        let dec = cipher.decrypt(&enc).unwrap();
+        assert_eq!(dec, plain);
+    }
+
+    /// 中文 / Emoji / 长字符串都能正常加解密
+    #[test]
+    fn encrypt_decrypt_unicode() {
+        let cipher = KeyCipher {
+            key: [1u8; 32],
+        };
+        let plain = "中文密钥 🎨 ñ ü — Hello";
+        let enc = cipher.encrypt(plain).unwrap();
+        let dec = cipher.decrypt(&enc).unwrap();
+        assert_eq!(dec, plain);
+    }
+
+    /// 同一明文每次加密密文不同（nonce 随机）
+    #[test]
+    fn encrypt_produces_different_ciphertexts() {
+        let cipher = KeyCipher {
+            key: [9u8; 32],
+        };
+        let plain = "same-plaintext";
+        let enc1 = cipher.encrypt(plain).unwrap();
+        let enc2 = cipher.encrypt(plain).unwrap();
+        assert_ne!(enc1, enc2, "nonce 必须随机,否则重放风险");
+        assert_eq!(cipher.decrypt(&enc1).unwrap(), plain);
+        assert_eq!(cipher.decrypt(&enc2).unwrap(), plain);
+    }
+
+    /// 不同密钥解密失败
+    #[test]
+    fn decrypt_with_wrong_key_fails() {
+        let cipher1 = KeyCipher {
+            key: [1u8; 32],
+        };
+        let cipher2 = KeyCipher {
+            key: [2u8; 32],
+        };
+        let enc = cipher1.encrypt("secret").unwrap();
+        let result = cipher2.decrypt(&enc);
+        assert!(result.is_err(), "不同 key 必须解密失败");
+    }
+
+    /// load_or_create 首次创建文件,二次加载得到相同 key
+    #[test]
+    fn load_or_create_is_idempotent() {
+        let app_dir = fresh_tempdir("idempotent");
+        let cipher1 = KeyCipher::load_or_create(&app_dir).unwrap();
+        let enc = cipher1.encrypt("hello").unwrap();
+        let cipher2 = KeyCipher::load_or_create(&app_dir).unwrap();
+        let dec = cipher2.decrypt(&enc).unwrap();
+        assert_eq!(dec, "hello");
+        let _ = std::fs::remove_dir_all(&app_dir);
+    }
+
+    /// 损坏的 secret.key(长度不对)必须报错而非 panic
+    #[test]
+    fn load_or_create_rejects_wrong_length() {
+        let app_dir = fresh_tempdir("badkey");
+        let key_path = app_dir.join("secret.key");
+        std::fs::write(&key_path, [0u8; 16]).unwrap();
+        let result = KeyCipher::load_or_create(&app_dir);
+        assert!(result.is_err());
+        let _ = std::fs::remove_dir_all(&app_dir);
+    }
+
+    /// 损坏的 secret.key(空文件)必须报错
+    #[test]
+    fn load_or_create_rejects_empty_file() {
+        let app_dir = fresh_tempdir("empty");
+        let key_path = app_dir.join("secret.key");
+        std::fs::write(&key_path, []).unwrap();
+        let result = KeyCipher::load_or_create(&app_dir);
+        assert!(result.is_err());
+        let _ = std::fs::remove_dir_all(&app_dir);
+    }
+}
