@@ -1,0 +1,44 @@
+# gitleaks 自定义规则
+# 默认规则覆盖大多数场景,我们只调整阈值和补充 Y-agent 特定的 allowlist
+# 详细规则: https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml
+
+title = "Y-agent gitleaks 配置"
+
+# 全局 allowlist - 排除非生产代码路径
+[allowlist]
+description = "全局白名单:测试 / 文档 / 临时文件"
+paths = [
+  '''(?i).*\.(log|tmp|bak|swp)$''',          # 临时文件
+  '''(?i)node_modules/''',                    # 依赖
+  '''(?i)dist/''',                            # 构建产物
+  '''(?i)src-tauri/target/''',                # Rust 编译产物
+  '''(?i)brand/''',                           # 品牌资产(可能含示例数据)
+  '''(?i)doc/MiniMax Design.*/''',            # 已 gitignore 的参考素材
+  '''(?i)hyperframes-video/''',                # 历史子项目产物
+]
+
+# 继承默认规则集
+# 默认会扫描 AK / SK / generic-api-key / github-pat / slack-token 等常见密钥模式
+
+# 关闭几个对 Y-agent 来说误报太多的内置规则
+# (例如 .env.example 里的 placeholder 容易被 generic 检测)
+[[rules]]
+id = "generic-api-key"
+description = "通用 API key 检测 (调整阈值减少误报)"
+regex = '''(?i)(?:key|token|secret|password|credential)[\s]*[=:][\s]*['\""]?([a-zA-Z0-9_\-]{32,})['\""]?'''
+keywords = [
+  "key",
+  "token",
+  "secret",
+  "password",
+  "credential",
+]
+
+  [rules.allowlist]
+  description = "doc / 测试 / 示例代码白名单"
+  paths = [
+    '''(?i)doc/.*\.md$''',                     # 文档里引用的示例 key
+    '''(?i).*\.test\.tsx?$''',                # 测试里的 mock key
+    '''(?i).*\.example$''',                    # .env.example 模板
+    '''(?i)README\.md$''',                     # README 引用的示例
+  ]

@@ -29,12 +29,16 @@ jobs:
       # Python 已预装在 windows-latest。
       - run: pnpm run validate:skills
       - run: pnpm run validate:style-contract
+      # P0-#21: 依赖审计 — pnpm audit 阻塞 high 级漏洞
+      - name: pnpm audit (high+ only)
+        run: pnpm audit --prod --audit-level=high
+        continue-on-error: false
 
   # Rust 后端 cargo check（需要 MSVC 工具链，Windows runner 自带）。
   # tauri::generate_context!() 宏需要 ../dist 存在（frontendDist 配置），
   # 所以这里先跑 pnpm install + pnpm build 生成产物再 cargo check。
   backend:
-    name: Backend (cargo check)
+    name: Backend (cargo check + clippy + test)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,9 +54,41 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
+          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
-      - name: cargo check
+      - name: rustfmt check
         working-directory: src-tauri
-        run: cargo check --locked
+        run: cargo fmt --all -- --check
+      - name: clippy (-D warnings)
+        working-directory: src-tauri
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test --locked --lib
+      # P0-#21: Rust 依赖审计 — cargo deny 阻塞 license / advisory 违规
+      - name: cargo deny
+        working-directory: src-tauri
+        run: |
+          cargo install --locked cargo-deny --version "^0.16"
+          cargo deny check
+
+  # P0-#20: Secret scan — gitleaks 拦误 commit 的 API key / 凭据
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest  # gitleaks Docker image 是 linux,windows-latest 装麻烦
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 必须拿全历史让 gitleaks 扫历史 commit
+      - name: Log file (skip pattern)
+        run: |
+          cat <<'EOF' >> .gitleaksignore
+          # 工作区卫生脚本临时日志 - 已 gitignore 但保险
+          *.log
+          EOF
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
