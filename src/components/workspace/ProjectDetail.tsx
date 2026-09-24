@@ -34,7 +34,7 @@ import {
 import PromptBar from "@/components/workspace/PromptBar";
 import AssetBoard from "@/components/workspace/AssetBoard";
 import ChatMessageList from "@/components/workspace/ChatMessageList";
-import ModeSwitch, { type InputMode } from "@/components/workspace/ModeSwitch";
+
 import ToolsTab from "@/components/workspace/ToolsTab";
 import AgentMemoryPanel from "@/components/workspace/AgentMemoryPanel";
 import CharacterWorkshop from "@/components/workspace/CharacterWorkshop";
@@ -47,7 +47,7 @@ interface Props {
   onOpenSettings: () => void;
 }
 
-type ViewTab = "chat" | "assets" | "tools" | "characters";
+type ViewTab = "chat" | "generate" | "video" | "assets" | "characters" | "tools";
 
 export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   const { currentProject, setCurrentProject } = useSession();
@@ -133,7 +133,6 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
       const parsed = JSON.parse(raw);
       if (parsed?.id && typeof parsed.id === "string") {
         setPrompt(`/${parsed.id} `);
-        setInputMode("chat");
         setTab("chat");
         // focus 输入框
         window.setTimeout(() => {
@@ -174,7 +173,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   // P9: H3-Context-IR 提示词增强开关。默认 ON,用户在 VideoPromptBar 里改。
   const [optimizePrompt, setOptimizePrompt] = useState(true);
   // 输入模式：生图（M1 直调）/ 对话（Agent 路由）
-  const [inputMode, setInputMode] = useState<InputMode>("chat");
+
   // P10：视频任务板(state / effects / 事件订阅 / CRUD)统一由 useVideoTaskBoard 管
   // ref 给事件回调读最新值（闭包会过期），state 交给 React 渲染。
   const {
@@ -190,7 +189,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     projectId: currentProject?.id,
     reload,
     toast,
-    inputMode,
+    inputMode: tab,
   });
   // M3：Agent 调 character_use_archive 后存到这里，下一次 jimeng_generate_image 会自动注入 prompt
   // - 用 ref 而非 state：避免 tool handler 内 setState 触发额外 re-render
@@ -410,7 +409,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     });
   };
 
-  // 按当前 inputMode 选择实际提交 callback(声明在 onSubmitGenerate 之后)
+  // 按当前 tab 选择实际提交 callback(声明在 onSubmitGenerate 之后)
 
   // P5+：切项目时主动 backfill 一次，把历史"url 有但 localPath 缺"的资产补下本地。
   // 后端并发下完后通过 `assets://local-backfilled` 事件增量更新到 useProjectBootstrap.assets，
@@ -443,28 +442,6 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
   }, [currentProject?.id]);
 
 
-  // 模式与 tab 同步：
-  // - 切换项目 → 用当前 inputMode 决定初始 tab
-  // - 切换 inputMode → 同步 tab（生图 → 资产，对话 → 对话）
-  // 顶部手动 tab 按钮已移除，ModeSwitch 是唯一入口，这里同步 tab 是预期行为。
-  const lastSyncedProjectIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!currentProject) return;
-    // 切项目时强制同步一次；切 inputMode 时每次都同步
-    const isProjectSwitch = lastSyncedProjectIdRef.current !== currentProject.id;
-    if (isProjectSwitch) {
-      lastSyncedProjectIdRef.current = currentProject.id;
-    }
-    setTab(
-      inputMode === "tools"
-        ? "tools"
-        : inputMode === "characters"
-        ? "characters"
-        : inputMode === "generate" || inputMode === "video"
-        ? "assets"
-        : "chat"
-    );
-  }, [currentProject, inputMode]);
 
   if (!currentProject) {
     return (
@@ -590,8 +567,8 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     }
   };
 
-  // 按当前 inputMode 选择实际提交 callback
-  const onSubmit = inputMode === "chat" ? onSubmitChat : inputMode === "video" ? onSubmitVideo : onSubmitGenerate;
+  // 按当前 tab 选择实际提交 callback
+  const onSubmit = tab === "chat" ? onSubmitChat : tab === "video" ? onSubmitVideo : onSubmitGenerate;
 
   // -------------------------------------------------------------------------
   /** 清空所有对话历史 */
@@ -625,13 +602,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
       {/* M-1: 二级 nav — 对话/资产/角色/工具 */}
       <ProjectTabs
         active={tab as ProjectTab}
-        onChange={(t) => {
-          setTab(t);
-          // 同步 inputMode:tab 跟 inputMode 仍走原 useEffect 同步逻辑
-          // (inputMode 一变会同步 tab,所以这里反向 set 一次)
-          if (t === "tools") setInputMode("tools");
-          else if (t === "characters") setInputMode("characters");
-        }}
+        onChange={setTab}
         assetCount={assets.length}
       />
 
@@ -683,7 +654,6 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
               // - O-6: focus=true 时 setTimeout focus 输入框,1 步到位
               if (id) {
                 setSelectedArchiveId(id);
-                setInputMode("chat");
                 setTab("chat");
                 const archive = characterArchives.find((a) => a.id === id);
                 toast.success(
@@ -711,7 +681,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
         ) : (
           <div className="flex-1 overflow-y-auto">
             <div className="p-4">
-              {inputMode === "video" && Object.keys(videoTasks).length > 0 && (
+              {tab === "video" && Object.keys(videoTasks).length > 0 && (
                 <div className="mb-4 space-y-3">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-xs font-medium text-text-muted">视频任务</span>
@@ -803,7 +773,6 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
                     } catch {
                       // ignore
                     }
-                    setInputMode("chat");
                     setTab("chat");
                     toast.info("已切换到对话,视频 URL 已加入参考图");
                     setTimeout(() => {
@@ -821,8 +790,8 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
       </div>
 
       {/* 底部统一输入区 */}
-      <div className="border-t border-border bg-bg-panel p-4 flex-shrink-0">
-        {inputMode === "video" && hasVideoKey === false && (
+      <div className="border-t border-border bg-bg-panel p-4 flex-shrink-0 shadow-[0_-4px_16px_rgba(0,0,0,0.05)]">
+        {tab === "video" && hasVideoKey === false && (
           <div
             className="mb-2 flex items-center gap-2 px-3 py-2 rounded-md border text-xs"
             style={{
@@ -883,9 +852,8 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
           </div>
         )}
         <div className="flex items-center gap-2 mb-3">
-          <ModeSwitch mode={inputMode} onChange={setInputMode} disabled={generating} />
         </div>
-        {inputMode === "video" ? (
+        {tab === "video" ? (
           <VideoPromptBar
             prompt={videoPrompt}
             setPrompt={setVideoPrompt}
@@ -904,7 +872,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
             generating={videoSubmitting}
             onSubmit={onSubmit}
           />
-        ) : inputMode !== "tools" && (
+        ) : (tab === "chat" || tab === "generate") && (
         <PromptBar
           prompt={prompt}
           setPrompt={setPrompt}
@@ -927,13 +895,12 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
           transparent={transparent}
           setTransparent={setTransparent}
           generating={generating}
-          inputMode={inputMode}
+          inputMode={tab === "generate" ? "generate" : "chat"}
           projectId={currentProject.id}
           archives={characterArchives}
           selectedArchiveId={selectedArchiveId}
           setSelectedArchiveId={setSelectedArchiveId}
           onOpenCharacterWorkshop={() => {
-            setInputMode("characters");
             setTab("characters");
           }}
           onArchivesChanged={() => void reloadCharacterArchives()}
@@ -952,3 +919,7 @@ export default function ProjectDetail({ onBack, onOpenSettings }: Props) {
     </div>
   );
 }
+
+
+
+

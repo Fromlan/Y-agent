@@ -27,7 +27,7 @@ import { MODEL_OPTIONS, type Asset, type ModelOption, type CharacterArchive } fr
 import type { AgentContext } from "@/lib/agent-memory";
 import type { StyleContract } from "@/lib/style-contract";
 
-export type ViewTab = "chat" | "assets" | "tools" | "characters";
+export type ViewTab = "chat" | "generate" | "video" | "assets" | "tools" | "characters";
 
 export interface UseChatSubmitArgs {
   // 表单 + 视图
@@ -582,3 +582,4 @@ const onSubmitChat = useCallback(async () => {
   
   return { onSubmitChat, onConfirmPlan, onCancelPlan };
 }
+

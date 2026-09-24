@@ -1,6 +1,19 @@
-import { MessageSquare, Image as ImageIcon, Users, Wrench, Video } from "lucide-react";
+import {
+  MessageSquare,
+  Image as ImageIcon,
+  Layers,
+  Users,
+  Wrench,
+  Video,
+} from "lucide-react";
 
-export type ProjectTab = "chat" | "assets" | "characters" | "tools";
+export type ProjectTab =
+  | "chat"
+  | "generate"
+  | "video"
+  | "assets"
+  | "characters"
+  | "tools";
 
 interface Props {
   active: ProjectTab;
@@ -10,9 +23,15 @@ interface Props {
 }
 
 /**
- * M-1 项目内二级 nav(4 个 tab):对话/资产/角色/工具
- * 替代原 ModeSwitch 中"工具/角色"两个 tab(它们被挪到这里)
- * 工具栏放在 header 下方,横排 icon + label,小屏可换行
+ * 项目内主导航(6 项,统一入口)。
+ *
+ * 替代原来的双层导航(ProjectTabs + ModeSwitch):
+ * - 对话:Agent 对话模式
+ * - 生图:直调即梦(底部显示 PromptBar 生成按钮)
+ * - 生视频:直接调 MiniMax H3(底部显示 VideoPromptBar)
+ * - 资产:仅资产库,无输入区
+ * - 工具:高级能力工作台
+ * - 角色:M3 角色工坊
  */
 export default function ProjectTabs({ active, onChange, assetCount }: Props) {
   const items: {
@@ -21,45 +40,57 @@ export default function ProjectTabs({ active, onChange, assetCount }: Props) {
     icon: typeof MessageSquare;
   }[] = [
     { id: "chat", label: "对话", icon: MessageSquare },
-    { id: "assets", label: "资产", icon: ImageIcon },
+    { id: "generate", label: "生图", icon: ImageIcon },
+    { id: "video", label: "生视频", icon: Video },
+    { id: "assets", label: "资产", icon: Layers },
     { id: "characters", label: "角色", icon: Users },
     { id: "tools", label: "工具", icon: Wrench },
   ];
   return (
-    <nav className="h-10 flex items-center gap-1 px-3 border-b border-border bg-bg-panel flex-shrink-0 overflow-x-auto">
+    <nav
+      className="h-10 flex items-center gap-1 px-3 border-b border-border bg-bg-panel flex-shrink-0 overflow-x-auto"
+      role="tablist"
+      aria-label="项目内 tab"
+    >
       {items.map(({ id, label, icon: Icon }) => {
         const on = active === id;
         return (
           <button
             key={id}
             onClick={() => onChange(id)}
-            className={`relative inline-flex items-center gap-1.5 px-3 h-7 rounded-md text-xs transition-colors flex-shrink-0 ${
-              on
-                ? "bg-bg-hover text-text-primary"
-                : "text-text-muted hover:text-text-primary hover:bg-bg-hover"
-            }`}
-            aria-pressed={on}
+            role="tab"
+            aria-selected={on}
+            className={`relative inline-flex items-center gap-1.5 px-3 h-8 rounded-md text-xs
+              transition-colors duration-150 flex-shrink-0
+              ${
+                on
+                  ? "text-text-primary"
+                  : "text-text-muted hover:text-text-primary hover:bg-bg-hover/40"
+              }
+            `}
             title={label}
           >
-            <Icon className="w-3.5 h-3.5" />
+            <Icon
+              className={`w-3.5 h-3.5 transition-colors ${
+                on ? "text-accent" : ""
+              }`}
+            />
             <span>{label}</span>
             {id === "assets" && assetCount !== undefined && assetCount > 0 && (
               <span className="ml-0.5 text-[10px] text-text-muted tabular-nums">
                 {assetCount}
               </span>
             )}
+            {/* active 底部 2px accent 滑入指示条 */}
             {on && (
-              <span className="absolute left-2 right-2 -bottom-px h-0.5 rounded-full bg-accent" />
+              <span
+                className="absolute left-2 right-2 -bottom-[5px] h-0.5 rounded-full bg-accent anim-fade-in"
+                aria-hidden
+              />
             )}
           </button>
         );
       })}
-      {/* 占位:生视频 tab 不在 nav 里,在输入区切换。给个提示 */}
-      <div className="flex-1" />
-      <span className="text-[10px] text-text-muted hidden md:inline">
-        <Video className="w-3 h-3 inline mr-0.5 align-text-bottom" />
-        生视频在输入区切换
-      </span>
     </nav>
   );
 }
