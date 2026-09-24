@@ -6,6 +6,7 @@ if errorlevel 1 (
   exit /b 1
 )
 REM vcvars64 resets PATH; re-prepend cargo
-set "PATH=C:\Users\17123\.cargo\bin;%PATH%"
+set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
 cd /d "%~dp0src-tauri"
 cargo %*
+

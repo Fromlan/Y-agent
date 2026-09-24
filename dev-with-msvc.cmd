@@ -6,7 +6,7 @@ if errorlevel 1 (
   exit /b 1
 )
 REM vcvars64 resets PATH; re-prepend cargo so the tauri CLI can run `cargo metadata`.
-set "PATH=C:\Users\17123\.cargo\bin;%PATH%"
+set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
 cd /d "%~dp0"
 REM Disable ANSI colors so the GBK console does not render Vite/cargo output as mojibake.
 set "NO_COLOR=1"
@@ -18,3 +18,4 @@ REM PowerShell 7+ (pwsh) 是 dev 的运行时依赖 — 自带 PS5.1 不支持 A
 REM 在中文 Windows 上会渲染 tauri/vite/cargo 输出为乱码。装法: winget install Microsoft.PowerShell
 pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0dev-with-msvc.ps1" %*
 exit /b %errorlevel%
+
