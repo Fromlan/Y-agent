@@ -39,6 +39,8 @@ allow = [
     "ISC",
     "0BSD",
     "Zlib",
+    "Unicode-3.0",           # ICU 系列 (icu_*, icu_normalizer 等)
+    "Unicode-DFS-2016",
     "BSL-1.0",                # Boost Software License
     "MPL-2.0",                # Mozilla Public License (弱 copyleft)
     "CC0-1.0",                # Creative Commons Zero
