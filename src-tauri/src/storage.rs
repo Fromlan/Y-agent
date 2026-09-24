@@ -360,7 +360,7 @@ impl Storage {
             .ok();
         let old_checksum = old_json
             .as_deref()
-            .and_then(|s| extract_checksum(s))
+            .and_then(extract_checksum)
             .unwrap_or_default();
         let new_checksum = extract_checksum(json).unwrap_or_default();
 
@@ -459,6 +459,7 @@ impl Storage {
 
     /// 插入一条消息，返回消息 id
     /// `id`：可选自定义 id（前端想保持 in-memory id 与 DB id 一致时传），None 则后端生成 UUID
+    #[allow(clippy::too_many_arguments)] // IPC 薄包装,签名重构需同步改前端 + storage 调用方,代价/收益不划算
     pub fn insert_chat_message(
         &self,
         session_id: &str,
@@ -499,6 +500,7 @@ impl Storage {
 
     /// 更新消息（部分字段）
     /// 所有可选字段：传 Some(v) = 更新；空字符串 = 清空
+    #[allow(clippy::too_many_arguments)] // IPC 薄包装,签名重构需同步改前端 + storage 调用方,代价/收益不划算
     pub fn update_chat_message(
         &self,
         message_id: &str,
@@ -925,7 +927,7 @@ fn row_to_video_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<VideoTaskRecor
 /// - reference_image_asset_ids / tags 是 JSON 字符串数组,内部用 raw String 存 SQLite,
 ///   serde 这里用自定义实现,序列化时解析成 Vec<String> 让前端直接拿到数组
 ///   (否则 #[serde(rename_all = "camelCase")] 会把 `tags_json` 序列化成 `tagsJson`,
-///    跟前端 `CharacterArchive.tags: string[]` 错配 — M3.6 fix)
+///   跟前端 `CharacterArchive.tags: string[]` 错配 — M3.6 fix)
 /// - project_id 在 scope=global 时为 None，scope=project 时必填
 /// - agent_use_count 由 M3.4 Agent 工具触发时自增，upsert 不覆盖（前端回填）
 /// - timestamp 字段在 storage 层自动写，调用方不需要传

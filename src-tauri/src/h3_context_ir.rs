@@ -239,10 +239,8 @@ pub fn validate_submit_params(req: &H3ContextIRReq) -> Result<(), String> {
     // - 有 first_frame/last_frame（图生视频） → adaptive
     // - 有 reference_*（多模态） → adaptive 或具体值
     // - 仅 text（文生视频） → 必填且 ≠ adaptive
-    let scenario = crate::video::detect_scenario(&req.content).map_err(|e| {
-        // detect_scenario 返回的已经是 "InvalidParameter: ..." 形式
-        e
-    })?;
+    // detect_scenario 返回的已经是 "InvalidParameter: ..." 形式
+    let scenario = crate::video::detect_scenario(&req.content)?;
     let ratio = req.ratio.as_deref().unwrap_or("");
     match scenario.as_str() {
         "t2va" => {

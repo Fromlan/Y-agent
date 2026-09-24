@@ -385,8 +385,8 @@ pub async fn query(api_key: &str, task_id: &str) -> anyhow::Result<VideoTask> {
 /// Demo 模式用的占位视频。
 ///
 /// - v1：留空（前端 fallback 走 placeholder 卡片，不阻塞流程）。
-///        要播 demo 视频时，把下面替换成一段真实 mp4 的 base64（≤100KB），
-///        或者改成 `include_bytes!("../assets/demo-video.mp4")` 然后用 B64.encode。
+///   要播 demo 视频时，把下面替换成一段真实 mp4 的 base64（≤100KB），
+///   或者改成 `include_bytes!("../assets/demo-video.mp4")` 然后用 B64.encode。
 /// - v2：建议把 demo-video.mp4 放 `src-tauri/assets/`，运行时读 + 走 asset:// 协议。
 const DEMO_VIDEO_B64: &str = "";
 

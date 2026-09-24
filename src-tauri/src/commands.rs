@@ -1300,12 +1300,16 @@ fn infer_format_from_url(url: &str) -> Option<&'static str> {
     }
 }
 
+/// backfill 候选元组：(asset_id, project_id, 已尝试的远端 urls, 现有 local_paths)
+/// 抽出来消 clippy::type_complexity;在 scan_backfill_candidates 和 download_and_write_candidates 之间共享。
+type BackfillCandidates = Vec<(String, String, Vec<String>, Vec<Option<String>>)>;
+
 /// 同步扫出「localPath 缺位 / 文件已不在磁盘」的资产。
 /// 共享给 backfill_local_assets(项目级) 和 startup_backfill(全量)。
 fn scan_backfill_candidates(
     project_id: Option<String>,
     state: &Mutex<AppState>,
-) -> Result<Vec<(String, String, Vec<String>, Vec<Option<String>>)>, String> {
+) -> Result<BackfillCandidates, String> {
     let s = state.lock().map_err(map_err)?;
     let conn = s.storage.conn.lock().map_err(map_err)?;
     let sql = if project_id.is_some() {
@@ -1337,7 +1341,7 @@ fn scan_backfill_candidates(
             // 条件 1:localPaths 至少有缺位
             let has_missing = existing
                 .iter()
-                .any(|p| p.as_deref().is_none_or(|s| s.is_empty()));
+                .any(|p| p.as_deref().map_or(true, |s| s.is_empty()));
             // 条件 2:已有 path 但文件已被外部删除
             let has_dead_file = existing.iter().any(|p| {
                 p.as_deref()
@@ -1354,7 +1358,7 @@ fn scan_backfill_candidates(
 /// 共用的「并发下载 + 写库 + emit 事件」核心。
 /// candidates 由 scan_backfill_candidates 给出;调用方各自做同步扫描,然后把结果 move 进来。
 async fn download_and_write_candidates(
-    candidates: Vec<(String, String, Vec<String>, Vec<Option<String>>)>,
+    candidates: BackfillCandidates,
     app: AppHandle,
 ) -> Result<BackfillReport, String> {
     let total = candidates.len();
@@ -1419,24 +1423,25 @@ async fn download_and_write_candidates(
                             &asset_id,
                             &existing,
                         );
-                        if r.is_ok() {
-                            let cleaned: Vec<String> = existing
-                                .iter()
-                                .map(|p| p.clone().unwrap_or_default())
-                                .collect();
-                            Ok(Some(cleaned))
-                        } else {
-                            Err(r.unwrap_err())
+                        // 在 tokio::spawn async block 内(外层返回 tuple),没法用 ?/return Err。
+                        // 改成嵌套 match:保留 r Err 时 write_result 也是 Err 的语义(否则后端写库失败被吞)。
+                        match r {
+                            Ok(_) => {
+                                let cleaned: Vec<String> = existing
+                                    .iter()
+                                    .map(|p| p.clone().unwrap_or_default())
+                                    .collect();
+                                Ok(Some(cleaned))
+                            }
+                            Err(e) => Err(e),
                         }
                     }
                     Err(_) => Ok(None),
                 },
                 Err(_) => Ok(None),
             };
-            let cleaned = match write_result {
-                Ok(c) => c,
-                Err(_) => None,
-            };
+            // Err(_) 当作没拿到 cleaned,等价于 Result<Option<_>>::unwrap_or_default() = Ok(None)
+            let cleaned = write_result.unwrap_or_default();
             let write_ok = cleaned.is_some();
             (asset_id, project_id, all_ok, write_ok, cleaned)
         });
@@ -1813,6 +1818,7 @@ pub fn chat_message_list(
 /// `id` 可选：传了就用传入的（前端要保持 in-memory id 与 DB id 一致，否则 update 会找不到行）；
 /// 不传则后端生成 UUID。
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn chat_message_insert(
     session_id: String,
     role: String,
@@ -1845,6 +1851,7 @@ pub fn chat_message_insert(
 
 /// 更新消息（部分字段）。
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn chat_message_update(
     message_id: String,
     content: Option<String>,
@@ -2385,7 +2392,7 @@ pub async fn jimeng_video_submit(
     let rec_meta_json = params
         .meta
         .as_ref()
-        .map(|m| serde_json::to_string(m))
+        .map(serde_json::to_string)
         .transpose()
         .map_err(map_err)?;
     let rec_prompt = params
