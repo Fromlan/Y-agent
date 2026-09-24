@@ -78,7 +78,9 @@ jobs:
       - name: cargo deny
         working-directory: src-tauri
         run: |
-          cargo install --locked cargo-deny --version "^0.16"
+          # 0.16 (2025-01) 解析最新 advisory-db 有 TOML 兼容 bug(anchor-lang/RUSTSEC-2026-0146.md),
+          # 升级到 0.20+ 修复。
+          cargo install --locked cargo-deny --version "^0.20"
           cargo deny check
 
   # P0-#20: Secret scan — gitleaks 拦误 commit 的 API key / 凭据
