@@ -212,11 +212,11 @@ export default function CommandPalette({ onRoute, onOpenSettings, onUseSkill }: 
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-start justify-center pt-[15vh] bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-[100] flex items-start justify-center pt-[15vh] modal-backdrop anim-fade-in"
       onClick={() => setOpen(false)}
     >
       <div
-        className="panel w-[560px] max-w-[95vw] shadow-2xl overflow-hidden"
+        className="bg-bg-panel border border-border rounded-2xl elev-xl w-[560px] max-w-[95vw] overflow-hidden anim-fade-up"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
@@ -298,3 +298,5 @@ export default function CommandPalette({ onRoute, onOpenSettings, onUseSkill }: 
     </div>
   );
 }
+
+

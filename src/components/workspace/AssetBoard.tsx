@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { ImageIcon, X } from "lucide-react";
+import EmptyState from "@/components/shared/EmptyState";
+import { X } from "lucide-react";
 import type { Asset } from "@/lib/types";
 import { assetMainImage } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
@@ -264,37 +265,34 @@ export default function AssetBoard({
   );
 }
 
-function EmptyFiltered({
-  total,
-  hasFilter,
-  onClear,
-}: {
-  total: number;
-  hasFilter: boolean;
-  onClear: () => void;
-}) {
+function EmptyFiltered({ total, hasFilter, onClear }: { total: number; hasFilter: boolean; onClear: () => void }) {
   if (total === 0) {
     return (
-      <div className="h-full flex flex-col items-center justify-center text-center min-h-[300px]">
-        <div className="w-16 h-16 rounded-2xl bg-bg-elev flex items-center justify-center mb-4">
-          <ImageIcon className="w-7 h-7 text-text-muted" />
-        </div>
-        <h2 className="text-base font-medium mb-1">还没有资产</h2>
-        <p className="text-text-secondary text-xs">在下方输入框生成</p>
-      </div>
+      <EmptyState
+        variant="image"
+        title="还没有资产"
+        subtitle="在下方输入框描述画面，按 Ctrl+Enter 发送就能生成第一张图。"
+      />
     );
   }
   return (
-    <div className="flex flex-col items-center justify-center text-center min-h-[200px] py-12">
-      <div className="w-12 h-12 rounded-2xl bg-bg-elev flex items-center justify-center mb-3">
-        <ImageIcon className="w-5 h-5 text-text-muted" />
-      </div>
-      <p className="text-text-secondary text-sm mb-2">没有匹配的资产</p>
-      {hasFilter && (
-        <button onClick={onClear} className="btn text-xs h-7 px-2.5">
-          <X className="w-3.5 h-3.5" /> 清空筛选
-        </button>
-      )}
-    </div>
+    <EmptyState
+      variant="search"
+      title="没有匹配的资产"
+      subtitle="可以换个搜索词，或清空筛选条件。"
+      action={
+        hasFilter
+          ? {
+              label: "清空筛选",
+              onClick: onClear,
+              icon: <X className="w-3.5 h-3.5" />,
+            }
+          : undefined
+      }
+    />
   );
 }
+
+
+
+

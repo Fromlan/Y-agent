@@ -1,12 +1,7 @@
 /**
  * CapabilityChip — 能力位开关的紧凑 chip 形式
  *
- * 替代 PromptBar 里"高级"折叠面板的 6 项(数量 / 图层拆分 / 联网 / 极速 / 输出格式 / 透明)
- * 2026-09-08 (O-2 UX 优化)
- *
- * - icon + 短 label + (可选) 当前值
- * - 激活态: accent 色背景
- * - disabled 态: opacity-50 cursor-not-allowed
+ * F4：hover lift -1px + shadow-sm / active 边框变 accent
  */
 import type { ReactNode } from "react";
 
@@ -41,11 +36,13 @@ export function CapabilityChip({
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className={`inline-flex items-center gap-1 px-1.5 h-6 rounded text-[11px] transition-colors ${
-        active
-          ? "bg-accent/15 text-accent border border-accent/40"
-          : "text-text-secondary hover:text-text-primary border border-border hover:border-border-strong"
-      } ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}
+      className={`group inline-flex items-center gap-1 px-1.5 h-6 rounded text-[11px] transition-all duration-150
+        ${
+          active
+            ? "bg-accent/15 text-accent border border-accent/40 shadow-sm"
+            : "text-text-secondary hover:text-text-primary border border-border hover:border-border-strong hover:-translate-y-px hover:shadow-sm"
+        }
+        ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}
     >
       <span className="w-3 h-3 inline-flex items-center justify-center">{icon}</span>
       <span className="whitespace-nowrap">{label}</span>
@@ -68,7 +65,7 @@ export function QuantityGroup({
   const presets = [1, 2, 4, 8].filter((n) => n <= max);
   if (max > 8 && !presets.includes(max)) presets.push(max);
   return (
-    <div className="inline-flex items-center gap-0.5 panel p-0.5">
+    <div className="inline-flex items-center gap-0.5 panel p-0.5 inset-top-highlight">
       {presets.map((n) => {
         const active = value === n;
         return (
@@ -76,10 +73,10 @@ export function QuantityGroup({
             key={n}
             type="button"
             onClick={() => onChange(n)}
-            className={`min-w-[24px] h-5 px-1 rounded text-[11px] tabular-nums transition-colors ${
+            className={`min-w-[24px] h-5 px-1 rounded text-[11px] tabular-nums transition-all duration-150 ${
               active
-                ? "bg-accent text-text-inverse"
-                : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"
+                ? "bg-accent text-text-inverse shadow-sm"
+                : "text-text-secondary hover:text-text-primary hover:bg-bg-hover/60"
             }`}
             title={n === 1 ? "单图" : `生成 ${n} 张`}
           >

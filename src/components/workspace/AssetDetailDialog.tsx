@@ -469,12 +469,11 @@ export default function AssetDetailDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-bg-overlay flex items-center justify-center p-4 sm:p-8"
+      className="fixed inset-0 z-50 modal-backdrop flex items-center justify-center p-4 sm:p-8 anim-fade-in"
       onClick={onClose}
     >
       <div
-        className="bg-bg-panel border border-border rounded-xl shadow-2xl
-          w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden"
+        className="bg-bg-panel border border-border rounded-2xl elev-xl w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden anim-fade-up"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 顶部栏 */}
@@ -683,7 +682,7 @@ export default function AssetDetailDialog({
               {/* Prompt（重点展示） */}
               <section>
                 <div className="flex items-center justify-between mb-1.5">
-                  <h3 className="text-[10px] text-text-muted uppercase tracking-wider">
+                  <h3 className="section-title mb-2">
                     Prompt
                   </h3>
                   <button
@@ -712,7 +711,7 @@ export default function AssetDetailDialog({
 
               {/* 关键参数（紧凑网格） */}
               <section>
-                <h3 className="text-[10px] text-text-muted uppercase tracking-wider mb-1.5">
+                <h3 className="section-title mb-2">
                   生成参数
                 </h3>
                 <div className="grid grid-cols-2 gap-2 text-xs">
@@ -758,7 +757,7 @@ export default function AssetDetailDialog({
               {/* P2：图层面板（仅 layer_decomposition 资产） */}
               {asset.isLayerDecomposition && images.length > 0 && (
                 <section>
-                  <h3 className="text-[10px] text-text-muted uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                  <h3 className="section-title mb-2 flex items-center gap-1.5">
                     <Layers className="w-3 h-3" /> 图层列表
                     <span className="text-text-muted/60 normal-case">
                       ({visibleLayers.length} / {images.length} 可见{soloLayerIdx !== null ? " · Solo" : ""})
@@ -917,7 +916,7 @@ export default function AssetDetailDialog({
 
               {/* 时间信息 */}
               <section>
-                <h3 className="text-[10px] text-text-muted uppercase tracking-wider mb-1.5">
+                <h3 className="section-title mb-2">
                   时间
                 </h3>
                 <div className="space-y-1.5 text-xs text-text-secondary">
@@ -1045,3 +1044,8 @@ function EditBar({
     </div>
   );
 }
+
+
+
+
+

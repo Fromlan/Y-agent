@@ -112,12 +112,14 @@ function AppShell() {
         onOpenSettings={() => setSettingsOpen(true)}
       />
       <main className="flex-1 flex flex-col overflow-hidden">
-        <Workspace
-          route={route}
-          onBackFromProject={handleBackFromProject}
-          onOpenSettings={() => setSettingsOpen(true)}
-          onJumpToProject={handleJumpToProject}
-        />
+        <div key={route} className="flex-1 flex flex-col overflow-hidden anim-fade-in">
+          <Workspace
+            route={route}
+            onBackFromProject={handleBackFromProject}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onJumpToProject={handleJumpToProject}
+          />
+        </div>
       </main>
       <SettingsPanel
         open={settingsOpen}
@@ -156,3 +158,4 @@ export default function App() {
     </ToastProvider>
   );
 }
+

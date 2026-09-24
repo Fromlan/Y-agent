@@ -145,7 +145,7 @@ export default function BoardToolbar({
             <span
               className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1
                 rounded-full bg-accent text-text-inverse text-[10px]
-                font-semibold flex items-center justify-center tabular-nums"
+                font-semibold flex items-center justify-center tabular-nums anim-bounce-in shadow-sm"
             >
               {selectedIds.size}
             </span>
@@ -384,3 +384,5 @@ function shortName(name: string): string {
   if (m) return m[1];
   return name.replace(/^自定义\s*/, "自定义");
 }
+
+

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ImageIcon, RefreshCw, Filter, Search, X } from "lucide-react";
+import { RefreshCw, Filter, Search, X, ImageIcon } from "lucide-react";
+import EmptyState from "@/components/shared/EmptyState";
 import { useToast } from "@/components/shared/Toast";
-import { useSession } from "@/lib/session";
 import { listProjects } from "@/lib/projects";
 import { listAssets, deleteAsset } from "@/lib/assets";
 import { confirmDialog } from "@/lib/dialog";
@@ -24,7 +24,7 @@ const FILTER_KEY = "y-agent.assetCenter.filter";
  */
 export default function AssetCenterPage() {
   const toast = useToast();
-  const { setCurrentProject } = useSession();
+
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -206,11 +206,7 @@ export default function AssetCenterPage() {
     return projects.filter((p) => p.name.toLowerCase().includes(q));
   }, [projects, projectSearch]);
 
-  const onJumpToProject = (id: string) => {
-    const p = projects.find((x) => x.id === id);
-    if (!p) return;
-    setCurrentProject(p);
-  };
+
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -303,7 +299,7 @@ export default function AssetCenterPage() {
             加载中…
           </div>
         ) : projects.length === 0 ? (
-          <EmptyNoProject onJumpToProject={onJumpToProject} />
+          <EmptyNoProject />
         ) : (
           <AssetBoard
             assets={filteredAssets}
@@ -328,9 +324,15 @@ function Stat({
   accent?: boolean;
 }) {
   return (
-    <span className="flex items-center gap-1">
+    <span className="group inline-flex items-center gap-1.5 transition-all duration-150 hover:scale-[1.04]">
       <span className="text-text-muted">{label}</span>
-      <b className={accent ? "text-accent" : "text-text-primary"}>{value}</b>
+      <b
+        className={`tabular-nums ${
+          accent ? "text-accent" : "text-text-primary"
+        } group-hover:text-accent transition-colors`}
+      >
+        {value}
+      </b>
     </span>
   );
 }
@@ -362,14 +364,22 @@ function Chip({
   );
 }
 
-function EmptyNoProject({ onJumpToProject: _ }: { onJumpToProject: (id: string) => void }) {
+function EmptyNoProject() {
   return (
-    <div className="h-full flex flex-col items-center justify-center text-center min-h-[300px]">
-      <div className="w-16 h-16 rounded-2xl bg-bg-elev flex items-center justify-center mb-4">
-        <ImageIcon className="w-7 h-7 text-text-muted" />
-      </div>
-      <h2 className="text-base font-medium mb-1">还没有任何项目</h2>
-      <p className="text-text-secondary text-xs">先去项目库创建一个项目，再开始生成资产</p>
-    </div>
+    <EmptyState
+      variant="folder"
+      title="还没有任何项目"
+      subtitle="先去项目库创建一个项目，再开始生成资产"
+      emphasis
+    />
   );
 }
+
+
+
+
+
+
+
+
+

@@ -83,55 +83,86 @@ export default function Sidebar({ route, onRoute, onOpenSettings }: Props) {
     setProjectMenuOpen(false);
   };
   return (
-    <aside className="w-56 flex-shrink-0 flex flex-col border-r border-border bg-bg-panel">
-      <div className="h-12 flex items-center px-4 border-b border-border">
+    <aside
+      className="w-56 flex-shrink-0 flex flex-col border-r border-border bg-bg-panel"
+      aria-label="主导航"
+    >
+      {/* Logo 区域（F2：从 48 提到 64px）*/}
+      <div className="h-16 flex items-center px-4 border-b border-border">
         <img
           src="/logo.svg"
           alt="Y-agent"
-          className="w-7 h-7 mr-2"
+          className="w-8 h-8 mr-2.5"
         />
-        <span className="font-semibold text-text-primary">Y-agent</span>
-        {/* API Key 状态点（U-决议 A.2）：绿 = 已配置，红 = 未配置 */}
+        <div className="flex flex-col leading-tight">
+          <span className="font-semibold text-sm tracking-wide text-text-primary">
+            Y-agent
+          </span>
+          <span className="text-[10px] text-text-muted tracking-wider uppercase">
+            Make · Iterate · Ship
+          </span>
+        </div>
+        {/* API Key 状态点（F2：加 ring 视觉）*/}
         <span
           className="ml-auto"
           title={hasKey ? "API Key 已配置" : "API Key 未配置"}
         >
           <span
-            className={`block w-2 h-2 rounded-full ${
+            className={`block w-2 h-2 rounded-full ring-2 ring-offset-1 ring-offset-bg-panel transition-colors ${
               hasKey === null
-                ? "bg-text-muted/50"
+                ? "bg-text-muted/50 ring-text-muted/20"
                 : hasKey
-                ? "bg-accent-success"
-                : "bg-status-danger"
+                ? "bg-accent-success ring-accent-success/30"
+                : "bg-status-danger ring-status-danger/30"
             }`}
           />
         </span>
       </div>
 
-      <nav className="flex-1 px-2 py-3 space-y-0.5">
-        {NAV.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => onRoute(id)}
-            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm
-              transition-colors
-              ${route === id
-                ? "bg-bg-hover text-text-primary"
-                : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"}
-            `}
-          >
-            <Icon className="w-4 h-4" />
-            <span className="flex-1 text-left">{label}</span>
-          </button>
-        ))}
+      {/* 主导航（F2：stagger 入场 + 左边竖条 active）*/}
+      <nav className="flex-1 px-2 py-3 stagger">
+        {NAV.map(({ id, label, icon: Icon }) => {
+          const active = route === id;
+          return (
+            <button
+              key={id}
+              onClick={() => onRoute(id)}
+              className={`relative w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm
+                transition-colors duration-150 group
+                ${
+                  active
+                    ? "bg-bg-hover text-text-primary"
+                    : "text-text-secondary hover:text-text-primary hover:bg-bg-hover/60"
+                }
+              `}
+              aria-current={active ? "page" : undefined}
+            >
+              {/* active 左侧 2px accent 竖条 */}
+              {active && (
+                <span
+                  className="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-accent anim-fade-in"
+                  aria-hidden
+                />
+              )}
+              <Icon
+                className={`w-4 h-4 transition-colors ${
+                  active ? "text-accent" : ""
+                }`}
+              />
+              <span className="flex-1 text-left">{label}</span>
+            </button>
+          );
+        })}
 
         {/* 当前项目：进入项目后高亮显示在导航底部。
-            M-3: 点击展开下拉(最近 5 个 + 项目库入口),不用先"项目库"再点 */}
+            F2：stagger 子项入场 + 下拉面板 anim-fade-up */}
         {currentProject && (
-          <div className="pt-3 mt-3 border-t border-border" ref={menuRef}>
-            <div className="px-3 py-1 text-[10px] text-text-muted uppercase tracking-wider">
-              当前项目
-            </div>
+          <div
+            className="pt-3 mt-3 border-t border-border"
+            ref={menuRef}
+            style={{ animationDelay: "90ms" }}
+          >
+            <div className="px-3 py-1 section-title">当前项目</div>
             <button
               onClick={() => {
                 if (projectMenuOpen) {
@@ -143,36 +174,46 @@ export default function Sidebar({ route, onRoute, onOpenSettings }: Props) {
               }}
               title={`返回项目 ${currentProject.name}（点击展开切换）`}
               className={`relative w-full flex items-center gap-2.5 pl-4 pr-2 py-2 rounded-md text-sm
-                transition-colors
-                ${route === "project"
-                  ? "bg-bg-hover text-text-primary"
-                  : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"}
+                transition-colors duration-150
+                ${
+                  route === "project"
+                    ? "bg-bg-hover text-text-primary"
+                    : "text-text-secondary hover:text-text-primary hover:bg-bg-hover/60"
+                }
               `}
+              aria-expanded={projectMenuOpen}
             >
               {route === "project" && (
-                <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-accent" />
+                <span
+                  className="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-accent anim-fade-in"
+                  aria-hidden
+                />
               )}
               <div className="w-4 h-4 rounded bg-accent/30 flex-shrink-0" />
-              <span className="flex-1 text-left truncate">{currentProject.name}</span>
+              <span className="flex-1 text-left truncate">
+                {currentProject.name}
+              </span>
               <ChevronDown
-                className={`w-3.5 h-3.5 text-text-muted transition-transform flex-shrink-0 ${
+                className={`w-3.5 h-3.5 text-text-muted transition-transform duration-200 flex-shrink-0 ${
                   projectMenuOpen ? "rotate-180" : ""
                 }`}
               />
             </button>
             {projectMenuOpen && (
-              <div className="mt-1 mx-1 panel border border-border rounded shadow-lg overflow-hidden">
+              <div className="mt-2 mx-1 panel border border-border rounded shadow-lg overflow-hidden anim-fade-up">
                 {allProjects.length > 0 ? (
                   <ul className="max-h-60 overflow-y-auto">
                     {allProjects.map((p) => (
                       <li key={p.id}>
                         <button
                           onClick={() => onSwitchProject(p)}
-                          className="w-full text-left px-3 py-1.5 text-xs hover:bg-bg-hover flex items-center gap-2"
+                          className="w-full text-left px-3 py-1.5 text-xs hover:bg-bg-hover flex items-center gap-2 transition-colors"
                           title={p.name}
                         >
                           <div className="w-3 h-3 rounded bg-accent/20 flex-shrink-0" />
-                          <span className="flex-1 truncate text-text-primary">{p.name}</span>
+                          <span className="flex-1 truncate text-text-primary">
+                            {p.name}
+                          </span>
                           <span className="text-[10px] text-text-muted tabular-nums">
                             {p.assetCount}
                           </span>
@@ -181,12 +222,14 @@ export default function Sidebar({ route, onRoute, onOpenSettings }: Props) {
                     ))}
                   </ul>
                 ) : (
-                  <div className="px-3 py-2 text-[10px] text-text-muted">没有其他项目</div>
+                  <div className="px-3 py-2 text-[10px] text-text-muted">
+                    没有其他项目
+                  </div>
                 )}
                 <div className="border-t border-border">
                   <button
                     onClick={onOpenProjectLibrary}
-                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-bg-hover flex items-center gap-2 text-text-secondary"
+                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-bg-hover flex items-center gap-2 text-text-secondary transition-colors"
                   >
                     <FolderPlus className="w-3 h-3" />
                     <span>项目库…</span>
@@ -201,10 +244,10 @@ export default function Sidebar({ route, onRoute, onOpenSettings }: Props) {
       <div className="p-2 border-t border-border">
         <button
           onClick={onOpenSettings}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm
-            text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
+          className="group w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm
+            text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-all duration-150"
         >
-          <Settings className="w-4 h-4" />
+          <Settings className="w-4 h-4 transition-transform duration-200 group-hover:rotate-45" />
           <span>设置</span>
         </button>
       </div>

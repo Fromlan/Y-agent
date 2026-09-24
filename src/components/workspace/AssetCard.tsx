@@ -483,8 +483,8 @@ export default function AssetCard({
           e.dataTransfer.setData("asset-id", asset.id);
           e.dataTransfer.effectAllowed = "copy";
         }}
-        className={`panel overflow-hidden cursor-pointer transition-all
-          ${selected ? "ring-2 ring-accent border-accent" : "hover:border-border-strong"}
+        className={`panel overflow-hidden cursor-pointer transition-all duration-200 anim-hover-pop
+          ${selected ? "ring-2 ring-accent border-accent shadow-md" : "hover:border-border-strong hover:shadow-md"}
         `}
       >
         <div className="relative aspect-square bg-bg-elev overflow-hidden">
@@ -605,8 +605,8 @@ export default function AssetCard({
         e.dataTransfer.setData("asset-id", asset.id);
         e.dataTransfer.effectAllowed = "copy";
       }}
-      className={`relative panel overflow-hidden cursor-pointer transition-all
-        ${selected ? "ring-2 ring-accent border-accent" : "hover:border-border-strong"}
+      className={`relative panel overflow-hidden cursor-pointer transition-all duration-200 anim-hover-pop
+        ${selected ? "ring-2 ring-accent border-accent shadow-md" : "hover:border-border-strong hover:shadow-md"}
       `}
     >
       <div className="relative h-48 bg-bg-elev overflow-hidden">
@@ -744,3 +744,5 @@ function formatTime(t: number): string {
   if (h < 24) return `${h} 小时前`;
   return new Date(t).toLocaleDateString("zh-CN");
 }
+
+

@@ -341,7 +341,7 @@ export default function CharacterWorkshop({
 
   return (
     <div className="flex h-full">
-      <div className="w-72 flex-shrink-0">
+      <div className="w-80 flex-shrink-0 anim-slide-right">
         <CharacterArchiveList
           archives={archives}
           selectedId={selectedId}
@@ -475,3 +475,4 @@ export default function CharacterWorkshop({
     </div>
   );
 }
+

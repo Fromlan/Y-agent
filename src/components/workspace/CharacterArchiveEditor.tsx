@@ -338,7 +338,7 @@ export default function CharacterArchiveEditor({
 
         {/* 校验错误 */}
         {validation && (
-          <div className="text-[11px] text-red-400 px-2 py-1.5 bg-red-500/10 rounded">
+          <div className="text-[11px] text-status-danger px-2 py-1.5 bg-status-danger/10 border border-status-danger/30 rounded anim-fade-in">
             {validation}
           </div>
         )}
@@ -350,7 +350,7 @@ export default function CharacterArchiveEditor({
           type="button"
           onClick={() => onApply()}
           disabled={!!validation}
-          className="flex items-center gap-1 px-3 py-1.5 rounded text-xs font-medium border border-border text-text-secondary hover:text-text-primary hover:bg-bg-hover disabled:opacity-40 disabled:cursor-not-allowed transition"
+          className="flex items-center gap-1 px-3 py-1.5 rounded text-xs font-medium border border-border text-text-secondary hover:text-text-primary hover:bg-bg-hover hover:-translate-y-px hover:shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150 anim-press"
           title="把这个档案设到 PromptBar,并切到对话 tab"
         >
           应用
@@ -359,7 +359,7 @@ export default function CharacterArchiveEditor({
           type="button"
           onClick={() => onApply({ focus: true })}
           disabled={!!validation}
-          className="flex items-center gap-1 px-3 py-1.5 rounded text-xs font-medium bg-accent text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition"
+          className="flex items-center gap-1 px-3 py-1.5 rounded text-xs font-medium bg-accent text-white hover:opacity-90 hover:-translate-y-px hover:shadow-md disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150 anim-press"
           title="应用 + 切到对话 + 自动 focus 输入框(1 步到位)"
         >
           应用并打字
@@ -369,3 +369,6 @@ export default function CharacterArchiveEditor({
     </div>
   );
 }
+
+
+

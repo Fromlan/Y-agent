@@ -303,7 +303,8 @@ export default function PromptBar({
             placeholder="描述画面，按 / 选 Skill；Ctrl+Enter 发送；可拖入资产作为参考图"
             rows={1}
             className="w-full bg-transparent text-sm text-text-primary placeholder:text-text-muted
-              focus:outline-none resize-none leading-[20px]"
+              focus:outline-none resize-none leading-[20px]
+              transition-shadow duration-150"
           />
           {dragHover && (
             <div className="absolute inset-0 flex items-center justify-center bg-accent/10
@@ -443,7 +444,9 @@ export default function PromptBar({
           disabled={generating}
           className="h-10 w-10 flex-shrink-0 rounded-full flex items-center justify-center
             bg-accent hover:bg-accent-hover text-text-inverse
-            disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            disabled:opacity-50 disabled:cursor-not-allowed
+            transition-all duration-150 anim-press
+            hover:scale-105 hover:shadow-md active:scale-95"
           title={
             generating
               ? "生成中…"
@@ -466,3 +469,6 @@ export default function PromptBar({
 
 // Re-export MODEL_OPTIONS for callers that need it
 export { MODEL_OPTIONS };
+
+
+

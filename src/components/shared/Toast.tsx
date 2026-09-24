@@ -91,8 +91,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {items.map((t) => (
           <div
             key={t.id}
-            className="panel px-3 py-2 flex items-center gap-2 text-sm pointer-events-auto
-              animate-in fade-in slide-in-from-right-2"
+            className="bg-bg-panel/95 backdrop-blur-sm border border-border rounded-md px-3 py-2 flex items-center gap-2 text-sm pointer-events-auto elev-md anim-slide-right"
             style={{
               borderColor:
                 t.level === "error"
@@ -143,3 +142,4 @@ function iconFor(level: Level) {
       return <Info className={`${cls} text-accent`} />;
   }
 }
+

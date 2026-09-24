@@ -2,12 +2,8 @@ import { useLayoutEffect, useRef, type ReactNode } from "react";
 
 /**
  * Bar 共享 UI 原子 —— 给 PromptBar（生图 / 对话）和 VideoPromptBar（生视频）共用
- * 目标：单行工具栏、紧凑控件、统一视觉骨架
  *
- * 设计约束：
- * - 所有高度约束走 token，不写死 px
- * - 所有颜色走 token，4 主题自适应
- * - ParamCell 高度 ~28px（与 .btn-icon 一致），整行工具栏目标 ≤ 40px
+ * F4：ToolbarDivider 1px subtle / CapabilityChip hover lift / CompactButton anim-press
  */
 
 // ---------------------------------------------------------------------------
@@ -75,9 +71,14 @@ export function ControlCell({
 // ToolbarDivider · 视觉子组分隔
 // ---------------------------------------------------------------------------
 
-/** 1px 细分隔线，1.5 间距，比字符 `|` 更干净 */
+/** F4：1px subtle 分隔线（F4 收紧到 bg-border/60），间距加大到 mx-2 */
 export function ToolbarDivider() {
-  return <span aria-hidden className="inline-block w-px h-5 bg-border mx-1.5 flex-shrink-0" />;
+  return (
+    <span
+      aria-hidden
+      className="inline-block w-px h-5 bg-border/60 mx-2 flex-shrink-0"
+    />
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -109,11 +110,11 @@ export function ScenarioChip({ label, tone = "muted", hint }: ScenarioChipProps)
   return (
     <div className="inline-flex items-center gap-1.5 text-[11px]">
       <span
-        className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-border bg-bg-elev ${
+        className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-border bg-bg-elev transition-colors ${
           tone === "active"
-            ? "text-accent"
+            ? "text-accent border-accent/30"
             : tone === "danger"
-            ? "text-accent-danger"
+            ? "text-accent-danger border-status-danger/30"
             : "text-text-secondary"
         }`}
       >
@@ -138,8 +139,7 @@ export interface CompactButtonProps {
 }
 
 /**
- * 包装 .btn-icon，加 whitespace-nowrap 防止「首帧」「尾帧」这种
- * 2 字标签在窄按钮里被强制断行（旧的「首\n帧」bug）。
+ * F4：加 anim-press + 选中时 ring-accent
  */
 export function CompactButton({ title, onClick, active, children }: CompactButtonProps) {
   return (
@@ -147,7 +147,7 @@ export function CompactButton({ title, onClick, active, children }: CompactButto
       type="button"
       onClick={onClick}
       title={title}
-      className={`btn-icon whitespace-nowrap ${
+      className={`btn-icon whitespace-nowrap anim-press transition-all ${
         active
           ? "border border-accent text-accent bg-accent/10"
           : ""

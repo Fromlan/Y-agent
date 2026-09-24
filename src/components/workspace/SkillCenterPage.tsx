@@ -109,7 +109,7 @@ export default function SkillCenterPage({ onJumpToProject }: SkillCenterProps) {
       {/* 主体：左列表 + 右详情 */}
       <div className="flex-1 flex min-h-0">
         {/* 左侧：Skill 列表 */}
-        <div className="w-80 flex-shrink-0 border-r border-border overflow-y-auto">
+        <div className="w-80 flex-shrink-0 border-r border-border overflow-y-auto stagger">
           {filtered.length === 0 ? (
             <div className="p-6 text-center text-text-muted text-xs">
               没有匹配的 Skill
@@ -381,8 +381,7 @@ function SkillDetail({
             </button>
           </div>
         </div>
-        <pre className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap
-          bg-bg-elev border border-border rounded-md p-3 max-h-[420px] overflow-y-auto font-mono">
+        <pre className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap bg-bg-elev border border-border rounded-xl p-4 max-h-[420px] overflow-y-auto font-mono shadow-inner scrollbar-thin">
           {skill.template}
         </pre>
         <p className="text-[11px] text-text-muted mt-2 flex items-center gap-2 flex-wrap">
@@ -425,3 +424,5 @@ function MetaBox({
     </div>
   );
 }
+
+

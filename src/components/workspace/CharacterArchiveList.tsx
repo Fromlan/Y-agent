@@ -69,7 +69,7 @@ export default function CharacterArchiveList({
   };
 
   return (
-    <div className="flex flex-col h-full bg-bg-panel border-r border-border">
+    <div className="flex flex-col h-full bg-bg-panel border-r border-border anim-slide-right">
       {/* 顶部：搜索 + 新建 */}
       <div className="p-3 border-b border-border space-y-2">
         {/* 新建按钮：分裂成"项目 / 全局"两选项 (A-5 scope 解释前置) */}
@@ -266,3 +266,4 @@ export default function CharacterArchiveList({
     </div>
   );
 }
+

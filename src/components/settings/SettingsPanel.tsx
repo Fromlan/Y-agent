@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { X, Eye, EyeOff, FlaskConical, Brain, Activity, Palette, Database } from "lucide-react";
 import { getApiKey, setApiKey, clearApiKey } from "@/lib/api-key";
 import {
@@ -273,11 +273,11 @@ export default function SettingsPanel({ open, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-bg-overlay"
+      className="fixed inset-0 z-50 modal-backdrop flex items-center justify-center anim-fade-in"
       onClick={onClose}
     >
       <div
-        className="panel w-[520px] max-w-[90vw] p-6 max-h-[90vh] overflow-y-auto"
+        className="bg-bg-panel border border-border rounded-2xl elev-xl w-[520px] max-w-[90vw] p-6 max-h-[90vh] overflow-y-auto anim-fade-up scrollbar-thin"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
@@ -287,7 +287,7 @@ export default function SettingsPanel({ open, onClose }: Props) {
           </button>
         </div>
 
-        <div className="space-y-5">
+        <div className="space-y-6">
           {/* 外观主题 */}
           <section>
             <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2 flex items-center gap-1.5">
@@ -585,8 +585,7 @@ export default function SettingsPanel({ open, onClose }: Props) {
                 </button>
               )}
               <button onClick={onClose} className="btn">取消</button>
-              <button onClick={onSave} disabled={saving} className="btn btn-primary">
-                {saving ? "保存中..." : "保存"}
+              <button onClick={onSave} disabled={saving} className="btn btn-primary anim-press">{saving ? "保存中..." : "保存"}
               </button>
             </div>
           </div>
@@ -611,4 +610,8 @@ export default function SettingsPanel({ open, onClose }: Props) {
     </div>
   );
 }
+
+
+
+
 

@@ -46,6 +46,58 @@ export default {
           "sans-serif",
         ],
       },
+      // ===== Motion 系统（F1 引入）=====
+      // 走 token（--dur-* / --ease-out），不写死毫秒
+      // 详见 src/index.css 里 .anim-* 工具类
+      keyframes: {
+        "fade-in": {
+          from: { opacity: "0" },
+          to: { opacity: "1" },
+        },
+        "fade-up": {
+          from: { opacity: "0", transform: "translateY(6px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
+        "fade-down": {
+          from: { opacity: "0", transform: "translateY(-6px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
+        "slide-right": {
+          from: { opacity: "0", transform: "translateX(-8px)" },
+          to: { opacity: "1", transform: "translateX(0)" },
+        },
+        "caret-pop": {
+          "0%": { transform: "scale(1)" },
+          "50%": { transform: "scale(1.18)" },
+          "100%": { transform: "scale(1)" },
+        },
+        "pulse-soft": {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.55" },
+        },
+        "marquee": {
+          from: { transform: "translateX(0)" },
+          to: { transform: "translateX(-50%)" },
+        },
+        "bounce-in": {
+          "0%": { transform: "scale(0.6)", opacity: "0" },
+          "70%": { transform: "scale(1.08)", opacity: "1" },
+          "100%": { transform: "scale(1)", opacity: "1" },
+        },
+      },
+      animation: {
+        "fade-in": "fade-in var(--dur-base, 180ms) var(--ease-out, ease-out) both",
+        "fade-up": "fade-up var(--dur-base, 180ms) var(--ease-out, ease-out) both",
+        "fade-down": "fade-down var(--dur-base, 180ms) var(--ease-out, ease-out) both",
+        "slide-right": "slide-right var(--dur-base, 180ms) var(--ease-out, ease-out) both",
+        "caret-pop": "caret-pop var(--dur-fast, 120ms) var(--ease-out, ease-out)",
+        "pulse-soft": "pulse-soft 1.6s var(--ease-out, ease-out) infinite",
+        "marquee": "marquee 24s linear infinite",
+        "bounce-in": "bounce-in var(--dur-base, 180ms) var(--ease-out, ease-out) both",
+      },
+      transitionTimingFunction: {
+        out: "var(--ease-out, cubic-bezier(0.2, 0.8, 0.2, 1))",
+      },
     },
   },
   plugins: [],

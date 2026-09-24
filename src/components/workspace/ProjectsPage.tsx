@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { FolderPlus, Trash2, FolderOpen, Pencil, ArrowRight, FlaskConical } from "lucide-react";
+import {
+  FolderPlus,
+  Trash2,
+  Pencil,
+  ArrowRight,
+} from "lucide-react";
+import EmptyState from "@/components/shared/EmptyState";
+import { SkeletonGrid } from "@/components/shared/Skeleton";
 import { listProjects, createProject, deleteProject, renameProject } from "@/lib/projects";
 import { setApiKey } from "@/lib/api-key";
 import { setPref, getPref } from "@/lib/prefs";
@@ -102,42 +109,44 @@ export default function ProjectsPage({ onOpenSettings }: { onOpenSettings?: () =
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-5xl mx-auto anim-fade-up">
         <div className="flex items-center justify-between mb-6">
-          <h1 className="text-xl font-semibold">项目库</h1>
-          <button onClick={onCreate} className="btn btn-primary">
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight">项目库</h1>
+            <p className="text-xs text-text-muted mt-0.5">
+              {items.length} 个项目 · 进入项目开始生图
+            </p>
+          </div>
+          <button onClick={onCreate} className="btn btn-primary anim-press">
             <FolderPlus className="w-4 h-4" />
             新建项目
           </button>
         </div>
 
         {loading ? (
-          <p className="text-text-secondary text-sm">加载中...</p>
+          <SkeletonGrid
+            count={6}
+            columns="grid-cols-2 md:grid-cols-3 lg:grid-cols-4"
+          />
         ) : items.length === 0 ? (
-          <div className="panel p-8 text-center max-w-md mx-auto">
-            <FolderOpen className="w-10 h-10 mx-auto text-text-muted mb-3" />
-            <p className="text-text-secondary mb-1 font-medium">还没有项目</p>
-            <p className="text-[11px] text-text-muted mb-5">
-              先建一个项目,或先开 Demo 模式体验完整 UI(无需 Key,不烧 token)
-            </p>
-            <div className="flex items-center justify-center gap-2 flex-wrap">
-              <button onClick={onCreate} className="btn btn-primary">
-                <FolderPlus className="w-4 h-4" />
-                新建项目
-              </button>
-              <button
-                onClick={onEnableDemo}
-                disabled={enablingDemo}
-                className="btn"
-                title="启用 Demo 模式(无需 API Key,看 UI 不烧钱)"
-              >
-                <FlaskConical className="w-4 h-4" />
-                {enablingDemo ? "启用中…" : "试用 Demo 模式"}
-              </button>
-            </div>
-          </div>
+          <EmptyState
+            variant="folder"
+            title="还没有项目"
+            subtitle="先建一个项目，或先开 Demo 模式体验完整 UI（无需 Key，不烧 token）"
+            emphasis
+            action={{
+              label: "新建项目",
+              onClick: onCreate,
+              icon: <FolderPlus className="w-4 h-4" />,
+              primary: true,
+            }}
+            secondary={{
+              label: enablingDemo ? "启用中…" : "试用 Demo 模式",
+              onClick: onEnableDemo,
+            }}
+          />
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 grid-flow-dense stagger">
             {items.map((p) => (
               <div
                 key={p.id}
@@ -151,18 +160,20 @@ export default function ProjectsPage({ onOpenSettings }: { onOpenSettings?: () =
                   }
                 }}
                 className="panel p-4 hover:border-accent/40 hover:bg-bg-hover/40
-                  transition-colors group cursor-pointer relative"
+                  transition-all duration-150 anim-hover-pop group cursor-pointer relative"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
-                    <div className="font-medium truncate">{p.name}</div>
-                    <div className="text-xs text-text-muted mt-1">
+                    <div className="font-medium truncate group-hover:text-accent transition-colors">
+                      {p.name}
+                    </div>
+                    <div className="text-xs text-text-muted mt-1 tabular-nums">
                       {p.assetCount} 个资产 · {formatTime(p.updatedAt)}
                     </div>
                   </div>
                   <ArrowRight
-                    className="w-4 h-4 text-text-muted opacity-0 group-hover:opacity-100
-                      transition-opacity flex-shrink-0 mt-0.5"
+                    className="w-4 h-4 text-text-muted opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5
+                      transition-all duration-150 flex-shrink-0 mt-0.5"
                   />
                 </div>
                 {/* 底部操作按钮：stopPropagation 避免触发卡片进入 */}
@@ -203,3 +214,4 @@ function formatTime(t: number): string {
   if (h < 24) return `${h} 小时前`;
   return new Date(t).toLocaleDateString("zh-CN");
 }
+
