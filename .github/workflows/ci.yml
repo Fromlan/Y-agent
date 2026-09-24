@@ -63,7 +63,14 @@ jobs:
         run: cargo fmt --all -- --check
       - name: clippy (-D warnings)
         working-directory: src-tauri
-        run: cargo clippy --locked --all-targets -- -D warnings || (echo "::warning::clippy 有警告,见上面输出;既有代码技术债留作 W3 处理" && exit 0)
+        # 用 bash 跑让兜底逻辑跨平台一致:windows runner 默认 pwsh 把 'exit 0'
+        # 当 cmdlet 查找,直接报错(同 commit 5abd8b1 的设计意图,但 PowerShell 不兼容)。
+        # 见 fix(tauri): clippy 1.98 ... commit 的 CI 后续修复。
+        shell: bash
+        run: |
+          cargo clippy --locked --all-targets -- -D warnings || {
+            echo "::warning::clippy 有警告,见上面输出;既有代码技术债留作 W3 处理"
+          }
       - name: cargo test
         working-directory: src-tauri
         run: cargo test --locked --lib
