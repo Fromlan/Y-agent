@@ -1,0 +1,53 @@
+# cargo-deny 配置(cargo-deny 0.20+)
+# 见 .github/workflows/ci.yml:cargo deny 步骤
+#
+# 默认 cargo-deny 0.16 的 license 白名单不严格,允许大量 SPDX 复合表达式;
+# 0.20 升级后默认白名单变严,常见 crate 的 'MIT OR Apache-2.0' 等复合 license
+# 全部被拒。需要显式 allow 这些 permissive license。
+
+[graph]
+# 默认即可 — 不画 graph 到文件
+
+[advisories]
+# 默认即可 — 加载 rustsec advisory-db,版本化 ignore 等暂不需要
+
+[licenses]
+# SPDX version 2,支持当前 crates.io 的 SPDX 复合表达式
+version = 2
+allow = [
+    # Permissive
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "0BSD",
+    "Zlib",
+    "zlib-acknowledgement",
+    "BSL-1.0",                # Boost Software License
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "OpenSSL",                # OpenSSL/SSLeay
+    "MPL-2.0",                # Mozilla Public License (弱 copyleft)
+    "CC0-1.0",                # Creative Commons Zero
+    "Unlicense",              # Public Domain
+]
+# confidence 阈值:license 解析置信度低于此值的 crate 会失败
+# 0.8 比较宽松,大部分正常 crate 都过;严格化建议 0.92
+confidence-threshold = 0.8
+
+[licenses.private]
+# 私有 crate 没 license 字段时忽略
+ignore = true
+
+[bans]
+# 默认即可 — 不强约束重复依赖等
+
+[sources]
+# 默认即可 — 不限制
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
