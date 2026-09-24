@@ -43,11 +43,14 @@ allow = [
     "MPL-2.0",                # Mozilla Public License (弱 copyleft)
     "CC0-1.0",                # Creative Commons Zero
     "Unlicense",              # Public Domain
-    "Proprietary",            # 专有闭源 (y-agent 自身)
 ]
 # confidence 阈值:license 解析置信度低于此值的 crate 会失败
 # 0.8 比较宽松,大部分正常 crate 都过;严格化建议 0.92
 confidence-threshold = 0.8
+
+[licenses.private]
+# 私有 crate (publish = false) 没 license 字段时忽略
+ignore = true
 
 [bans]
 # 默认即可 — 不强约束重复依赖等

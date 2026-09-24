@@ -5,9 +5,8 @@ description = "Y-agent - 游戏美术 AI 工作台"
 authors = ["Y-agent"]
 edition = "2021"
 rust-version = "1.77"
-# 桌面应用 binary,不发布到 crates.io。SPDX 接受 "Proprietary" 标识专有软件
-# (cargo-deny 0.20+ 会校验 license 字段;Proprietary 不在 allow 列表但允许未经许可的报错被登记)
-license = "Proprietary"
+# 桌面应用 binary,不发布到 crates.io
+publish = false
 
 [lib]
 name = "y_agent_lib"
